@@ -27,6 +27,7 @@ var (
 	repositoryCommands = app.Command("repository", "Commands to manipulate repository.").Alias("repo")
 	cacheCommands      = app.Command("cache", "Commands to manipulate local cache").Hidden()
 	snapshotCommands   = app.Command("snapshot", "Commands to manipulate snapshots.").Alias("snap")
+	restoreCommands    = app.Command("restore", "Commands to restore snapshots.")
 	policyCommands     = app.Command("policy", "Commands to manipulate snapshotting policies.").Alias("policies")
 	serverCommands     = app.Command("server", "Commands to control HTTP API server.")
 	manifestCommands   = app.Command("manifest", "Low-level commands to manipulate manifest items.").Hidden()
