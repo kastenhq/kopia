@@ -1,0 +1,7 @@
+[global]
+include global.fio
+[append-100m]
+directory=append-phase
+size=100m
+nrfiles=100
+file_append=1

@@ -1,0 +1,6 @@
+[global]
+include global.fio
+[write-100g]
+#directory=write-phase
+size=100g
+nrfiles=100000
