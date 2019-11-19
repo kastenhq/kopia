@@ -34,6 +34,7 @@ var (
 	blobCommands       = app.Command("blob", "Commands to manipulate BLOBs.").Hidden()
 	indexCommands      = app.Command("index", "Commands to manipulate content index.").Hidden()
 	benchmarkCommands  = app.Command("benchmark", "Commands to test performance of algorithms.").Hidden()
+	restoreCommands    = app.Command("restore", "Commands to restore snapshots.")
 )
 
 func helpFullAction(ctx *kingpin.ParseContext) error {
