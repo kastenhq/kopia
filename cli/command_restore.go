@@ -9,21 +9,21 @@ import (
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
+	"github.com/pkg/errors"
 )
 
 var (
-	restoreSnapshotID = restoreCommands.Arg("snapshot-id", "Snapshot ID from which to restore.").Required().String()
+	restoreRootID     = restoreCommands.Arg("root-id", "Snapshot Root ID from which to restore.").Required().String()
 	restoreTargetPath = restoreCommands.Arg("target-path", "Path to which the snapshot must be restored.").Required().String()
 )
 
 func runRestoreCommand(ctx context.Context, rep *repo.Repository) error {
-	oid, err := parseObjectID(ctx, rep, *restoreSnapshotID)
+	oid, err := parseObjectID(ctx, rep, *restoreRootID)
 	if err != nil {
 		return err
 	}
-	targetPath := *restoreTargetPath
 
-	return restoreRecursively(ctx, rep, targetPath, oid)
+	return restoreRecursively(ctx, rep, *restoreTargetPath, oid)
 }
 
 func init() {
@@ -43,21 +43,19 @@ func restoreRecursively(ctx context.Context, rep *repo.Repository, targetPath st
 		objectID := e.(object.HasObjectID).ObjectID()
 		// Restore directories recursively
 		if e.Mode().IsDir() {
-			// Create the directory
-			if direrr := os.MkdirAll(restorePath, 0777); direrr != nil {
+			if direrr := createDirectory(restorePath); direrr != nil {
 				return direrr
 			}
 			if recerr := restoreRecursively(ctx, rep, restorePath+"/", objectID); recerr != nil {
 				return recerr
 			}
-			// Set permissions as stored in the backup
-			if cherr := os.Chmod(restorePath, e.Mode()); cherr != nil {
+			// Set permissions as stored in the snapshot
+			if cherr := os.Chmod(restorePath, e.Mode()); cherr != nil && !os.IsPermission(cherr) {
 				return cherr
 			}
 			continue
 		}
-		// Create the output file
-		outFile, err := os.Create(restorePath)
+		outFile, err := createFile(restorePath)
 		if err != nil {
 			return err
 		}
@@ -71,11 +69,38 @@ func restoreRecursively(ctx context.Context, rep *repo.Repository, targetPath st
 		if _, cerr := io.Copy(outFile, r); cerr != nil {
 			return cerr
 		}
-		// Set file permissions as stored in the backup
-		if cherr := os.Chmod(outFile.Name(), e.Mode()); cherr != nil {
+		// Set file permissions as stored in the snapshot
+		if cherr := os.Chmod(outFile.Name(), e.Mode()); cherr != nil && !os.IsPermission(cherr) {
 			return cherr
 		}
 	}
 
 	return nil
+}
+
+func createDirectory(path string) error {
+	stat, err := os.Stat(path)
+	switch {
+	case err == nil:
+		if stat.Mode().IsRegular() {
+			return errors.New("path already exists as a file")
+		}
+		return nil
+	case os.IsNotExist(err):
+		return os.MkdirAll(path, 0700)
+	default:
+		return err
+	}
+}
+
+func createFile(path string) (*os.File, error) {
+	_, err := os.Stat(path)
+	switch {
+	case err == nil:
+		return nil, errors.New("unable to create file: already exists")
+	case os.IsNotExist(err):
+		return os.Create(path)
+	default:
+		return nil, err
+	}
 }
