@@ -181,6 +181,10 @@ func getLocalBackupPaths(ctx context.Context, rep *repo.Repository) ([]string, e
 }
 
 func getUserName() string {
+	if len(overrideUserName) > 0 {
+		return overrideUserName
+	}
+
 	currentUser, err := user.Current()
 	if err != nil {
 		log.Warningf("Cannot determine current user: %s", err)
@@ -199,6 +203,10 @@ func getUserName() string {
 }
 
 func getHostName() string {
+	if len(overrideHostName) > 0 {
+		return overrideHostName
+	}
+
 	hostname, err := os.Hostname()
 	if err != nil {
 		log.Warningf("Unable to determine hostname: %s", err)
@@ -212,5 +220,6 @@ func getHostName() string {
 }
 
 func init() {
+	setupOverrideOptions(snapshotCreateCommand)
 	snapshotCreateCommand.Action(repositoryAction(runBackupCommand))
 }

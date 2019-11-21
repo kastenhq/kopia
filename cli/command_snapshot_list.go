@@ -262,5 +262,6 @@ func deltaBytes(b int64) string {
 }
 
 func init() {
+	setupOverrideOptions(snapshotListCommand)
 	snapshotListCommand.Action(repositoryAction(runSnapshotsCommand))
 }

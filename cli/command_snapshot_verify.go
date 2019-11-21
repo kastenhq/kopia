@@ -271,5 +271,6 @@ func loadSourceManifests(ctx context.Context, rep *repo.Repository, sources []st
 }
 
 func init() {
+	setupOverrideOptions(verifyCommand)
 	verifyCommand.Action(repositoryAction(runVerifyCommand))
 }
