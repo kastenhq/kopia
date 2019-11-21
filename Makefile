@@ -1,6 +1,16 @@
 COVERAGE_PACKAGES=./repo/...,./fs/...,./snapshot/...
 GO_TEST=go test
 
+ifeq ($(TRAVIS_PULL_REQUEST_SLUG),kopia/kopia)
+ifeq ($(TRAVIS_PULL_REQUEST),false)
+ifeq ($(TRAVIS_BRANCH),master)
+# this indicates we're running on Travis CI and NOT processing a pull request
+# and merging into the master branch in the kopia/kopia repo
+KOPIA_MERGE_TO_MASTER = true
+endif
+endif
+endif
+
 all: test lint vet integration-tests
 
 include tools/tools.mk
@@ -122,9 +132,9 @@ official-release:
 goreturns:
 	find . -name '*.go' | xargs goreturns -w --local github.com/kopia/kopia
 
-# this indicates we're running on Travis CI and NOT processing pull request.
-ifeq ($(TRAVIS_PULL_REQUEST),false)
 
+# Not a PR and merging into master in the kopia/kopia repo
+ifdef KOPIA_MERGE_TO_MASTER
 travis-install-gpg-key:
 	@echo Installing GPG key...
 	openssl aes-256-cbc -K "$(encrypted_fa1db4b894bb_key)" -iv "$(encrypted_fa1db4b894bb_iv)" -in kopia.gpg.enc -out /tmp/kopia.gpg -d
