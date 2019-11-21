@@ -157,8 +157,8 @@ func TestEndToEnd(t *testing.T) {
 
 	dir3 := filepath.Join(e.dataDir, "dir3")
 	createDirectory(t, dir3, 3)
-	e.runAndExpectSuccess(t, "snapshot", "create", "--hostname", "bar", "--username", "foo", dir3)
-	e.runAndExpectSuccess(t, "snapshot", "list", "--hostname", "bar", "--username", "foo", dir3)
+	e.runAndExpectSuccess(t, "snapshot", "create", "--override-hostname", "bar", "--override-username", "foo", dir3)
+	e.runAndExpectSuccess(t, "snapshot", "list", "--override-hostname", "bar", "--override-username", "foo", dir3)
 
 	sources := listSnapshotsAndExpectSuccess(t, e)
 	if got, want := len(sources), 3; got != want {
