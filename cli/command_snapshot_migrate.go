@@ -209,6 +209,6 @@ func getSourcesToMigrate(ctx context.Context, rep *repo.Repository) ([]snapshot.
 }
 
 func init() {
-	setupOverrideOptions(migrateCommand)
+	addUserAndHostFlags(migrateCommand)
 	migrateCommand.Action(repositoryAction(runMigrateCommand))
 }

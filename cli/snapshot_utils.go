@@ -5,11 +5,11 @@ import (
 )
 
 var (
-	overrideHostName string
-	overrideUserName string
+	hostName = getDefaultHostName()
+	userName = getDefaultUserName()
 )
 
-func setupOverrideOptions(cmd *kingpin.CmdClause) {
-	cmd.Flag("override-hostname", "Override system hostname.").StringVar(&overrideHostName)
-	cmd.Flag("override-username", "Override system username.").StringVar(&overrideUserName)
+func addUserAndHostFlags(cmd *kingpin.CmdClause) {
+	cmd.Flag("hostname", "Override default hostname.").StringVar(&hostName)
+	cmd.Flag("username", "Override default username.").StringVar(&userName)
 }
