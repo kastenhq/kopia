@@ -269,6 +269,18 @@ func TestSnapshotDelete(t *testing.T) {
 		},
 		{
 			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete"}
+			},
+			expectFail,
+		},
+		{
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", "some-garbage-manifestID"}
+			},
+			expectFail,
+		},
+		{
+			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
 					"--hostname", "some-wrong-host",
 					"--username", source.user,
