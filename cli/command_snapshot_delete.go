@@ -11,12 +11,12 @@ import (
 var (
 	snapshotDeleteCommand        = snapshotCommands.Command("delete", "Explicitly delete a snapshot by providing a snapshot ID.")
 	snapshotDeleteID             = snapshotDeleteCommand.Arg("id", "Snapshot ID to be deleted").Required().String()
-	snapshotDeleteHostName       = snapshotDeleteCommand.Flag("host", "Snapshot ID to be deleted").String()
-	snapshotDeleteUserName       = snapshotDeleteCommand.Flag("user", "Snapshot ID to be deleted").String()
-	snapshotDeletePath           = snapshotDeleteCommand.Flag("path", "Delete snapshot for a given path only").String()
-	snapshotDeleteIgnoreHostName = snapshotDeleteCommand.Flag("unsafe-ignore-host", "Snapshot ID to be deleted").Bool()
-	snapshotDeleteIgnoreUserName = snapshotDeleteCommand.Flag("unsafe-ignore-user", "Snapshot ID to be deleted").Bool()
-	snapshotDeleteIgnorePath     = snapshotDeleteCommand.Flag("unsafe-ignore-path", "Snapshot ID to be deleted").Bool()
+	snapshotDeleteHostName       = snapshotDeleteCommand.Flag("hostname", "Specify the host name of the snapshot to be deleted").String()
+	snapshotDeleteUserName       = snapshotDeleteCommand.Flag("username", "Specify the user name of the snapshot to be deleted").String()
+	snapshotDeletePath           = snapshotDeleteCommand.Flag("path", "Specify the path of the snapshot to be deleted").String()
+	snapshotDeleteIgnoreHostName = snapshotDeleteCommand.Flag("unsafe-ignore-host", "Override the requirement to specify a host name for the delete to succeed").Bool()
+	snapshotDeleteIgnoreUserName = snapshotDeleteCommand.Flag("unsafe-ignore-user", "Override the requirement to specify a user name for the delete to succeed").Bool()
+	snapshotDeleteIgnorePath     = snapshotDeleteCommand.Flag("unsafe-ignore-path", "Override the requirement to specify a path for the delete to succeed").Bool()
 )
 
 func runDeleteCommand(ctx context.Context, rep *repo.Repository) error {
@@ -53,6 +53,5 @@ func runDeleteCommand(ctx context.Context, rep *repo.Repository) error {
 }
 
 func init() {
-	addUserAndHostFlags(snapshotDeleteCommand)
 	snapshotDeleteCommand.Action(repositoryAction(runDeleteCommand))
 }
