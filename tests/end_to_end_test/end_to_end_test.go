@@ -161,8 +161,8 @@ func TestEndToEnd(t *testing.T) {
 
 	dir3 := filepath.Join(e.dataDir, "dir3")
 	createDirectory(t, dir3, 3)
-	e.runAndExpectSuccess(t, "snapshot", "create", "--hostname", "bar", "--username", "foo", dir3)
-	e.runAndExpectSuccess(t, "snapshot", "list", "--hostname", "bar", "--username", "foo", dir3)
+	e.runAndExpectSuccess(t, "snapshot", "create", "--hostnamename", "bar", "--usernamename", "foo", dir3)
+	e.runAndExpectSuccess(t, "snapshot", "list", "--hostnamename", "bar", "--usernamename", "foo", dir3)
 
 	sources := listSnapshotsAndExpectSuccess(t, e)
 	if got, want := len(sources), 3; got != want {
@@ -250,8 +250,8 @@ func TestSnapshotDelete(t *testing.T) {
 		{
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
-					"--host", source.host,
-					"--user", source.user,
+					"--hostname", source.host,
+					"--username", source.user,
 					"--path", source.path,
 				}
 			},
@@ -270,8 +270,8 @@ func TestSnapshotDelete(t *testing.T) {
 		{
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
-					"--host", "some-wrong-host",
-					"--user", source.user,
+					"--hostname", "some-wrong-host",
+					"--username", source.user,
 					"--path", source.path,
 				}
 			},
@@ -280,8 +280,8 @@ func TestSnapshotDelete(t *testing.T) {
 		{
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
-					"--host",
-					"--user", source.user,
+					"--hostname",
+					"--username", source.user,
 					"--path", source.path,
 				}
 			},
@@ -290,8 +290,8 @@ func TestSnapshotDelete(t *testing.T) {
 		{
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
-					"--host", source.host,
-					"--user", "some-wrong-user",
+					"--hostname", source.host,
+					"--username", "some-wrong-user",
 					"--path", source.path,
 				}
 			},
@@ -300,8 +300,8 @@ func TestSnapshotDelete(t *testing.T) {
 		{
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
-					"--host", source.host,
-					"--user", source.user,
+					"--hostname", source.host,
+					"--username", source.user,
 					"--path", "some-wrong-path",
 				}
 			},
@@ -311,8 +311,8 @@ func TestSnapshotDelete(t *testing.T) {
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
 					"--unsafe-ignore-host",
-					"--host", "some-wrong-host",
-					"--user", source.user,
+					"--hostname", "some-wrong-host",
+					"--username", source.user,
 					"--path", source.path,
 				}
 			},
@@ -322,8 +322,8 @@ func TestSnapshotDelete(t *testing.T) {
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
 					"--unsafe-ignore-user",
-					"--host", source.host,
-					"--user", "some-wrong-user",
+					"--hostname", source.host,
+					"--username", "some-wrong-user",
 					"--path", source.path,
 				}
 			},
@@ -332,8 +332,8 @@ func TestSnapshotDelete(t *testing.T) {
 		{
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
-					"--host", source.host,
-					"--user", source.user,
+					"--hostname", source.host,
+					"--username", source.user,
 					"--path", "some-wrong-path",
 					"--unsafe-ignore-path",
 				}
