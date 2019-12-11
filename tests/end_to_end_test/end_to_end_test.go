@@ -291,168 +291,168 @@ how are you
 	e.runAndVerifyOutputLineCount(t, expectedContentCount, "content", "list")
 }
 
-type manifestDelFunc func(t *testing.T, e *testenv, manifestID string, source sourceInfo)
+type deleteArgMaker func(manifestID string, source sourceInfo) []string
 
 func TestSnapshotDelete(t *testing.T) {
 	expectFail := false
 	expectSuccess := true
 	for _, tc := range []struct {
-		mf            manifestDelFunc
+		mf            deleteArgMaker
 		expectSuccess bool
 	}{
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectSuccess(t, "manifest", "rm", manifestID)
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"manifest", "rm", manifestID}
 			},
 			expectSuccess,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectSuccess(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--host", source.host,
 					"--user", source.user,
 					"--path", source.path,
-				)
+				}
 			},
 			expectSuccess,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectSuccess(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--unsafe-ignore-host",
 					"--unsafe-ignore-user",
 					"--unsafe-ignore-path",
-				)
+				}
 			},
 			expectSuccess,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectFailure(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--host", "some-wrong-host",
 					"--user", source.user,
 					"--path", source.path,
-				)
+				}
 			},
 			expectFail,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectFailure(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--host",
 					"--user", source.user,
 					"--path", source.path,
-				)
+				}
 			},
 			expectFail,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectFailure(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--host", source.host,
 					"--user", "some-wrong-user",
 					"--path", source.path,
-				)
+				}
 			},
 			expectFail,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectFailure(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--host", source.host,
 					"--user", source.user,
 					"--path", "some-wrong-path",
-				)
+				}
 			},
 			expectFail,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectSuccess(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--unsafe-ignore-host",
 					"--host", "some-wrong-host",
 					"--user", source.user,
 					"--path", source.path,
-				)
+				}
 			},
 			expectSuccess,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectSuccess(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--unsafe-ignore-user",
 					"--host", source.host,
 					"--user", "some-wrong-user",
 					"--path", source.path,
-				)
+				}
 			},
 			expectSuccess,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectSuccess(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--host", source.host,
 					"--user", source.user,
 					"--path", "some-wrong-path",
 					"--unsafe-ignore-path",
-				)
+				}
 			},
 			expectSuccess,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectFailure(t, "snapshot", "delete", manifestID)
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID}
 			},
 			expectFail,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectFailure(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--unsafe-ignore-host",
 					"--unsafe-ignore-user",
-				)
+				}
 			},
 			expectFail,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectFailure(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--unsafe-ignore-host",
 					"--unsafe-ignore-path",
-				)
+				}
 			},
 			expectFail,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectFailure(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--unsafe-ignore-user",
 					"--unsafe-ignore-path",
-				)
+				}
 			},
 			expectFail,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectFailure(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--unsafe-ignore-user",
-				)
+				}
 			},
 			expectFail,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectFailure(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--unsafe-ignore-host",
-				)
+				}
 			},
 			expectFail,
 		},
 		{
-			func(t *testing.T, e *testenv, manifestID string, source sourceInfo) {
-				e.runAndExpectFailure(t, "snapshot", "delete", manifestID,
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
 					"--unsafe-ignore-path",
-				)
+				}
 			},
 			expectFail,
 		},
@@ -461,7 +461,7 @@ func TestSnapshotDelete(t *testing.T) {
 	}
 }
 
-func testSnapshotDelete(t *testing.T, mf manifestDelFunc, expectDeleteSucceeds bool) {
+func testSnapshotDelete(t *testing.T, argMaker deleteArgMaker, expectDeleteSucceeds bool) {
 	e := newTestEnv(t)
 	defer e.cleanup(t)
 	defer e.runAndExpectSuccess(t, "repo", "disconnect")
@@ -490,7 +490,12 @@ how are you
 		for _, ss := range source.snapshots {
 			manifestID := ss.snapshotID
 			t.Logf("manifestID: %v", manifestID)
-			mf(t, e, manifestID, source)
+			args := argMaker(manifestID, source)
+			if expectDeleteSucceeds {
+				e.runAndExpectSuccess(t, args...)
+			} else {
+				e.runAndExpectFailure(t, args...)
+			}
 		}
 	}
 
