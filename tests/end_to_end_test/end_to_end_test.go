@@ -304,16 +304,19 @@ func TestSnapshotDelete(t *testing.T) {
 	expectFail := false
 	expectSuccess := true
 	for _, tc := range []struct {
+		desc          string
 		mf            deleteArgMaker
 		expectSuccess bool
 	}{
 		{
+			"Test manifest rm function",
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"manifest", "rm", manifestID}
 			},
 			expectSuccess,
 		},
 		{
+			"Specify all source values correctly",
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
 					"--hostname", source.host,
@@ -324,31 +327,48 @@ func TestSnapshotDelete(t *testing.T) {
 			expectSuccess,
 		},
 		{
+			"Specify path and username, using default hostname",
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
-					"--unsafe-ignore-host",
-					"--unsafe-ignore-user",
-					"--unsafe-ignore-path",
+					"--username", source.user,
+					"--path", source.path,
 				}
 			},
 			expectSuccess,
 		},
 		{
-			func(manifestID string, source sourceInfo) []string {
-				return []string{"snapshot", "delete"}
-			},
-			expectFail,
-		},
-		{
-			func(manifestID string, source sourceInfo) []string {
-				return []string{"snapshot", "delete", "some-garbage-manifestID"}
-			},
-			expectFail,
-		},
-		{
+			"Specify path and hostname, using default username",
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
-					"--hostname", "some-wrong-host",
+					"--hostname", source.host,
+					"--path", source.path,
+				}
+			},
+			expectSuccess,
+		},
+		{
+			"No source flags, with unsafe ignore source flag",
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
+					"--unsafe-ignore-source",
+				}
+			},
+			expectSuccess,
+		},
+		{
+			"Specify path only, using default username and hostname",
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
+					"--path", source.path,
+				}
+			},
+			expectSuccess,
+		},
+		{
+			"Specify all source flags, incorrect host name",
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
+					"--hostname", "some-other-host",
 					"--username", source.user,
 					"--path", source.path,
 				}
@@ -356,6 +376,88 @@ func TestSnapshotDelete(t *testing.T) {
 			expectFail,
 		},
 		{
+			"Specify all source flags, incorrect user name",
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
+					"--hostname", source.host,
+					"--username", "some-other-user",
+					"--path", source.path,
+				}
+			},
+			expectFail,
+		},
+		{
+			"Specify all source flags, incorrect path",
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
+					"--hostname", source.host,
+					"--username", source.user,
+					"--path", "some-wrong-path",
+				}
+			},
+			expectFail,
+		},
+		{
+			"Specify all source flags, incorrect hostname, ignore flag set",
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
+					"--unsafe-ignore-source",
+					"--hostname", "some-other-host",
+					"--username", source.user,
+					"--path", source.path,
+				}
+			},
+			expectSuccess,
+		},
+		{
+			"Specify all source flags, incorrect username, ignore flag set",
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
+					"--hostname", source.host,
+					"--username", "some-other-user",
+					"--unsafe-ignore-source",
+					"--path", source.path,
+				}
+			},
+			expectSuccess,
+		},
+		{
+			"Specify all source flags, incorrect path, ignore flag set",
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", manifestID,
+					"--hostname", source.host,
+					"--username", source.user,
+					"--path", "some-wrong-path",
+					"--unsafe-ignore-source",
+				}
+			},
+			expectSuccess,
+		},
+		{
+			"No manifest ID provided",
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete"}
+			},
+			expectFail,
+		},
+		{
+			"No manifest ID provided, ignore source flag set",
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete",
+					"--unsafe-ignore-source",
+				}
+			},
+			expectFail,
+		},
+		{
+			"Garbage manifest ID provided",
+			func(manifestID string, source sourceInfo) []string {
+				return []string{"snapshot", "delete", "some-garbage-manifestID"}
+			},
+			expectFail,
+		},
+		{
+			"Hostname flag provided but no value input",
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
 					"--hostname",
@@ -366,116 +468,24 @@ func TestSnapshotDelete(t *testing.T) {
 			expectFail,
 		},
 		{
-			func(manifestID string, source sourceInfo) []string {
-				return []string{"snapshot", "delete", manifestID,
-					"--hostname", source.host,
-					"--username", "some-wrong-user",
-					"--path", source.path,
-				}
-			},
-			expectFail,
-		},
-		{
-			func(manifestID string, source sourceInfo) []string {
-				return []string{"snapshot", "delete", manifestID,
-					"--hostname", source.host,
-					"--username", source.user,
-					"--path", "some-wrong-path",
-				}
-			},
-			expectFail,
-		},
-		{
-			func(manifestID string, source sourceInfo) []string {
-				return []string{"snapshot", "delete", manifestID,
-					"--unsafe-ignore-host",
-					"--hostname", "some-wrong-host",
-					"--username", source.user,
-					"--path", source.path,
-				}
-			},
-			expectSuccess,
-		},
-		{
-			func(manifestID string, source sourceInfo) []string {
-				return []string{"snapshot", "delete", manifestID,
-					"--unsafe-ignore-user",
-					"--hostname", source.host,
-					"--username", "some-wrong-user",
-					"--path", source.path,
-				}
-			},
-			expectSuccess,
-		},
-		{
-			func(manifestID string, source sourceInfo) []string {
-				return []string{"snapshot", "delete", manifestID,
-					"--hostname", source.host,
-					"--username", source.user,
-					"--path", "some-wrong-path",
-					"--unsafe-ignore-path",
-				}
-			},
-			expectSuccess,
-		},
-		{
+			"No path provided and no unsafe ignore source flag provided",
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID}
 			},
 			expectFail,
 		},
 		{
+			"Specify hostname and username with no path provided",
 			func(manifestID string, source sourceInfo) []string {
 				return []string{"snapshot", "delete", manifestID,
-					"--unsafe-ignore-host",
-					"--unsafe-ignore-user",
-				}
-			},
-			expectFail,
-		},
-		{
-			func(manifestID string, source sourceInfo) []string {
-				return []string{"snapshot", "delete", manifestID,
-					"--unsafe-ignore-host",
-					"--unsafe-ignore-path",
-				}
-			},
-			expectFail,
-		},
-		{
-			func(manifestID string, source sourceInfo) []string {
-				return []string{"snapshot", "delete", manifestID,
-					"--unsafe-ignore-user",
-					"--unsafe-ignore-path",
-				}
-			},
-			expectFail,
-		},
-		{
-			func(manifestID string, source sourceInfo) []string {
-				return []string{"snapshot", "delete", manifestID,
-					"--unsafe-ignore-user",
-				}
-			},
-			expectFail,
-		},
-		{
-			func(manifestID string, source sourceInfo) []string {
-				return []string{"snapshot", "delete", manifestID,
-					"--unsafe-ignore-host",
-				}
-			},
-			expectFail,
-		},
-		{
-			func(manifestID string, source sourceInfo) []string {
-				return []string{"snapshot", "delete", manifestID,
-					"--unsafe-ignore-path",
+					"--hostname", source.host,
+					"--username", source.user,
 				}
 			},
 			expectFail,
 		},
 	} {
+		t.Log(tc.desc)
 		testSnapshotDelete(t, tc.mf, tc.expectSuccess)
 	}
 }
@@ -549,16 +559,12 @@ func TestSnapshotDeleteRestore(t *testing.T) {
 
 	// snapshot delete should succeed
 	e.runAndExpectSuccess(t, "snapshot", "delete", snapID,
-		"--unsafe-ignore-host",
-		"--unsafe-ignore-user",
-		"--unsafe-ignore-path",
+		"--unsafe-ignore-source",
 	)
 
 	// Subsequent snapshot delete to the same ID should fail
 	e.runAndExpectFailure(t, "snapshot", "delete", snapID,
-		"--unsafe-ignore-host",
-		"--unsafe-ignore-user",
-		"--unsafe-ignore-path",
+		"--unsafe-ignore-source",
 	)
 
 	// garbage-collect to clean up the root object. Otherwise
