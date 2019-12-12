@@ -45,8 +45,9 @@ type sourceInfo struct {
 }
 
 type snapshotInfo struct {
-	objectID string
-	time     time.Time
+	objectID   string
+	snapshotID string
+	time       time.Time
 }
 
 func newTestEnv(t *testing.T) *testenv {
@@ -355,7 +356,7 @@ canary
 	}
 }
 
-func TestSnapshotRestore(t *testing.T) {
+func TestRestoreCommand(t *testing.T) {
 	e := newTestEnv(t)
 	defer e.cleanup(t)
 	defer e.runAndExpectSuccess(t, "repo", "disconnect")
@@ -369,11 +370,17 @@ func TestSnapshotRestore(t *testing.T) {
 	// Attempt to restore a snapshot from an empty repo.
 	e.runAndExpectFailure(t, "restore", "kffbb7c28ea6c34d6cbe555d1cf80faa9", "r1")
 	e.runAndExpectSuccess(t, "snapshot", "create", source)
-	o := e.runAndExpectSuccess(t, "snapshot", "list")
 
 	// obtain snapshot root id and use it for restore
-	root := getLastSnapshotRootID(t, o)
-	t.Log("root id: ", root)
+	si := listSnapshotsAndExpectSuccess(t, e, source)
+	if got, want := len(si), 1; got != want {
+		t.Fatalf("got %v sources, wanted %v", got, want)
+	}
+	if got, want := len(si[0].snapshots), 1; got != want {
+		t.Fatalf("got %v snapshots, wanted %v", got, want)
+	}
+	snapID := si[0].snapshots[0].snapshotID
+	rootID := si[0].snapshots[0].objectID
 
 	// Attempt to restore a non-existing snapshot.
 	e.runAndExpectFailure(t, "restore", "kffbb7c28ea6c34d6cbe555d1cf80fdd9", "r2")
@@ -381,15 +388,25 @@ func TestSnapshotRestore(t *testing.T) {
 	// Ensure restored files are created with a different ModTime
 	time.Sleep(time.Second)
 
+	// Attempt to restore using snapshot ID
+	restoreFailDir := filepath.Join(e.dataDir, "restorefail")
+	e.runAndExpectFailure(t, "restore", snapID, restoreFailDir)
+
+	// Attempt to restore into a target directory that already exists
+	e.runAndExpectFailure(t, "restore", rootID, restoreFailDir)
+
 	// Restore last snapshot
-	e.runAndExpectSuccess(t, "restore", root, restoreDir)
+	e.runAndExpectSuccess(t, "restore", rootID, restoreDir)
 
 	// Note: restore does not reset the permissions for the top directory due to
 	// the way the top FS entry is created in snapshotfs. Force the permissions
 	// of the top directory to match those of the source so the recursive
 	// directory comparison has a chance of succeeding.
 	assertNoError(t, os.Chmod(restoreDir, 0700))
+	compareDirs(t, source, restoreDir)
+}
 
+func compareDirs(t *testing.T, source, restoreDir string) {
 	// Restored contents should match source
 	s, err := localfs.Directory(source)
 	assertNoError(t, err)
@@ -411,6 +428,52 @@ func TestSnapshotRestore(t *testing.T) {
 		cmp.DiffCommand = "cmp"
 		_ = cmp.Compare(ctx, s, r)
 	}
+}
+
+func TestSnapshotRestore(t *testing.T) {
+	e := newTestEnv(t)
+	defer e.cleanup(t)
+	defer e.runAndExpectSuccess(t, "repo", "disconnect")
+
+	e.runAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.repoDir)
+
+	source := filepath.Join(e.dataDir, "source")
+	createDirectory(t, source, 1)
+
+	restoreDir := filepath.Join(e.dataDir, "restored")
+	// Attempt to restore a snapshot from an empty repo.
+	e.runAndExpectFailure(t, "snapshot", "restore", "kffbb7c28ea6c34d6cbe555d1cf80faa9", "r1")
+	e.runAndExpectSuccess(t, "snapshot", "create", source)
+
+	// obtain snapshot root id and use it for restore
+	si := listSnapshotsAndExpectSuccess(t, e, source)
+	if got, want := len(si), 1; got != want {
+		t.Fatalf("got %v sources, wanted %v", got, want)
+	}
+	if got, want := len(si[0].snapshots), 1; got != want {
+		t.Fatalf("got %v snapshots, wanted %v", got, want)
+	}
+	snapID := si[0].snapshots[0].snapshotID
+	rootID := si[0].snapshots[0].objectID
+
+	// Attempt to restore a non-existing snapshot.
+	e.runAndExpectFailure(t, "snapshot", "restore", "kffbb7c28ea6c34d6cbe555d1cf80fdd9", "r2")
+
+	// Ensure restored files are created with a different ModTime
+	time.Sleep(time.Second)
+
+	// Attempt to restore snapshot with root ID
+	restoreFailDir := filepath.Join(e.dataDir, "restorefail")
+	e.runAndExpectFailure(t, "snapshot", "restore", rootID, restoreFailDir)
+
+	// Attempt to restore snapshot with an already-existing target directory
+	e.runAndExpectFailure(t, "snapshot", "restore", snapID, restoreFailDir)
+
+	// Restore last snapshot using the snapshot ID
+	e.runAndExpectSuccess(t, "snapshot", "restore", snapID, restoreDir)
+
+	// Restored contents should match source
+	compareDirs(t, source, restoreDir)
 }
 
 func TestCompression(t *testing.T) {
@@ -543,7 +606,7 @@ func trimOutput(s string) string {
 }
 
 func listSnapshotsAndExpectSuccess(t *testing.T, e *testenv, targets ...string) []sourceInfo {
-	lines := e.runAndExpectSuccess(t, append([]string{"snapshot", "list", "-l"}, targets...)...)
+	lines := e.runAndExpectSuccess(t, append([]string{"snapshot", "list", "-l", "--manifest-id"}, targets...)...)
 	return mustParseSnapshots(t, lines)
 }
 
@@ -650,9 +713,13 @@ func mustParseSnaphotInfo(t *testing.T, l string) snapshotInfo {
 		t.Fatalf("err: %v", err)
 	}
 
+	manifestField := parts[7]
+	snapID := strings.TrimPrefix(manifestField, "manifest:")
+
 	return snapshotInfo{
-		time:     ts,
-		objectID: parts[3],
+		time:       ts,
+		objectID:   parts[3],
+		snapshotID: snapID,
 	}
 }
 
