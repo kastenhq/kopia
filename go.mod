@@ -14,14 +14,19 @@ require (
 	github.com/go-bindata/go-bindata v3.1.2+incompatible // indirect
 	github.com/go-ini/ini v1.46.0 // indirect
 	github.com/godbus/dbus v4.1.0+incompatible // indirect
+	github.com/klauspost/compress v1.9.4
+	github.com/klauspost/crc32 v1.2.0 // indirect
+	github.com/klauspost/pgzip v1.2.1
 	github.com/kylelemons/godebug v1.1.0
 	github.com/minio/minio-go v6.0.14+incompatible
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
+	github.com/natefinch/atomic v0.0.0-20150920032501-a62ce929ffcc
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/pkg/errors v0.8.1
 	github.com/pkg/profile v1.3.0
 	github.com/pkg/sftp v1.10.1
 	github.com/skratchdot/open-golang v0.0.0-20190402232053-79abb63cd66e
+	github.com/stretchr/testify v1.4.0
 	github.com/studio-b12/gowebdav v0.0.0-20190103184047-38f79aeaf1ac
 	github.com/zalando/go-keyring v0.0.0-20190715212148-76787ff3b3bd
 	golang.org/x/crypto v0.0.0-20190829043050-9756ffdc2472

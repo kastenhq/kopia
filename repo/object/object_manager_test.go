@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/repo/content"
 )
 
@@ -110,7 +111,7 @@ func TestWriters(t *testing.T) {
 			t.Errorf("incorrect result for %v, expected: %v got: %v", c.data, c.objectID.String(), result.String())
 		}
 
-		if _, ok := c.objectID.ContentID(); !ok {
+		if _, _, ok := c.objectID.ContentID(); !ok {
 			if len(data) != 0 {
 				t.Errorf("unexpected data written to the storage: %v", data)
 			}
@@ -205,13 +206,9 @@ func TestIndirection(t *testing.T) {
 			t.Errorf("unexpected blob count for %v: %v, expected %v", c.dataLength, got, want)
 		}
 
-		l, b, err := om.VerifyObject(ctx, result)
+		b, err := om.VerifyObject(ctx, result)
 		if err != nil {
 			t.Errorf("error verifying %q: %v", result, err)
-		}
-
-		if got, want := int(l), len(contentBytes); got != want {
-			t.Errorf("got invalid byte count for %q: %v, wanted %v", result, got, want)
 		}
 
 		if got, want := len(b), c.expectedBlobCount; got != want {
@@ -316,6 +313,7 @@ func TestEndToEndReadAndSeek(t *testing.T) {
 		}
 
 		objectID, err := writer.Result()
+		t.Logf("oid: %v", objectID)
 
 		writer.Close()
 
@@ -328,6 +326,34 @@ func TestEndToEndReadAndSeek(t *testing.T) {
 	}
 }
 
+func TestEndToEndReadAndSeekWithCompression(t *testing.T) {
+	ctx := context.Background()
+	_, om := setupTest(t)
+
+	for compressorName := range compression.ByName {
+		for _, size := range []int{1, 199, 200, 201, 9999, 512434} {
+			// Create some random data sample of the specified size.
+			randomData := make([]byte, size)
+
+			writer := om.NewWriter(ctx, WriterOptions{Compressor: compressorName})
+			if _, err := writer.Write(randomData); err != nil {
+				t.Errorf("write error: %v", err)
+			}
+
+			objectID, err := writer.Result()
+			t.Logf("oid: %v", objectID)
+
+			writer.Close()
+
+			if err != nil {
+				t.Errorf("cannot get writer result for %v: %v", size, err)
+				continue
+			}
+
+			verify(ctx, t, om, objectID, randomData, fmt.Sprintf("%v %v", objectID, size))
+		}
+	}
+}
 func verify(ctx context.Context, t *testing.T, om *Manager, objectID ID, expectedData []byte, testCaseID string) {
 	t.Helper()
 

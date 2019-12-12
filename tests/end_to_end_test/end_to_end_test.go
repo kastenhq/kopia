@@ -1,6 +1,7 @@
 package endtoend_test
 
 import (
+	"context"
 	cryptorand "crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -10,12 +11,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kylelemons/godebug/pretty"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/kopia/kopia/fs/localfs"
+	"github.com/kopia/kopia/internal/diff"
+	"github.com/kopia/kopia/internal/fshasher"
 )
 
 const repoPassword = "qWQPJ2hiiLgWRRCr" // nolint:gosec
@@ -211,8 +218,8 @@ func TestEndToEnd(t *testing.T) {
 		// all recovered index entries are added as index file
 		e.runAndVerifyOutputLineCount(t, 1, "index", "ls")
 		contentsAfter := e.runAndExpectSuccess(t, "content", "ls")
-		if diff := pretty.Compare(contentsBefore, contentsAfter); diff != "" {
-			t.Errorf("unexpected block diff after recovery: %v", diff)
+		if d := pretty.Compare(contentsBefore, contentsAfter); d != "" {
+			t.Errorf("unexpected block diff after recovery: %v", d)
 		}
 	})
 
@@ -564,6 +571,112 @@ canary
 	}
 }
 
+func TestSnapshotRestore(t *testing.T) {
+	e := newTestEnv(t)
+	defer e.cleanup(t)
+	defer e.runAndExpectSuccess(t, "repo", "disconnect")
+
+	e.runAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.repoDir)
+
+	source := filepath.Join(e.dataDir, "source")
+	createDirectory(t, source, 1)
+
+	restoreDir := filepath.Join(e.dataDir, "restored")
+	// Attempt to restore a snapshot from an empty repo.
+	e.runAndExpectFailure(t, "restore", "kffbb7c28ea6c34d6cbe555d1cf80faa9", "r1")
+	e.runAndExpectSuccess(t, "snapshot", "create", source)
+	o := e.runAndExpectSuccess(t, "snapshot", "list")
+
+	// obtain snapshot root id and use it for restore
+	root := getLastSnapshotRootID(t, o)
+	t.Log("root id: ", root)
+
+	// Attempt to restore a non-existing snapshot.
+	e.runAndExpectFailure(t, "restore", "kffbb7c28ea6c34d6cbe555d1cf80fdd9", "r2")
+
+	// Ensure restored files are created with a different ModTime
+	time.Sleep(time.Second)
+
+	// Restore last snapshot
+	e.runAndExpectSuccess(t, "restore", root, restoreDir)
+
+	// Note: restore does not reset the permissions for the top directory due to
+	// the way the top FS entry is created in snapshotfs. Force the permissions
+	// of the top directory to match those of the source so the recursive
+	// directory comparison has a chance of succeeding.
+	assertNoError(t, os.Chmod(restoreDir, 0700))
+
+	// Restored contents should match source
+	s, err := localfs.Directory(source)
+	assertNoError(t, err)
+	wantHash, err := fshasher.Hash(context.Background(), s)
+	assertNoError(t, err)
+
+	// check restored contents
+	r, err := localfs.Directory(restoreDir)
+	assertNoError(t, err)
+
+	ctx := context.Background()
+	gotHash, err := fshasher.Hash(ctx, r)
+	assertNoError(t, err)
+
+	if !assert.Equal(t, wantHash, gotHash, "restored directory hash does not match source's hash") {
+		cmp, err := diff.NewComparer(os.Stderr)
+		assertNoError(t, err)
+
+		cmp.DiffCommand = "cmp"
+		_ = cmp.Compare(ctx, s, r)
+	}
+}
+
+func TestCompression(t *testing.T) {
+	e := newTestEnv(t)
+	defer e.cleanup(t)
+	defer e.runAndExpectSuccess(t, "repo", "disconnect")
+
+	e.runAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.repoDir)
+
+	// set global policy
+	e.runAndExpectSuccess(t, "policy", "set", "--global", "--compression", "pgzip")
+
+	dataDir := filepath.Join(e.dataDir, "dir1")
+	assertNoError(t, os.MkdirAll(dataDir, 0777))
+
+	dataLines := []string{
+		"hello world",
+		"how are you",
+		"hello world",
+		"how are you",
+		"hello world",
+		"how are you",
+		"hello world",
+		"how are you",
+		"hello world",
+		"how are you",
+		"hello world",
+		"how are you",
+		"hello world",
+		"how are you",
+		"hello world",
+		"how are you",
+	}
+	// add a file that compresses well
+	assertNoError(t, ioutil.WriteFile(filepath.Join(dataDir, "some-file1"), []byte(strings.Join(dataLines, "\n")), 0600))
+
+	e.runAndExpectSuccess(t, "snapshot", "create", dataDir)
+	sources := listSnapshotsAndExpectSuccess(t, e)
+	oid := sources[0].snapshots[0].objectID
+	entries := listDirectory(t, e, oid)
+
+	if !strings.HasPrefix(entries[0].oid, "Z") {
+		t.Errorf("expected compressed object, got %v", entries[0].oid)
+	}
+
+	if lines := e.runAndExpectSuccess(t, "show", entries[0].oid); !reflect.DeepEqual(dataLines, lines) {
+		t.Errorf("invalid object contents")
+	}
+}
+
 func (e *testenv) runAndExpectSuccess(t *testing.T, args ...string) []string {
 	t.Helper()
 
@@ -648,6 +761,31 @@ func trimOutput(s string) string {
 func listSnapshotsAndExpectSuccess(t *testing.T, e *testenv, targets ...string) []sourceInfo {
 	lines := e.runAndExpectSuccess(t, append([]string{"snapshot", "list", "-l", "--manifest-id"}, targets...)...)
 	return mustParseSnapshots(t, lines)
+}
+
+type dirEntry struct {
+	name string
+	oid  string
+}
+
+func listDirectory(t *testing.T, e *testenv, targets ...string) []dirEntry {
+	lines := e.runAndExpectSuccess(t, append([]string{"ls", "-l"}, targets...)...)
+	return mustParseDirectoryEntries(lines)
+}
+
+func mustParseDirectoryEntries(lines []string) []dirEntry {
+	var result []dirEntry
+
+	for _, l := range lines {
+		parts := strings.Fields(l)
+
+		result = append(result, dirEntry{
+			name: parts[6],
+			oid:  parts[5],
+		})
+	}
+
+	return result
 }
 
 func createDirectory(t *testing.T, dirname string, depth int) {
@@ -772,4 +910,19 @@ func assertNoError(t *testing.T, err error) {
 	if err != nil {
 		t.Errorf("err: %v", err)
 	}
+}
+
+func getLastSnapshotRootID(t *testing.T, listOutput []string) string {
+	t.Helper()
+
+	if len(listOutput) == 0 {
+		t.Fatal("Expected non-empty snapshot list")
+	}
+
+	f := strings.Fields(listOutput[len(listOutput)-1])
+	if len(f) < 4 {
+		t.Fatal("Could not parse snapshot list output: ", listOutput)
+	}
+
+	return f[3]
 }

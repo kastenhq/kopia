@@ -8,8 +8,8 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/kopia/kopia/fs/ignorefs"
 	"github.com/kopia/kopia/repo"
+	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/snapshot/policy"
 )
 
@@ -34,6 +34,21 @@ var (
 	policySetAddIgnore    = policySetCommand.Flag("add-ignore", "List of paths to add to the ignore list").PlaceHolder("PATTERN").Strings()
 	policySetRemoveIgnore = policySetCommand.Flag("remove-ignore", "List of paths to remove from the ignore list").PlaceHolder("PATTERN").Strings()
 	policySetClearIgnore  = policySetCommand.Flag("clear-ignore", "Clear list of paths in the ignore list").Bool()
+
+	// Name of compression algorithm.
+	policySetCompressionAlgorithm = policySetCommand.Flag("compression", "Compression algorithm").Enum(supportedCompressionAlgorithms()...)
+	policySetCompressionMinSize   = policySetCommand.Flag("compression-min-size", "Min size of file to attempt compression for").String()
+	policySetCompressionMaxSize   = policySetCommand.Flag("compression-max-size", "Max size of file to attempt compression for").String()
+
+	// Files to only compress.
+	policySetAddOnlyCompress    = policySetCommand.Flag("add-only-compress", "List of extensions to add to the only-compress list").PlaceHolder("PATTERN").Strings()
+	policySetRemoveOnlyCompress = policySetCommand.Flag("remove-only-compress", "List of extensions to remove from the only-compress list").PlaceHolder("PATTERN").Strings()
+	policySetClearOnlyCompress  = policySetCommand.Flag("clear-only-compress", "Clear list of extensions in the only-compress list").Bool()
+
+	// Files to never compress.
+	policySetAddNeverCompress    = policySetCommand.Flag("add-never-compress", "List of extensions to add to the never compress list").PlaceHolder("PATTERN").Strings()
+	policySetRemoveNeverCompress = policySetCommand.Flag("remove-never-compress", "List of extensions to remove from the never compress list").PlaceHolder("PATTERN").Strings()
+	policySetClearNeverCompress  = policySetCommand.Flag("clear-never-compress", "Clear list of extensions in the never compress list").Bool()
 
 	// Dot-ignore iles to look at.
 	policySetAddDotIgnore    = policySetCommand.Flag("add-dot-ignore", "List of paths to add to the dot-ignore list").PlaceHolder("FILENAME").Strings()
@@ -92,6 +107,10 @@ func setPolicyFromFlags(p *policy.Policy, changeCount *int) error {
 
 	setFilesPolicyFromFlags(&p.FilesPolicy, changeCount)
 
+	if err := setCompressionPolicyFromFlags(&p.CompressionPolicy, changeCount); err != nil {
+		return errors.Wrap(err, "compression policy")
+	}
+
 	if err := setSchedulingPolicyFromFlags(&p.SchedulingPolicy, changeCount); err != nil {
 		return errors.Wrap(err, "scheduling policy")
 	}
@@ -110,7 +129,7 @@ func setPolicyFromFlags(p *policy.Policy, changeCount *int) error {
 	return nil
 }
 
-func setFilesPolicyFromFlags(fp *ignorefs.FilesPolicy, changeCount *int) {
+func setFilesPolicyFromFlags(fp *policy.FilesPolicy, changeCount *int) {
 	if *policySetClearDotIgnore {
 		*changeCount++
 		printStderr(" - removing all rules for dot-ignore files\n")
@@ -191,6 +210,54 @@ func setSchedulingPolicyFromFlags(sp *policy.SchedulingPolicy, changeCount *int)
 		} else {
 			printStderr(" - setting snapshot times to %v\n", timesOfDay)
 		}
+	}
+
+	return nil
+}
+
+func setCompressionPolicyFromFlags(p *policy.CompressionPolicy, changeCount *int) error {
+	if err := applyPolicyNumber64("minimum file size subject to compression", &p.MinSize, *policySetCompressionMinSize, changeCount); err != nil {
+		return errors.Wrap(err, "minimum file size subject to compression")
+	}
+
+	if err := applyPolicyNumber64("maximum file size subject to compression", &p.MaxSize, *policySetCompressionMaxSize, changeCount); err != nil {
+		return errors.Wrap(err, "maximum file size subject to compression")
+	}
+
+	if v := *policySetCompressionAlgorithm; v != "" {
+		*changeCount++
+
+		if v == inheritPolicyString {
+			printStderr(" - resetting compression algorithm to default value inherited from parent\n")
+
+			p.CompressorName = ""
+		} else {
+			printStderr(" - setting compression algorithm to %v\n", v)
+
+			p.CompressorName = compression.Name(v)
+		}
+	}
+
+	if *policySetClearOnlyCompress {
+		*changeCount++
+
+		p.OnlyCompress = nil
+
+		printStderr(" - removing all only-compress extensions\n")
+	} else {
+		p.OnlyCompress = addRemoveDedupeAndSort("only-compress extensions",
+			p.OnlyCompress, *policySetAddOnlyCompress, *policySetRemoveOnlyCompress, changeCount)
+	}
+
+	if *policySetClearNeverCompress {
+		*changeCount++
+
+		p.NeverCompress = nil
+
+		printStderr(" - removing all never-compress extensions\n")
+	} else {
+		p.NeverCompress = addRemoveDedupeAndSort("never-compress extensions",
+			p.NeverCompress, *policySetAddNeverCompress, *policySetRemoveNeverCompress, changeCount)
 	}
 
 	return nil
@@ -278,4 +345,15 @@ func applyPolicyNumber64(desc string, val *int64, str string, changeCount *int) 
 	*val = v
 
 	return nil
+}
+
+func supportedCompressionAlgorithms() []string {
+	var res []string
+	for name := range compression.ByName {
+		res = append(res, string(name))
+	}
+
+	sort.Strings(res)
+
+	return append([]string{inheritPolicyString, "none"}, res...)
 }
