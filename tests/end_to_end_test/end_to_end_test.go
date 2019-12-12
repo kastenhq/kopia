@@ -513,6 +513,70 @@ how are you
 	}
 }
 
+func TestSnapshotDeleteRestore(t *testing.T) {
+	e := newTestEnv(t)
+	defer e.cleanup(t)
+	defer e.runAndExpectSuccess(t, "repo", "disconnect")
+
+	e.runAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.repoDir)
+
+	source := filepath.Join(e.dataDir, "source")
+	createDirectory(t, source, 1)
+	restoreDir := filepath.Join(e.dataDir, "restored")
+
+	// Create snapshot
+	e.runAndExpectSuccess(t, "snapshot", "create", source)
+
+	// obtain snapshot root id and use it for restore
+	si := listSnapshotsAndExpectSuccess(t, e, source)
+	if got, want := len(si), 1; got != want {
+		t.Fatalf("got %v sources, wanted %v", got, want)
+	}
+	if got, want := len(si[0].snapshots), 1; got != want {
+		t.Fatalf("got %v snapshots, wanted %v", got, want)
+	}
+	snapID := si[0].snapshots[0].snapshotID
+	rootID := si[0].snapshots[0].objectID
+
+	e.runAndExpectSuccess(t, "restore", rootID, restoreDir)
+
+	// Note: restore does not reset the permissions for the top directory due to
+	// the way the top FS entry is created in snapshotfs. Force the permissions
+	// of the top directory to match those of the source so the recursive
+	// directory comparison has a chance of succeeding.
+	assertNoError(t, os.Chmod(restoreDir, 0700))
+	compareDirs(t, source, restoreDir)
+
+	// snapshot delete should succeed
+	e.runAndExpectSuccess(t, "snapshot", "delete", snapID,
+		"--unsafe-ignore-host",
+		"--unsafe-ignore-user",
+		"--unsafe-ignore-path",
+	)
+
+	// Subsequent snapshot delete to the same ID should fail
+	e.runAndExpectFailure(t, "snapshot", "delete", snapID,
+		"--unsafe-ignore-host",
+		"--unsafe-ignore-user",
+		"--unsafe-ignore-path",
+	)
+
+	// garbage-collect to clean up the root object. Otherwise
+	// a restore will succeed
+	e.runAndExpectSuccess(t, "snapshot", "gc", "--delete", "--min-age", "0s")
+
+	// Run a restore on the deleted snapshot's root ID
+	notRestoreDir := filepath.Join(e.dataDir, "notrestored")
+	e.runAndExpectFailure(t, "restore", rootID, notRestoreDir)
+
+	// Make sure the restore did not happen from the deleted snapshot
+	fileInfo, err := ioutil.ReadDir(notRestoreDir)
+	assertNoError(t, err)
+	if len(fileInfo) != 0 {
+		t.Fatalf("expected nothing to be restored")
+	}
+}
+
 func TestDiff(t *testing.T) {
 	e := newTestEnv(t)
 	defer e.cleanup(t)
@@ -606,6 +670,10 @@ func TestSnapshotRestore(t *testing.T) {
 	// directory comparison has a chance of succeeding.
 	assertNoError(t, os.Chmod(restoreDir, 0700))
 
+	compareDirs(t, source, restoreDir)
+}
+
+func compareDirs(t *testing.T, source, restoreDir string) {
 	// Restored contents should match source
 	s, err := localfs.Directory(source)
 	assertNoError(t, err)
