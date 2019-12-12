@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"os"
 
 	"github.com/kopia/kopia/fs/localfs"
 	"github.com/kopia/kopia/repo"
@@ -22,13 +21,11 @@ func runSnapRestoreCommand(ctx context.Context, rep *repo.Repository) error {
 	m := &snapshot.Manifest{}
 	err := rep.Manifests.Get(ctx, manifestID, m)
 	if err != nil {
-		_ = os.MkdirAll(*snapshotRestoreTargetPath, 0700)
 		return err
 	}
 
 	rootEntry, err := snapshotfs.SnapshotRoot(rep, m)
 	if err != nil {
-		_ = os.MkdirAll(*snapshotRestoreTargetPath, 0700)
 		return err
 	}
 	return localfs.Copy(ctx, *snapshotRestoreTargetPath, rootEntry)

@@ -467,6 +467,7 @@ func TestSnapshotRestore(t *testing.T) {
 	e.runAndExpectFailure(t, "snapshot", "restore", rootID, restoreFailDir)
 
 	// Attempt to restore snapshot with an already-existing target directory
+	_ = os.MkdirAll(restoreFailDir, 0700)
 	e.runAndExpectFailure(t, "snapshot", "restore", snapID, restoreFailDir)
 
 	// Restore last snapshot using the snapshot ID
