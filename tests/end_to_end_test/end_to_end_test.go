@@ -523,6 +523,29 @@ how are you
 	}
 }
 
+func TestSnapshotDeleteTypeCheck(t *testing.T) {
+	e := newTestEnv(t)
+	defer e.cleanup(t)
+	defer e.runAndExpectSuccess(t, "repo", "disconnect")
+
+	e.runAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.repoDir)
+
+	lines := e.runAndExpectSuccess(t, "manifest", "ls")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line global policy output for manifest ls")
+	}
+	line := lines[0]
+	fields := strings.Fields(line)
+	manifestID := fields[0]
+	typeField := fields[5]
+	typeVal := strings.TrimPrefix(typeField, "type:")
+	if typeVal != "policy" {
+		t.Fatalf("Expected global policy manifest on a fresh repo")
+	}
+
+	e.runAndExpectFailure(t, "snapshot", "delete", manifestID, "--unsafe-ignore-source")
+}
+
 func TestSnapshotDeleteRestore(t *testing.T) {
 	e := newTestEnv(t)
 	defer e.cleanup(t)

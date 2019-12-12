@@ -27,7 +27,7 @@ func runDeleteCommand(ctx context.Context, rep *repo.Repository) error {
 	}
 	labels := manifestMeta.Labels
 	if labels["type"] != "snapshot" {
-		return errors.New("snapshot ID provided did not reference a snapshot")
+		return errors.Errorf("snapshot ID provided (%v) did not reference a snapshot", manifestID)
 	}
 	if !*snapshotDeleteIgnoreSource {
 		if labels["hostname"] != getHostName() {
