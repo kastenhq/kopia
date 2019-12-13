@@ -759,18 +759,3 @@ func assertNoError(t *testing.T, err error) {
 		t.Errorf("err: %v", err)
 	}
 }
-
-func getLastSnapshotRootID(t *testing.T, listOutput []string) string {
-	t.Helper()
-
-	if len(listOutput) == 0 {
-		t.Fatal("Expected non-empty snapshot list")
-	}
-
-	f := strings.Fields(listOutput[len(listOutput)-1])
-	if len(f) < 4 {
-		t.Fatal("Could not parse snapshot list output: ", listOutput)
-	}
-
-	return f[3]
-}
