@@ -376,9 +376,11 @@ func TestRestoreCommand(t *testing.T) {
 	if got, want := len(si), 1; got != want {
 		t.Fatalf("got %v sources, wanted %v", got, want)
 	}
+
 	if got, want := len(si[0].snapshots), 1; got != want {
 		t.Fatalf("got %v snapshots, wanted %v", got, want)
 	}
+
 	snapID := si[0].snapshots[0].snapshotID
 	rootID := si[0].snapshots[0].objectID
 
@@ -450,9 +452,11 @@ func TestSnapshotRestore(t *testing.T) {
 	if got, want := len(si), 1; got != want {
 		t.Fatalf("got %v sources, wanted %v", got, want)
 	}
+
 	if got, want := len(si[0].snapshots), 1; got != want {
 		t.Fatalf("got %v snapshots, wanted %v", got, want)
 	}
+
 	snapID := si[0].snapshots[0].snapshotID
 	rootID := si[0].snapshots[0].objectID
 

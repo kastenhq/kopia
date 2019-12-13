@@ -3,12 +3,13 @@ package snapshotfs
 import (
 	"context"
 
+	"github.com/pkg/errors"
+
 	"github.com/kopia/kopia/fs/localfs"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot"
-	"github.com/pkg/errors"
 )
 
 // Restore walks a snapshot root with given snapshot ID and restores it to the local filesystem
@@ -21,10 +22,12 @@ func Restore(ctx context.Context, rep *repo.Repository, targetPath string, snapI
 	if m.RootEntry == nil {
 		return errors.Errorf("No root entry found in manifest (%v)", snapID)
 	}
+
 	rootEntry, err := SnapshotRoot(rep, m)
 	if err != nil {
 		return err
 	}
+
 	return localfs.Copy(ctx, targetPath, rootEntry)
 }
 
