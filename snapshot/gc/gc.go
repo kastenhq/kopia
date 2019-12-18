@@ -80,12 +80,15 @@ func Run(ctx context.Context, rep *repo.DirectRepository, minContentAge time.Dur
 
 	var st Stats
 
+	start := time.Now() // allow:no-inject-time
+
 	if err := findInUseContentIDs(ctx, rep, &used); err != nil {
 		return st, errors.Wrap(err, "unable to find in-use content ID")
 	}
 
 	var unused, inUse, system, tooRecent stats.CountSum
 
+	log(ctx).Infof("found in-use content in %s", time.Since(start)) // allow:no-inject-time
 	log(ctx).Infof("looking for unreferenced contents")
 
 	err := rep.Content.IterateContents(ctx, content.IterateOptions{}, func(ci content.Info) error {
