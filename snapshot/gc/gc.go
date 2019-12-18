@@ -4,7 +4,6 @@ package gc
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -75,19 +74,22 @@ func findInUseContentIDs(ctx context.Context, rep *repo.Repository, used *sync.M
 
 // Run performs garbage collection on all the snapshots in the repository.
 // nolint:gocognit
-func Run(ctx context.Context, rep *repo.Repository, minContentAge time.Duration, gcDelete bool) error {
+func Run(ctx context.Context, rep *repo.Repository, minContentAge time.Duration, gcDelete bool) (*Stats, error) {
+	start := time.Now()
+
+	st := &Stats{}
+
 	var used sync.Map
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	if err := findInUseContentIDs(ctx, rep, &used); err != nil {
-		return errors.Wrap(err, "unable to find in-use content ID")
+		return st, errors.Wrap(err, "unable to find in-use content ID")
 	}
 
-	var unusedCount, inUseCount, systemCount, tooRecentCount int32
-
-	var totalUnusedBytes, totalInUseBytes, totalSystemBytes, totalTooRecentBytes int64
+	finishFindUsed := time.Now()
+	st.FindInUseDuration = finishFindUsed.Sub(start)
 
 	log.Info("looking for unreferenced contents")
 
@@ -97,21 +99,18 @@ func Run(ctx context.Context, rep *repo.Repository, minContentAge time.Duration,
 		}
 
 		if manifest.ContentPrefix == ci.ID.Prefix() {
-			atomic.AddInt32(&systemCount, 1)
-			atomic.AddInt64(&totalSystemBytes, int64(ci.Length))
+			st.System().Add(ci.Length)
 			return nil
 		}
 
 		if _, ok := used.Load(ci.ID); !ok {
 			if time.Since(ci.Timestamp()) < minContentAge {
 				log.Debugf("recent unreferenced content %v (%v bytes, modified %v)", ci.ID, ci.Length, ci.Timestamp())
-				atomic.AddInt32(&tooRecentCount, 1)
-				atomic.AddInt64(&totalTooRecentBytes, int64(ci.Length))
+				st.TooRecent().Add(ci.Length)
 				return nil
 			}
 			log.Debugf("unreferenced %v (%v bytes, modified %v)", ci.ID, ci.Length, ci.Timestamp())
-			cnt := atomic.AddInt32(&unusedCount, 1)
-			totalSize := atomic.AddInt64(&totalUnusedBytes, int64(ci.Length))
+			cnt, totalSize := st.Unused().Add(ci.Length)
 			if gcDelete {
 				if err := rep.Content.DeleteContent(ci.ID); err != nil {
 					return errors.Wrap(err, "error deleting content")
@@ -127,22 +126,18 @@ func Run(ctx context.Context, rep *repo.Repository, minContentAge time.Duration,
 				}
 			}
 		} else {
-			atomic.AddInt32(&inUseCount, 1)
-			atomic.AddInt64(&totalInUseBytes, int64(ci.Length))
+			st.InUse().Add(ci.Length)
 		}
 		return nil
 	}); err != nil {
-		return errors.Wrap(err, "error iterating contents")
+		return st, errors.Wrap(err, "error iterating contents")
 	}
 
-	log.Infof("found %v unused contents (%v bytes)", unusedCount, units.BytesStringBase2(totalUnusedBytes))
-	log.Infof("found %v unused contents that are too recent to delete (%v bytes)", tooRecentCount, units.BytesStringBase2(totalTooRecentBytes))
-	log.Infof("found %v in-use contents (%v bytes)", inUseCount, units.BytesStringBase2(totalInUseBytes))
-	log.Infof("found %v in-use system-contents (%v bytes)", systemCount, units.BytesStringBase2(totalSystemBytes))
+	st.FindUnusedDuration = time.Since(finishFindUsed)
 
-	if unusedCount > 0 && !gcDelete {
-		return errors.Errorf("not deleting because '--delete' flag was not set")
+	if count, _ := st.Unused().Approximate(); count > 0 && !gcDelete {
+		return st, errors.Errorf("not deleting because '--delete' flag was not set")
 	}
 
-	return nil
+	return st, nil
 }
