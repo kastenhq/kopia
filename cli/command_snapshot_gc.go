@@ -14,7 +14,16 @@ var (
 )
 
 func runSnapshotGCCommand(ctx context.Context, rep *repo.Repository) error {
-	return gc.Run(ctx, rep, *snapshotGCMinContentAge, *snapshotGCDelete)
+	stats, err := gc.Run(ctx, rep, *snapshotGCMinContentAge, *snapshotGCDelete)
+
+	log.Info("GC unused contents: ", stats.Unused.String())
+	log.Info("GC unused contents that are too recent to delete: ", stats.TooRecent.String())
+	log.Info("GC in-use contents: ", stats.InUse.String())
+	log.Info("GC in-use system-contents: ", stats.System.String())
+	log.Info("GC find in-use content duration: ", stats.FindInUseDuration)
+	log.Info("GC mark-delete content duration: ", stats.FindUnusedDuration)
+
+	return err
 }
 
 func init() {
