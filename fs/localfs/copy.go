@@ -161,6 +161,8 @@ func (c *copier) copyFileContent(ctx context.Context, targetPath string, f fs.Fi
 	}
 	defer r.Close() //nolint:errcheck
 
+	log.Debug("copying file contents to:", targetPath)
+
 	return atomic.WriteFile(targetPath, r)
 }
 
