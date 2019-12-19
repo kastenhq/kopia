@@ -19,7 +19,7 @@ func init() {
 }
 
 func runSnapRestoreCommand(ctx context.Context, rep *repo.Repository) error {
-	return snapshotfs.Restore(ctx, rep, *snapshotRestoreTargetPath, manifest.ID(*snapshotRestoreSnapID))
+	return snapshotfs.Restore(ctx, rep, *snapshotRestoreTargetPath, manifest.ID(*snapshotRestoreSnapID), restoreOptions())
 }
 
 func init() {
