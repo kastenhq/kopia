@@ -16,7 +16,7 @@ import (
 type CopyOptions struct {
 	// If a directory already exists, overwrite the directory.
 	OverwriteDirectories bool
-	// Indicatew whether or not to overwrite existing files. When set to false,
+	// Indicate whether or not to overwrite existing files. When set to false,
 	// the copier does not modify already existing files and returns an error
 	// instead.
 	OverwriteFiles bool
@@ -136,7 +136,7 @@ func (c *copier) createDirectory(path string) error {
 				return errors.Errorf("non-empty directory already exists, not overwriting it: %q", path)
 			}
 		}
-		log.Debug("Not creating already existing directory:", path)
+		log.Debug("Not creating already existing directory: ", path)
 		return nil
 	default:
 		return errors.Errorf("unable to create directory, %q already exists and it is not a directory", path)
@@ -150,7 +150,7 @@ func (c *copier) copyFileContent(ctx context.Context, targetPath string, f fs.Fi
 		if !c.OverwriteFiles {
 			return errors.Errorf("unable to create %q, it already exists", targetPath)
 		}
-		log.Debug("Overwriting existing file:", targetPath)
+		log.Debug("Overwriting existing file: ", targetPath)
 	default:
 		return errors.Wrap(err, "failed to stat "+targetPath)
 	}
@@ -161,7 +161,7 @@ func (c *copier) copyFileContent(ctx context.Context, targetPath string, f fs.Fi
 	}
 	defer r.Close() //nolint:errcheck
 
-	log.Debug("copying file contents to:", targetPath)
+	log.Debug("copying file contents to: ", targetPath)
 
 	return atomic.WriteFile(targetPath, r)
 }
