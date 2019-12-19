@@ -14,14 +14,11 @@ var (
 	snapshotRestoreTargetPath = snapshotRestoreCommand.Arg("target-path", "Path of the directory for the contents to be restored").Required().String()
 )
 
-func init() {
-	addRestoreFlags(snapshotRestoreCommand)
-}
-
 func runSnapRestoreCommand(ctx context.Context, rep *repo.Repository) error {
 	return snapshotfs.Restore(ctx, rep, *snapshotRestoreTargetPath, manifest.ID(*snapshotRestoreSnapID), restoreOptions())
 }
 
 func init() {
+	addRestoreFlags(snapshotRestoreCommand)
 	snapshotRestoreCommand.Action(repositoryAction(runSnapRestoreCommand))
 }

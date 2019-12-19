@@ -47,10 +47,6 @@ var (
 	restoreOverwriteFiles       = true
 )
 
-func init() {
-	addRestoreFlags(restoreCommand)
-}
-
 func addRestoreFlags(cmd *kingpin.CmdClause) {
 	cmd.Flag("overwrite-directories", "Overwrite existing directories").BoolVar(&restoreOverwriteDirectories)
 	cmd.Flag("overwrite-files", "Specifies whether or not to overwrite already existing files").
@@ -74,5 +70,6 @@ func runRestoreCommand(ctx context.Context, rep *repo.Repository) error {
 }
 
 func init() {
+	addRestoreFlags(restoreCommand)
 	restoreCommand.Action(repositoryAction(runRestoreCommand))
 }
