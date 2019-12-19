@@ -1,6 +1,7 @@
 package content
 
 import (
+	"sort"
 	"time"
 
 	"github.com/kopia/kopia/repo/blob"
@@ -21,6 +22,11 @@ func (i ID) Prefix() ID {
 // HasPrefix determines if the given ID has a non-empty prefix.
 func (i ID) HasPrefix() bool {
 	return len(i)%2 == 1
+}
+
+// SortIDs sorts ids in place
+func SortIDs(ids []ID) {
+	sort.Slice(ids, func(i int, j int) bool { return ids[i] < ids[j] })
 }
 
 // Info is an information about a single piece of content managed by Manager.
