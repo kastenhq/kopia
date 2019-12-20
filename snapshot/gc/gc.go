@@ -10,7 +10,6 @@ import (
 
 	"github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/internal/kopialogging"
-	"github.com/kopia/kopia/internal/units"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/manifest"
@@ -25,12 +24,7 @@ func oidOf(entry fs.Entry) object.ID {
 	return entry.(object.HasObjectID).ObjectID()
 }
 
-func findInUseContentIDs(ctx context.Context, rep *repo.Repository, used *sync.Map) error {
-	ids, err := snapshot.ListSnapshotManifests(ctx, rep, nil)
-	if err != nil {
-		return errors.Wrap(err, "unable to list snapshot manifest IDs")
-	}
-
+func findInUseContentIDs(ctx context.Context, rep *repo.Repository, ids []manifest.ID, used *sync.Map) error {
 	manifests, err := snapshot.LoadSnapshots(ctx, rep, ids)
 	if err != nil {
 		return errors.Wrap(err, "unable to load manifest IDs")
@@ -73,71 +67,138 @@ func findInUseContentIDs(ctx context.Context, rep *repo.Repository, used *sync.M
 }
 
 // Run performs garbage collection on all the snapshots in the repository.
-// nolint:gocognit
 func Run(ctx context.Context, rep *repo.Repository, minContentAge time.Duration, gcDelete bool) (*Stats, error) {
-	start := time.Now()
-
-	st := &Stats{}
-
-	var used sync.Map
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	if err := findInUseContentIDs(ctx, rep, &used); err != nil {
-		return st, errors.Wrap(err, "unable to find in-use content ID")
+	snapIDs, err := snapshot.ListSnapshotManifests(ctx, rep, nil)
+	if err != nil {
+		return &Stats{}, errors.Wrap(err, "unable to list snapshot manifest IDs")
 	}
 
-	finishFindUsed := time.Now()
-	st.FindInUseDuration = finishFindUsed.Sub(start)
-
-	log.Info("looking for unreferenced contents")
-
-	if err := rep.Content.IterateContents(content.IterateOptions{}, func(ci content.Info) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		if manifest.ContentPrefix == ci.ID.Prefix() {
-			st.System().Add(ci.Length)
-			return nil
-		}
-
-		if _, ok := used.Load(ci.ID); !ok {
-			if time.Since(ci.Timestamp()) < minContentAge {
-				log.Debugf("recent unreferenced content %v (%v bytes, modified %v)", ci.ID, ci.Length, ci.Timestamp())
-				st.TooRecent().Add(ci.Length)
-				return nil
-			}
-			log.Debugf("unreferenced %v (%v bytes, modified %v)", ci.ID, ci.Length, ci.Timestamp())
-			cnt, totalSize := st.Unused().Add(ci.Length)
-			if gcDelete {
-				if err := rep.Content.DeleteContent(ci.ID); err != nil {
-					return errors.Wrap(err, "error deleting content")
-				}
-			}
-
-			if cnt%100000 == 0 {
-				log.Infof("... found %v unused contents so far (%v bytes)", cnt, units.BytesStringBase2(totalSize))
-				if gcDelete {
-					if err := rep.Flush(ctx); err != nil {
-						return errors.Wrap(err, "flush error")
-					}
-				}
-			}
-		} else {
-			st.InUse().Add(ci.Length)
-		}
-		return nil
-	}); err != nil {
-		return st, errors.Wrap(err, "error iterating contents")
+	st, err := markUnusedContent(ctx, rep, snapIDs, minContentAge, gcDelete)
+	if err != nil {
+		return st, err
 	}
-
-	st.FindUnusedDuration = time.Since(finishFindUsed)
 
 	if count, _ := st.Unused().Approximate(); count > 0 && !gcDelete {
 		return st, errors.Errorf("not deleting because '--delete' flag was not set")
 	}
 
 	return st, nil
+}
+
+func markUnusedContent(ctx context.Context, rep *repo.Repository, snapIDs []manifest.ID, minContentAge time.Duration, gcDelete bool) (*Stats, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	st := &Stats{}
+
+	var used sync.Map
+
+	start := time.Now()
+
+	if err := findInUseContentIDs(ctx, rep, snapIDs, &used); err != nil {
+		return st, errors.Wrap(err, "unable to find in-use content ID")
+	}
+
+	finishFindUsed := time.Now()
+	st.FindInUseDuration = finishFindUsed.Sub(start)
+
+	defer func() { // update stats with find unused duration before returning
+		st.FindUnusedDuration = time.Since(finishFindUsed)
+	}()
+
+	log.Info("looking for unreferenced contents")
+
+	const toDeleteBufferLength = 10
+
+	toDelete := make(chan content.ID, toDeleteBufferLength)
+	errCh := make(chan error)
+
+	go func() {
+		defer close(errCh)
+		defer close(toDelete)
+
+		if err := rep.Content.IterateContents(content.IterateOptions{}, func(ci content.Info) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			if pr := ci.ID.Prefix(); manifest.ContentPrefix == pr || ContentPrefix == pr {
+				st.System().Add(ci.Length)
+				return nil
+			}
+
+			if _, ok := used.Load(ci.ID); ok {
+				st.InUse().Add(ci.Length)
+				return nil
+			}
+
+			if time.Since(ci.Timestamp()) < minContentAge {
+				log.Debugf("recent unreferenced content %v (%v bytes, modified %v)", ci.ID, ci.Length, ci.Timestamp())
+				st.TooRecent().Add(ci.Length)
+				return nil
+			}
+
+			log.Debugf("unreferenced %v (%v bytes, modified %v)", ci.ID, ci.Length, ci.Timestamp())
+			st.Unused().Add(ci.Length)
+
+			if gcDelete {
+				select {
+				case toDelete <- ci.ID:
+				case <-ctx.Done():
+					return errors.Wrap(ctx.Err(), "canceled while buffering deleted content")
+				}
+			}
+
+			return nil
+		}); err != nil {
+			errCh <- errors.Wrap(err, "error iterating contents")
+
+			cancel()
+		}
+	}()
+
+	const batchSize = 10000
+	if err := deleteUnused(ctx, rep, snapIDs, toDelete, batchSize); err != nil {
+		return st, err
+	}
+
+	if err := <-errCh; err != nil {
+		return st, err
+	}
+
+	return st, nil
+}
+
+func deleteUnused(ctx context.Context, rep *repo.Repository, snaps []manifest.ID, toDelete <-chan content.ID, batchSize int) error {
+	var cnt int
+
+	ids := make([]content.ID, 0, batchSize)
+
+	for id := range toDelete {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		ids = append(ids, id)
+		if len(ids) == batchSize {
+			if err := markContentsDeleted(ctx, rep, snaps, ids); err != nil {
+				return err
+			}
+
+			cnt += len(ids)
+			ids = ids[:0]
+
+			log.Info("... unused contents found so far: ", cnt)
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if len(ids) == 0 {
+		return nil
+	}
+
+	return markContentsDeleted(ctx, rep, snaps, ids)
 }
