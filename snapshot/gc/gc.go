@@ -77,6 +77,10 @@ func findInUseContentIDs(ctx context.Context, rep *repo.Repository, used *sync.M
 // nolint:gocognit
 func Run(ctx context.Context, rep *repo.Repository, minContentAge time.Duration, gcDelete bool) error {
 	var used sync.Map
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	if err := findInUseContentIDs(ctx, rep, &used); err != nil {
 		return errors.Wrap(err, "unable to find in-use content ID")
 	}
@@ -88,6 +92,10 @@ func Run(ctx context.Context, rep *repo.Repository, minContentAge time.Duration,
 	log.Info("looking for unreferenced contents")
 
 	if err := rep.Content.IterateContents(content.IterateOptions{}, func(ci content.Info) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		if manifest.ContentPrefix == ci.ID.Prefix() {
 			atomic.AddInt32(&systemCount, 1)
 			atomic.AddInt64(&totalSystemBytes, int64(ci.Length))
