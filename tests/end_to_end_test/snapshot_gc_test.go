@@ -66,6 +66,8 @@ how are you
 	e.RunAndExpectSuccess(t, "snapshot", "gc", "--delete", "--min-age", "0s")
 
 	// two contents are deleted
-	expectedContentCount -= 2
+	// the gc-mark phase should produce 2 new contents: one for the gc-mark
+	// details and one for the gc manifest, so the net number of expected
+	// contents should stay the same.
 	e.RunAndVerifyOutputLineCount(t, expectedContentCount, "content", "list")
 }
