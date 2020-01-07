@@ -103,24 +103,18 @@ func (e Entries) Update(newEntry Entry) Entries {
 		return e[i].Name() >= name
 	})
 
-	// append at the end
-	if pos >= len(e) {
-		return append(append(Entries(nil), e...), newEntry)
+	insert := 1 // insert
+	if pos < len(e) && e[pos].Name() == name {
+		insert = 0 // replace
 	}
 
-	if e[pos].Name() == name {
-		if pos > 0 {
-			return append(append(append(Entries(nil), e[0:pos]...), newEntry), e[pos+1:]...)
-		}
+	es := make(Entries, len(e)+insert)
 
-		return append(append(Entries(nil), newEntry), e[pos+1:]...)
-	}
+	copy(es[0:pos], e[0:pos])
+	es[pos] = newEntry
+	copy(es[pos+1:], e[pos+1-insert:])
 
-	if pos > 0 {
-		return append(append(append(Entries(nil), e[0:pos]...), newEntry), e[pos:]...)
-	}
-
-	return append(append(Entries(nil), newEntry), e[pos:]...)
+	return es
 }
 
 // Remove returns a copy of Entries with the provided entry removed, while maintaining sorted order.
@@ -130,19 +124,16 @@ func (e Entries) Remove(name string) Entries {
 	})
 
 	// not found
-	if pos >= len(e) {
+	if pos >= len(e) || e[pos].Name() != name {
 		return e
 	}
 
-	if e[pos].Name() != name {
-		return e
-	}
+	es := make(Entries, len(e)-1)
 
-	if pos > 0 {
-		return append(append(Entries(nil), e[0:pos]...), e[pos+1:]...)
-	}
+	copy(es[0:pos], e[0:pos])
+	copy(es[pos:], e[pos+1:])
 
-	return append(Entries(nil), e[pos+1:]...)
+	return es
 }
 
 // Sort sorts the entries by name.
