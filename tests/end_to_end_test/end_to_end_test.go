@@ -561,6 +561,10 @@ func TestSnapshotDeleteRestore(t *testing.T) {
 	e.runAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.repoDir)
 
 	source := filepath.Join(e.dataDir, "source")
+
+	// Test snapshot of nonexistent directory fails
+	e.runAndExpectFailure(t, "snapshot", "create", source)
+
 	createDirectory(t, source, 1)
 
 	// Create snapshot
