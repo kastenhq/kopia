@@ -920,6 +920,7 @@ func (e *testenv) run(t *testing.T, args ...string) ([]string, error) {
 	if code != 0 && err == nil {
 		t.Fatalf("kopia exited with code %d but no error status", code)
 	}
+
 	if code == 0 && err != nil {
 		t.Fatalf("kopia exited with an error %s but zero exit code", err)
 	}
