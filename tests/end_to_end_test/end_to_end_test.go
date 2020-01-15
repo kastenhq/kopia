@@ -1119,6 +1119,7 @@ func createSimpleDirStructure(t *testing.T, dirname string, depth int) {
 		subdirName := fmt.Sprintf("subdir")
 		createSimpleDirStructure(t, filepath.Join(dirname, subdirName), depth-1)
 	}
+
 	fileName := "file"
 	createRandomFile(t, filepath.Join(dirname, fileName))
 }
