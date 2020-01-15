@@ -223,7 +223,7 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 
 	sort.Sort(sortedEntries(entries))
 
-	// return any error encountered when listing the directory
+	// return any error encountered when listing or reading the directory
 	return entries, readDirErr
 }
 
