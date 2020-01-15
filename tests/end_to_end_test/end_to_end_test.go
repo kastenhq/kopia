@@ -571,6 +571,7 @@ func TestSnapshotFail(t *testing.T) {
 
 	// Create snapshot
 	e.runAndExpectSuccess(t, "snapshot", "create", source)
+
 	numSuccessfulSnapshots := 1
 
 	// Test the root dir permissions
@@ -578,6 +579,7 @@ func TestSnapshotFail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	parentDir := filepath.Dir(source)
 	numSuccessfulSnapshots += e.testPermissions(t, source, parentDir, []os.FileInfo{fi})
 
@@ -590,10 +592,12 @@ func TestSnapshotFail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	for _, fi := range fileInfoList {
 		if fi.IsDir() {
 			parentDir := filepath.Join(source, fi.Name())
 			numSuccessfulSnapshots += e.testPermissionsInDir(t, source, parentDir)
+
 			continue
 		}
 	}
@@ -607,7 +611,6 @@ func TestSnapshotFail(t *testing.T) {
 	if got, want := len(si[0].snapshots), numSuccessfulSnapshots; got != want {
 		t.Fatalf("got %v snapshots, wanted %v", got, want)
 	}
-
 }
 
 func (e *testenv) testPermissionsInDir(t *testing.T, source, dirName string) int {
@@ -615,6 +618,7 @@ func (e *testenv) testPermissionsInDir(t *testing.T, source, dirName string) int
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return e.testPermissions(t, source, dirName, fileInfoList)
 }
 
@@ -630,11 +634,12 @@ const (
 // against "source", assumes the os.FileInfo list passed is located in "parentDir",
 // and will only perform the test procdure on a single file and directory within
 // the passed file list. It returns the number of successful snapshot operations.
-func (e *testenv) testPermissions(t *testing.T, source string, parentDir string, fileList []os.FileInfo) int {
+func (e *testenv) testPermissions(t *testing.T, source, parentDir string, fileList []os.FileInfo) int {
 	t.Helper()
 
 	var testedFile, testedDir bool
 	var numSuccessfulSnapshots int
+
 	for _, changeFile := range fileList {
 		if changeFile.IsDir() {
 			if testedDir {
@@ -651,6 +656,7 @@ func (e *testenv) testPermissions(t *testing.T, source string, parentDir string,
 			fp := filepath.Join(parentDir, name)
 			chmod := os.FileMode(i << userPermOffset)
 			t.Logf("Chmod: name: %s, isDir: %v, prevMode: %v, newMode: %v", name, changeFile.IsDir(), mode, chmod)
+
 			err := os.Chmod(fp, chmod)
 			if err != nil {
 				t.Fatal(err)
@@ -686,7 +692,7 @@ func (e *testenv) testPermissions(t *testing.T, source string, parentDir string,
 func permIncludesReadAndExecute(perm uint32) bool {
 	readAndExec := uint32(1<<readOffset | 1<<execOffset)
 	// perm & 101 == 101 (both bits are set)
-	return uint32(perm)&readAndExec == readAndExec
+	return perm&readAndExec == readAndExec
 }
 
 func TestSnapshotDeleteRestore(t *testing.T) {

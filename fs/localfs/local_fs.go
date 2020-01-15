@@ -210,14 +210,17 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 
 	// drain the entriesCh into a slice and sort it
 	var entries fs.Entries
+
 	for e := range entriesCh {
 		if e.err != nil {
 			// only return the first error
 			if readDirErr == nil {
 				readDirErr = e.err
 			}
+
 			continue
 		}
+
 		entries = append(entries, e.entry)
 	}
 
