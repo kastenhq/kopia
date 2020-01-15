@@ -625,6 +625,11 @@ const (
 	userPermOffset = 6
 )
 
+// testPermissions iterates over all possible user permission states, testing
+// a file and a directory (if present). It issues the kopia snapshot command
+// against "source", assumes the os.FileInfo list passed is located in "parentDir",
+// and will only perform the test procdure on a single file and directory within
+// the passed file list. It returns the number of successful snapshot operations.
 func (e *testenv) testPermissions(t *testing.T, source string, parentDir string, fileList []os.FileInfo) int {
 	t.Helper()
 
