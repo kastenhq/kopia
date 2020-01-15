@@ -638,9 +638,11 @@ func (e *testenv) testPermissions(t *testing.T, source, parentDir string, fileLi
 	t.Helper()
 
 	var testedFile, testedDir bool
+
 	var numSuccessfulSnapshots int
 
 	for _, changeFile := range fileList {
+
 		if changeFile.IsDir() {
 			if testedDir {
 				continue

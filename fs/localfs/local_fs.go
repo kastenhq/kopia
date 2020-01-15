@@ -140,12 +140,7 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 
 	var readDirErr error
 
-	var namesWG sync.WaitGroup
-
-	namesWG.Add(1)
-
 	go func() {
-		defer namesWG.Done()
 		defer close(namesCh)
 
 		for {
@@ -188,6 +183,7 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 						continue
 					}
 					entriesCh <- &entryWithError{err: errors.Errorf("unable to process directory entry %q: %v", n, staterr)}
+
 					continue
 				}
 
