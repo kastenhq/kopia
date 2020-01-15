@@ -121,6 +121,11 @@ func (fsd *filesystemDirectory) Child(ctx context.Context, name string) (fs.Entr
 	return entryFromChildFileInfo(st, fullPath)
 }
 
+type entryWithError struct {
+	entry fs.Entry
+	err   error
+}
+
 func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error) {
 	fullPath := fsd.fullPath()
 
@@ -133,7 +138,7 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 	// start feeding directory entry names to namesCh
 	namesCh := make(chan string, dirListingPrefetch)
 
-	var namesErr error
+	var readDirErr error
 
 	var namesWG sync.WaitGroup
 
@@ -157,13 +162,13 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 				break
 			}
 
-			namesErr = err
+			readDirErr = err
 
 			break
 		}
 	}()
 
-	entriesCh := make(chan fs.Entry, dirListingPrefetch)
+	entriesCh := make(chan *entryWithError, dirListingPrefetch)
 
 	var workersWG sync.WaitGroup
 
@@ -177,8 +182,12 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 
 			for n := range namesCh {
 				fi, staterr := os.Lstat(fullPath + "/" + n)
-				if os.IsNotExist(staterr) {
-					// lost the race - ignore.
+				if staterr != nil {
+					if os.IsNotExist(staterr) {
+						// lost the race - ignore.
+						continue
+					}
+					entriesCh <- &entryWithError{err: errors.Errorf("unable to process directory entry %q: %v", n, staterr)}
 					continue
 				}
 
@@ -188,7 +197,7 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 					continue
 				}
 
-				entriesCh <- e
+				entriesCh <- &entryWithError{entry: e}
 			}
 		}()
 	}
@@ -202,13 +211,20 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 	// drain the entriesCh into a slice and sort it
 	var entries fs.Entries
 	for e := range entriesCh {
-		entries = append(entries, e)
+		if e.err != nil {
+			// only return the first error
+			if readDirErr == nil {
+				readDirErr = e.err
+			}
+			continue
+		}
+		entries = append(entries, e.entry)
 	}
 
 	sort.Sort(sortedEntries(entries))
 
 	// return any error encountered when listing the directory
-	return entries, namesErr
+	return entries, readDirErr
 }
 
 type fileWithMetadata struct {

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -553,6 +554,136 @@ func TestSnapshotDeleteTypeCheck(t *testing.T) {
 	e.runAndExpectFailure(t, "snapshot", "delete", manifestID, "--unsafe-ignore-source")
 }
 
+func TestSnapshotFail(t *testing.T) {
+	e := newTestEnv(t)
+	defer e.cleanup(t)
+	defer e.runAndExpectSuccess(t, "repo", "disconnect")
+
+	e.runAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.repoDir)
+	e.runAndExpectSuccess(t, "policy", "set", "--global", "--keep-latest", strconv.Itoa(1<<31-1))
+	source := filepath.Join(e.dataDir, "source")
+
+	// Test snapshot of nonexistent directory fails
+	e.runAndExpectFailure(t, "snapshot", "create", source)
+
+	testDirDepth := 2
+	createDirectory(t, source, testDirDepth)
+
+	// Create snapshot
+	e.runAndExpectSuccess(t, "snapshot", "create", source)
+	numSuccessfulSnapshots := 1
+
+	// Test the root dir permissions
+	fi, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentDir := filepath.Dir(source)
+	numSuccessfulSnapshots += e.testPermissions(t, source, parentDir, []os.FileInfo{fi})
+
+	// Test permissions of entries inside root dir
+	numSuccessfulSnapshots += e.testPermissionsInDir(t, source, source)
+
+	// Test permissions within a subdir under root
+	// Find a subdirectory
+	fileInfoList, err := ioutil.ReadDir(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fi := range fileInfoList {
+		if fi.IsDir() {
+			parentDir := filepath.Join(source, fi.Name())
+			numSuccessfulSnapshots += e.testPermissionsInDir(t, source, parentDir)
+			continue
+		}
+	}
+
+	// obtain snapshot root id and use it for restore
+	si := listSnapshotsAndExpectSuccess(t, e, source)
+	if got, want := len(si), 1; got != want {
+		t.Fatalf("got %v sources, wanted %v", got, want)
+	}
+
+	if got, want := len(si[0].snapshots), numSuccessfulSnapshots; got != want {
+		t.Fatalf("got %v snapshots, wanted %v", got, want)
+	}
+
+}
+
+func (e *testenv) testPermissionsInDir(t *testing.T, source, dirName string) int {
+	fileInfoList, err := ioutil.ReadDir(dirName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e.testPermissions(t, source, dirName, fileInfoList)
+}
+
+// Perm constants
+const (
+	execOffset     = 0
+	readOffset     = 2
+	userPermOffset = 6
+)
+
+func (e *testenv) testPermissions(t *testing.T, source string, parentDir string, fileList []os.FileInfo) int {
+	t.Helper()
+
+	var testedFile, testedDir bool
+	var numSuccessfulSnapshots int
+	for _, changeFile := range fileList {
+		if changeFile.IsDir() {
+			if testedDir {
+				continue
+			}
+		} else if testedFile {
+			continue
+		}
+
+		// Iterate over all permission bit configurations
+		for i := uint32(0); i <= uint32(7); i++ {
+			name := changeFile.Name()
+			mode := changeFile.Mode()
+			fp := filepath.Join(parentDir, name)
+			chmod := os.FileMode(i << userPermOffset)
+			t.Logf("Chmod: name: %s, isDir: %v, prevMode: %v, newMode: %v", name, changeFile.IsDir(), mode, chmod)
+			err := os.Chmod(fp, chmod)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Directory will fail if it cannot be both read and executed
+			if changeFile.IsDir() && !permIncludesReadAndExecute(i) {
+				t.Log("expecting failure")
+				e.runAndExpectFailure(t, "snapshot", "create", source)
+			} else {
+				t.Log("expecting success")
+				// Currently by default, the uploader has IgnoreFileErrors set to true.
+				// Expect warning and successful snapshot creation
+				e.runAndExpectSuccess(t, "snapshot", "create", source)
+				numSuccessfulSnapshots++
+			}
+
+			// Change permissions back and expect success
+			os.Chmod(fp, mode.Perm())
+			e.runAndExpectSuccess(t, "snapshot", "create", source)
+			numSuccessfulSnapshots++
+		}
+		if changeFile.IsDir() {
+			testedDir = true
+		} else {
+			testedFile = true
+		}
+	}
+
+	return numSuccessfulSnapshots
+}
+
+func permIncludesReadAndExecute(perm uint32) bool {
+	readAndExec := uint32(1<<readOffset | 1<<execOffset)
+	// perm & 101 == 101 (both bits are set)
+	return uint32(perm)&readAndExec == readAndExec
+}
+
 func TestSnapshotDeleteRestore(t *testing.T) {
 	e := newTestEnv(t)
 	defer e.cleanup(t)
@@ -561,9 +692,6 @@ func TestSnapshotDeleteRestore(t *testing.T) {
 	e.runAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.repoDir)
 
 	source := filepath.Join(e.dataDir, "source")
-
-	// Test snapshot of nonexistent directory fails
-	e.runAndExpectFailure(t, "snapshot", "create", source)
 
 	createDirectory(t, source, 1)
 
