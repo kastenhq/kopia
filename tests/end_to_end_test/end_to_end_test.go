@@ -642,7 +642,6 @@ func (e *testenv) testPermissions(t *testing.T, source, parentDir string, fileLi
 	var numSuccessfulSnapshots int
 
 	for _, changeFile := range fileList {
-
 		if changeFile.IsDir() {
 			if testedDir {
 				continue
@@ -681,6 +680,7 @@ func (e *testenv) testPermissions(t *testing.T, source, parentDir string, fileLi
 			e.runAndExpectSuccess(t, "snapshot", "create", source)
 			numSuccessfulSnapshots++
 		}
+
 		if changeFile.IsDir() {
 			testedDir = true
 		} else {
