@@ -567,7 +567,7 @@ func TestSnapshotFail(t *testing.T) {
 	e.runAndExpectFailure(t, "snapshot", "create", source)
 
 	testDirDepth := 2
-	createDirectory(t, source, testDirDepth)
+	createSimpleDirStructure(t, source, testDirDepth)
 
 	// Create snapshot
 	e.runAndExpectSuccess(t, "snapshot", "create", source)
@@ -598,7 +598,7 @@ func TestSnapshotFail(t *testing.T) {
 			parentDir := filepath.Join(source, fi.Name())
 			numSuccessfulSnapshots += e.testPermissionsInDir(t, source, parentDir)
 
-			continue
+			break
 		}
 	}
 
@@ -1107,6 +1107,20 @@ func mustParseDirectoryEntries(lines []string) []dirEntry {
 	}
 
 	return result
+}
+
+// createSimpleDirStructure
+func createSimpleDirStructure(t *testing.T, dirname string, depth int) {
+	if err := os.MkdirAll(dirname, 0700); err != nil {
+		t.Fatalf("unable to create directory %v: %v", dirname, err)
+	}
+
+	if depth > 0 {
+		subdirName := fmt.Sprintf("subdir")
+		createSimpleDirStructure(t, filepath.Join(dirname, subdirName), depth-1)
+	}
+	fileName := "file"
+	createRandomFile(t, filepath.Join(dirname, fileName))
 }
 
 func createDirectory(t *testing.T, dirname string, depth int) {
