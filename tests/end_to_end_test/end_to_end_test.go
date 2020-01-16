@@ -576,9 +576,7 @@ func TestSnapshotFail(t *testing.T) {
 
 	// Test the root dir permissions
 	fi, err := os.Stat(source)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assertNoError(t, err)
 
 	parentDir := filepath.Dir(source)
 	numSuccessfulSnapshots += e.testPermissions(t, source, parentDir, []os.FileInfo{fi})
@@ -589,9 +587,7 @@ func TestSnapshotFail(t *testing.T) {
 	// Test permissions within a subdir under root
 	// Find a subdirectory
 	fileInfoList, err := ioutil.ReadDir(source)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assertNoError(t, err)
 
 	for _, fi := range fileInfoList {
 		if fi.IsDir() {
@@ -615,9 +611,7 @@ func TestSnapshotFail(t *testing.T) {
 
 func (e *testenv) testPermissionsInDir(t *testing.T, source, dirName string) int {
 	fileInfoList, err := ioutil.ReadDir(dirName)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assertNoError(t, err)
 
 	return e.testPermissions(t, source, dirName, fileInfoList)
 }
@@ -1095,7 +1089,7 @@ func createSimpleDirStructure(t *testing.T, dirname string, depth int) {
 	}
 
 	if depth > 0 {
-		subdirName := fmt.Sprintf("subdir")
+		subdirName := "subdir"
 		createSimpleDirStructure(t, filepath.Join(dirname, subdirName), depth-1)
 	}
 
