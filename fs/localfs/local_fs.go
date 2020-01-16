@@ -177,13 +177,12 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 
 			for n := range namesCh {
 				fi, staterr := os.Lstat(fullPath + "/" + n)
-				if staterr != nil {
-					if os.IsNotExist(staterr) {
-						// lost the race - ignore.
-						continue
-					}
+				switch {
+				case os.IsNotExist(staterr):
+					// lost the race - ignore.
+					continue
+				case staterr != nil:
 					entriesCh <- entryWithError{err: errors.Errorf("unable to stat directory entry %q: %v", n, staterr)}
-
 					continue
 				}
 
