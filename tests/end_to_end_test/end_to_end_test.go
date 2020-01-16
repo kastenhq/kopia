@@ -663,7 +663,7 @@ func (e *testenv) testPermissions(t *testing.T, source, parentDir string, fileLi
 				t.Fatal(err)
 			}
 
-			// Directory will fail if it cannot be both read and executed
+			// Directory listing will fail if either the read or executed permissions are unset on the directory itself
 			if changeFile.IsDir() && !permIncludesReadAndExecute(i) {
 				t.Log("expecting failure")
 				e.runAndExpectFailure(t, "snapshot", "create", source)
