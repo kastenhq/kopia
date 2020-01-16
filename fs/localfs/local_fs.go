@@ -163,7 +163,7 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 		}
 	}()
 
-	entriesCh := make(chan *entryWithError, dirListingPrefetch)
+	entriesCh := make(chan entryWithError, dirListingPrefetch)
 
 	var workersWG sync.WaitGroup
 
@@ -182,7 +182,7 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 						// lost the race - ignore.
 						continue
 					}
-					entriesCh <- &entryWithError{err: errors.Errorf("unable to process directory entry %q: %v", n, staterr)}
+					entriesCh <- entryWithError{err: errors.Errorf("unable to stat directory entry %q: %v", n, staterr)}
 
 					continue
 				}
