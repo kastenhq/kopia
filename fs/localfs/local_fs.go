@@ -177,6 +177,7 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 
 			for n := range namesCh {
 				fi, staterr := os.Lstat(fullPath + "/" + n)
+
 				switch {
 				case os.IsNotExist(staterr):
 					// lost the race - ignore.
