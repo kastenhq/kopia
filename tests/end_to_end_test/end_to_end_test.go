@@ -653,7 +653,7 @@ func (e *testenv) testPermissions(t *testing.T, source, parentDir string, fileLi
 				err := os.Chmod(fp, chmod)
 				assertNoError(t, err)
 
-				// Directory will fail if it cannot be both read and executed
+				// Directory listing will fail if either the read or executed permissions are unset on the directory itself
 				if changeFile.IsDir() && readPermission&executePermission == 0 {
 					t.Log("expecting failure")
 					e.runAndExpectFailure(t, "snapshot", "create", source)
