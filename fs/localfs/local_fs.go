@@ -193,7 +193,7 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 					continue
 				}
 
-				entriesCh <- &entryWithError{entry: e}
+				entriesCh <- entryWithError{entry: e}
 			}
 		}()
 	}
