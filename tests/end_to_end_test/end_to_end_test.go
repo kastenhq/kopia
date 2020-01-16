@@ -637,64 +637,43 @@ const (
 func (e *testenv) testPermissions(t *testing.T, source, parentDir string, fileList []os.FileInfo) int {
 	t.Helper()
 
-	var testedFile, testedDir bool
-
 	var numSuccessfulSnapshots int
 
 	for _, changeFile := range fileList {
-		if changeFile.IsDir() {
-			if testedDir {
-				continue
-			}
-		} else if testedFile {
-			continue
-		}
-
 		// Iterate over all permission bit configurations
-		for i := uint32(0); i <= uint32(7); i++ {
-			name := changeFile.Name()
-			mode := changeFile.Mode()
-			fp := filepath.Join(parentDir, name)
-			chmod := os.FileMode(i << userPermOffset)
-			t.Logf("Chmod: name: %s, isDir: %v, prevMode: %v, newMode: %v", name, changeFile.IsDir(), mode, chmod)
+		for _, readPermission := range []uint32{0, 1} {
+			for _, executePermission := range []uint32{0, 1} {
+				name := changeFile.Name()
+				mode := changeFile.Mode()
+				fp := filepath.Join(parentDir, name)
+				perm := readPermission<<readOffset | executePermission<<execOffset
+				chmod := os.FileMode(perm << userPermOffset)
+				t.Logf("Chmod: name: %s, isDir: %v, prevMode: %v, newMode: %v", name, changeFile.IsDir(), mode, chmod)
 
-			err := os.Chmod(fp, chmod)
-			if err != nil {
-				t.Fatal(err)
-			}
+				err := os.Chmod(fp, chmod)
+				assertNoError(t, err)
 
-			// Directory will fail if it cannot be both read and executed
-			if changeFile.IsDir() && !permIncludesReadAndExecute(i) {
-				t.Log("expecting failure")
-				e.runAndExpectFailure(t, "snapshot", "create", source)
-			} else {
-				t.Log("expecting success")
-				// Currently by default, the uploader has IgnoreFileErrors set to true.
-				// Expect warning and successful snapshot creation
+				// Directory will fail if it cannot be both read and executed
+				if changeFile.IsDir() && readPermission&executePermission == 0 {
+					t.Log("expecting failure")
+					e.runAndExpectFailure(t, "snapshot", "create", source)
+				} else {
+					t.Log("expecting success")
+					// Currently by default, the uploader has IgnoreFileErrors set to true.
+					// Expect warning and successful snapshot creation
+					e.runAndExpectSuccess(t, "snapshot", "create", source)
+					numSuccessfulSnapshots++
+				}
+
+				// Change permissions back and expect success
+				os.Chmod(fp, mode.Perm())
 				e.runAndExpectSuccess(t, "snapshot", "create", source)
 				numSuccessfulSnapshots++
 			}
-
-			// Change permissions back and expect success
-			os.Chmod(fp, mode.Perm())
-			e.runAndExpectSuccess(t, "snapshot", "create", source)
-			numSuccessfulSnapshots++
-		}
-
-		if changeFile.IsDir() {
-			testedDir = true
-		} else {
-			testedFile = true
 		}
 	}
 
 	return numSuccessfulSnapshots
-}
-
-func permIncludesReadAndExecute(perm uint32) bool {
-	readAndExec := uint32(1<<readOffset | 1<<execOffset)
-	// perm & 101 == 101 (both bits are set)
-	return perm&readAndExec == readAndExec
 }
 
 func TestSnapshotDeleteRestore(t *testing.T) {
