@@ -598,7 +598,8 @@ func TestSnapshotFail(t *testing.T) {
 		}
 	}
 
-	// obtain snapshot root id and use it for restore
+	// check the number of snapshots that succeeded match the length of
+	// a snap list output
 	si := listSnapshotsAndExpectSuccess(t, e, source)
 	if got, want := len(si), 1; got != want {
 		t.Fatalf("got %v sources, wanted %v", got, want)
