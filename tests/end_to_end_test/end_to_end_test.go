@@ -649,10 +649,8 @@ func (e *testenv) testPermissions(t *testing.T, source, parentDir string, fileLi
 
 				// Directory listing will fail if either the read or executed permissions are unset on the directory itself
 				if changeFile.IsDir() && readPermission&executePermission == 0 {
-					t.Log("expecting failure")
 					e.runAndExpectFailure(t, "snapshot", "create", source)
 				} else {
-					t.Log("expecting success")
 					// Currently by default, the uploader has IgnoreFileErrors set to true.
 					// Expect warning and successful snapshot creation
 					e.runAndExpectSuccess(t, "snapshot", "create", source)
