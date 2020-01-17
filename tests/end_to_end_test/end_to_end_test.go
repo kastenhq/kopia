@@ -561,7 +561,7 @@ func TestSnapshotFail(t *testing.T) {
 
 	e.runAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.repoDir)
 	e.runAndExpectSuccess(t, "policy", "set", "--global", "--keep-latest", strconv.Itoa(1<<31-1))
-	source := filepath.Join(e.dataDir, "source")
+	source := filepath.Join(e.dataDir, "parent/source")
 
 	// Test snapshot of nonexistent directory fails
 	e.runAndExpectFailure(t, "snapshot", "create", source)
@@ -575,27 +575,25 @@ func TestSnapshotFail(t *testing.T) {
 	numSuccessfulSnapshots := 1
 
 	// Test the root dir permissions
-	fi, err := os.Stat(source)
-	assertNoError(t, err)
-
-	parentDir := filepath.Dir(source)
-	numSuccessfulSnapshots += e.testPermissions(t, source, parentDir, []os.FileInfo{fi})
-
-	// Test permissions of entries inside root dir
-	numSuccessfulSnapshots += e.testPermissionsInDir(t, source, source)
-
-	// Test permissions within a subdir under root
-	// Find a subdirectory
-	fileInfoList, err := ioutil.ReadDir(source)
-	assertNoError(t, err)
-
-	for _, fi := range fileInfoList {
-		if fi.IsDir() {
-			parentDir := filepath.Join(source, fi.Name())
-			numSuccessfulSnapshots += e.testPermissionsInDir(t, source, parentDir)
-
-			break
-		}
+	for _, tc := range []struct {
+		desc      string
+		parentDir string
+	}{
+		{
+			desc:      "Modify permissions of the snapshot root directory",
+			parentDir: filepath.Dir(source),
+		},
+		{
+			desc:      "Modify permissions of entries in the snapshot root dir",
+			parentDir: source,
+		},
+		{
+			desc:      "Modify permissions of entries in a subdir of the snapshot root",
+			parentDir: findASubDirFilePath(t, source),
+		},
+	} {
+		t.Log(tc.desc)
+		numSuccessfulSnapshots += e.testPermissions(t, source, tc.parentDir)
 	}
 
 	// check the number of snapshots that succeeded match the length of
@@ -610,11 +608,18 @@ func TestSnapshotFail(t *testing.T) {
 	}
 }
 
-func (e *testenv) testPermissionsInDir(t *testing.T, source, dirName string) int {
-	fileInfoList, err := ioutil.ReadDir(dirName)
+func findASubDirFilePath(t *testing.T, parent string) string {
+	fileInfoList, err := ioutil.ReadDir(parent)
 	assertNoError(t, err)
 
-	return e.testPermissions(t, source, dirName, fileInfoList)
+	for _, fi := range fileInfoList {
+		if fi.IsDir() {
+			return filepath.Join(parent, fi.Name())
+		}
+	}
+
+	t.Fatalf("Could not find a subdirectory in parent dir %v", parent)
+	return ""
 }
 
 // Perm constants
@@ -626,10 +631,13 @@ const (
 
 // testPermissions iterates over readable and executable permission states, testing
 // files and directories (if present). It issues the kopia snapshot command
-// against "source" and assumes the os.FileInfo list passed is located in "parentDir".
+// against "source" and will test permissions against all entries in "parentDir".
 // It returns the number of successful snapshot operations.
-func (e *testenv) testPermissions(t *testing.T, source, parentDir string, fileList []os.FileInfo) int {
+func (e *testenv) testPermissions(t *testing.T, source, parentDir string) int {
 	t.Helper()
+
+	fileList, err := ioutil.ReadDir(parentDir)
+	assertNoError(t, err)
 
 	var numSuccessfulSnapshots int
 
@@ -642,7 +650,7 @@ func (e *testenv) testPermissions(t *testing.T, source, parentDir string, fileLi
 				fp := filepath.Join(parentDir, name)
 				perm := readPermission<<readOffset | executePermission<<execOffset
 				chmod := os.FileMode(perm << userPermOffset)
-				t.Logf("Chmod: name: %s, isDir: %v, prevMode: %v, newMode: %v", name, changeFile.IsDir(), mode, chmod)
+				t.Logf("Chmod: path: %s, isDir: %v, prevMode: %v, newMode: %v", fp, changeFile.IsDir(), mode, chmod)
 
 				err := os.Chmod(fp, chmod)
 				assertNoError(t, err)
