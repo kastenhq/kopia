@@ -82,6 +82,7 @@ func findASubDirFilePath(t *testing.T, parent string) string {
 	}
 
 	t.Fatalf("Could not find a subdirectory in parent dir %v", parent)
+
 	return ""
 }
 
