@@ -119,7 +119,7 @@ func (e *CLITest) RunAndExpectSuccess(t *testing.T, args ...string) []string {
 }
 
 // RunAndExpectSuccessWithErrOut runs the given command, expects it to succeed and returns its stdout and stderr lines.
-func (e *CLITest) RunAndExpectSuccessWithErrOut(t *testing.T, args ...string) ([]string, []string) {
+func (e *CLITest) RunAndExpectSuccessWithErrOut(t *testing.T, args ...string) (stdout, stderr []string) {
 	t.Helper()
 
 	stdout, stderr, err := e.Run(t, args...)
@@ -155,7 +155,7 @@ func (e *CLITest) RunAndVerifyOutputLineCount(t *testing.T, wantLines int, args 
 }
 
 // Run executes kopia with given arguments and returns the output lines.
-func (e *CLITest) Run(t *testing.T, args ...string) ([]string, []string, error) {
+func (e *CLITest) Run(t *testing.T, args ...string) (stdout, stderr []string, err error) {
 	t.Helper()
 	t.Logf("running 'kopia %v'", strings.Join(args, " "))
 	// nolint:gosec
@@ -170,7 +170,7 @@ func (e *CLITest) Run(t *testing.T, args ...string) ([]string, []string, error) 
 		t.Fatalf("can't set up stderr pipe reader")
 	}
 
-	var stderr []byte
+	var errOut []byte
 
 	var wg sync.WaitGroup
 
@@ -179,15 +179,15 @@ func (e *CLITest) Run(t *testing.T, args ...string) ([]string, []string, error) 
 	go func() {
 		defer wg.Done()
 
-		stderr, err = ioutil.ReadAll(stderrPipe)
+		errOut, err = ioutil.ReadAll(stderrPipe)
 	}()
 
 	o, err := c.Output()
 
 	wg.Wait()
-	t.Logf("finished 'kopia %v' with err=%v and output:\n%v\nstderr:\n%v\n", strings.Join(args, " "), err, trimOutput(string(o)), trimOutput(string(stderr)))
+	t.Logf("finished 'kopia %v' with err=%v and output:\n%v\nstderr:\n%v\n", strings.Join(args, " "), err, trimOutput(string(o)), trimOutput(string(errOut)))
 
-	return splitLines(string(o)), splitLines(string(stderr)), err
+	return splitLines(string(o)), splitLines(string(errOut)), err
 }
 
 func trimOutput(s string) string {
@@ -275,19 +275,19 @@ func CreateDirectoryTree(dirname string, options DirectoryTreeOptions, counters 
 
 // MustCreateRandomFile creates a new file at the provided path with randomized contents.
 // It will fail with a test error if the creation does not succeed.
-func MustCreateRandomFile(t *testing.T, filepath string, options DirectoryTreeOptions, counters *DirectoryTreeCounters) {
-	if err := CreateRandomFile(filepath, options, counters); err != nil {
+func MustCreateRandomFile(t *testing.T, filePath string, options DirectoryTreeOptions, counters *DirectoryTreeCounters) {
+	if err := CreateRandomFile(filePath, options, counters); err != nil {
 		t.Error(err)
 	}
 }
 
 // CreateRandomFile creates a new file at the provided path with randomized contents
-func CreateRandomFile(filepath string, options DirectoryTreeOptions, counters *DirectoryTreeCounters) error {
+func CreateRandomFile(filePath string, options DirectoryTreeOptions, counters *DirectoryTreeCounters) error {
 	if counters == nil {
 		counters = &DirectoryTreeCounters{}
 	}
 
-	return createRandomFile(filepath, options, counters)
+	return createRandomFile(filePath, options, counters)
 }
 
 // createDirectoryTreeInternal creates a directory tree of a given depth with random files.

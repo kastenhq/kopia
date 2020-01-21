@@ -180,6 +180,7 @@ func TestSnapshotFail(t *testing.T) {
 		},
 	} {
 		t.Log(tc.desc)
+
 		uniqueSourceMap[tc.snapSource] = struct{}{}
 		restoreDir := fmt.Sprintf("%s%d", restoreDirPrefix, ti)
 		numSuccessfulSnapshots += testPermissions(e, t, tc.snapSource, tc.modifyEntry, restoreDir, tc.expectSuccess)
@@ -189,6 +190,7 @@ func TestSnapshotFail(t *testing.T) {
 	// a snap list output
 	si := e.ListSnapshotsAndExpectSuccess(t)
 	expSources := len(uniqueSourceMap)
+
 	if got, want := len(si), expSources; got != want {
 		t.Fatalf("got %v sources, wanted %v", got, want)
 	}
@@ -255,7 +257,6 @@ func testPermissions(e *testenv.CLITest, t *testing.T, source, modifyEntry, rest
 
 			// Expect that since the snapshot succeeded, the data can be restored
 			e.RunAndExpectSuccess(t, "snapshot", "restore", snapID, restoreDir)
-
 		} else {
 			e.RunAndExpectFailure(t, "snapshot", "create", source)
 		}
@@ -271,12 +272,15 @@ func testPermissions(e *testenv.CLITest, t *testing.T, source, modifyEntry, rest
 
 func parseSnapID(t *testing.T, lines []string) string {
 	pattern := regexp.MustCompile(`uploaded snapshot ([\S]+)`)
+
 	for _, l := range lines {
 		match := pattern.FindAllStringSubmatch(l, 1)
 		if len(match) > 0 && len(match[0]) > 1 {
 			return match[0][1]
 		}
 	}
+
 	t.Fatal("Snap ID could not be parsed")
+
 	return ""
 }
