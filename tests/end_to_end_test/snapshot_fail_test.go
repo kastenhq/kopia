@@ -1,9 +1,10 @@
 package endtoend_test
 
 import (
-	"io/ioutil"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"testing"
 
@@ -20,122 +21,262 @@ func TestSnapshotFail(t *testing.T) {
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 	e.RunAndExpectSuccess(t, "policy", "set", "--global", "--keep-latest", strconv.Itoa(1<<31-1))
 
-	parentDirOfSource := makeScratchDir(t)
-	source := filepath.Join(parentDirOfSource, "source")
+	scratchDir := makeScratchDir(t)
 
 	// Test snapshot of nonexistent directory fails
-	e.RunAndExpectFailure(t, "snapshot", "create", source)
+	e.RunAndExpectFailure(t, "snapshot", "create", filepath.Join(scratchDir, "notExist"))
 
-	testenv.MustCreateDirectoryTree(t, source, testenv.DirectoryTreeOptions{
-		Depth:                  2,
-		MaxSubdirsPerDirectory: 1,
-		MaxFilesPerDirectory:   1,
-	})
+	// Each directory tier will have a file, an empty directory, and the next tier's directory
+	// (unless at max depth). Naming scheme is [file|dir|emptyDir][tier #].
+	createSimplestFileTree(t, 3, 0, scratchDir)
 
 	// Create snapshot
-	e.RunAndExpectSuccess(t, "snapshot", "create", source)
+	dir0Path := filepath.Join(scratchDir, "dir0")
+	e.RunAndExpectSuccess(t, "snapshot", "create", filepath.Join(dir0Path, "dir1"))
+
+	restoreDirPrefix := filepath.Join(scratchDir, "target")
 
 	numSuccessfulSnapshots := 1
+	uniqueSourceMap := make(map[string]struct{})
 
 	// Test the root dir permissions
-	for _, tc := range []struct {
-		desc      string
-		parentDir string
+	for ti, tc := range []struct {
+		desc          string
+		modifyEntry   string
+		snapSource    string
+		expectSuccess map[os.FileMode]bool
 	}{
 		{
-			desc:      "Modify permissions of the snapshot root directory",
-			parentDir: filepath.Dir(source),
+			desc:        "Modify permissions of the parent dir of the snapshot source (source is a FILE)",
+			modifyEntry: dir0Path,
+			snapSource:  filepath.Join(dir0Path, "file1"),
+			expectSuccess: map[os.FileMode]bool{
+				0000: false, // --- permission: cannot read directory
+				0100: true,  // --X permission: can enter directory and take snapshot of the file (with full permissions)
+				0400: false, // R-- permission: can read the file name, but will be unable to snapshot it without entering directory
+				0500: true,  // R-W permission: full permission to read dir and enter for snapshot execution
+			},
 		},
 		{
-			desc:      "Modify permissions of entries in the snapshot root dir",
-			parentDir: source,
+			desc:        "Modify permissions of the parent dir of the snapshot source (source is a DIRECTORY)",
+			modifyEntry: dir0Path,
+			snapSource:  filepath.Join(dir0Path, "dir1"),
+			expectSuccess: map[os.FileMode]bool{
+				0000: false,
+				0100: true,
+				0400: false,
+				0500: true,
+			},
 		},
 		{
-			desc:      "Modify permissions of entries in a subdir of the snapshot root",
-			parentDir: findASubDirFilePath(t, source),
+			desc:        "Modify permissions of the parent dir of the snapshot source (source is an EMPTY directory)",
+			modifyEntry: dir0Path,
+			snapSource:  filepath.Join(dir0Path, "emptyDir1"),
+			expectSuccess: map[os.FileMode]bool{
+				0000: false,
+				0100: true,
+				0400: false,
+				0500: true,
+			},
+		},
+		{
+			desc:        "Modify permissions of the snapshot source itself (source is a FILE)",
+			modifyEntry: filepath.Join(dir0Path, "file1"),
+			snapSource:  filepath.Join(dir0Path, "file1"),
+			expectSuccess: map[os.FileMode]bool{
+				0000: false,
+				0100: false,
+				0400: true,
+				0500: true,
+			},
+		},
+		{
+			desc:        "Modify permissions of the snapshot source itself (source is a DIRECTORY)",
+			modifyEntry: filepath.Join(dir0Path, "dir1"),
+			snapSource:  filepath.Join(dir0Path, "dir1"),
+			expectSuccess: map[os.FileMode]bool{
+				0000: false,
+				0100: false,
+				0400: false,
+				0500: true,
+			},
+		},
+		{
+			desc:        "Modify permissions of the snapshot source itself (source is an EMPTY directory)",
+			modifyEntry: filepath.Join(dir0Path, "dir1", "emptyDir2"),
+			snapSource:  filepath.Join(dir0Path, "dir1"),
+			expectSuccess: map[os.FileMode]bool{
+				0000: false,
+				0100: false,
+				0400: true,
+				0500: true,
+			},
+		},
+		{
+			desc:        "Modify permissions of a FILE in the snapshot directory",
+			modifyEntry: filepath.Join(dir0Path, "dir1", "file2"),
+			snapSource:  filepath.Join(dir0Path, "dir1"),
+			expectSuccess: map[os.FileMode]bool{
+				0000: true,
+				0100: true,
+				0400: true,
+				0500: true,
+			},
+		},
+		{
+			desc:        "Modify permissions of a DIRECTORY in the snapshot directory",
+			modifyEntry: filepath.Join(dir0Path, "dir1", "dir2"),
+			snapSource:  filepath.Join(dir0Path, "dir1"),
+			expectSuccess: map[os.FileMode]bool{
+				0000: false,
+				0100: false,
+				0400: false,
+				0500: true,
+			},
+		},
+		{
+			desc:        "Modify permissions of an EMPTY directory in the snapshot directory",
+			modifyEntry: filepath.Join(dir0Path, "dir1", "emptyDir2"),
+			snapSource:  filepath.Join(dir0Path, "dir1"),
+			expectSuccess: map[os.FileMode]bool{
+				0000: false,
+				0100: false,
+				0400: true,
+				0500: true,
+			},
+		},
+		{
+			desc:        "Modify permissions of a FILE in a subdirectory of the snapshot root directory",
+			modifyEntry: filepath.Join(dir0Path, "dir1", "file2"),
+			snapSource:  dir0Path,
+			expectSuccess: map[os.FileMode]bool{
+				0000: true,
+				0100: true,
+				0400: true,
+				0500: true,
+			},
+		},
+		{
+			desc:        "Modify permissions of a DIRECTORY in a subdirectory of the snapshot root directory",
+			modifyEntry: filepath.Join(dir0Path, "dir1", "dir2"),
+			snapSource:  dir0Path,
+			expectSuccess: map[os.FileMode]bool{
+				0000: false,
+				0100: false,
+				0400: false,
+				0500: true,
+			},
+		},
+		{
+			desc:        "Modify permissions of an EMPTY directory in a subdirectory of the snapshot root directory",
+			modifyEntry: filepath.Join(dir0Path, "dir1", "emptyDir2"),
+			snapSource:  dir0Path,
+			expectSuccess: map[os.FileMode]bool{
+				0000: false,
+				0100: false,
+				0400: true,
+				0500: true,
+			},
 		},
 	} {
 		t.Log(tc.desc)
-		numSuccessfulSnapshots += testPermissions(e, t, source, tc.parentDir)
+		uniqueSourceMap[tc.snapSource] = struct{}{}
+		restoreDir := fmt.Sprintf("%s%d", restoreDirPrefix, ti)
+		numSuccessfulSnapshots += testPermissions(e, t, tc.snapSource, tc.modifyEntry, restoreDir, tc.expectSuccess)
 	}
 
 	// check the number of snapshots that succeeded match the length of
 	// a snap list output
 	si := e.ListSnapshotsAndExpectSuccess(t)
-	if got, want := len(si), 1; got != want {
+	expSources := len(uniqueSourceMap)
+	if got, want := len(si), expSources; got != want {
 		t.Fatalf("got %v sources, wanted %v", got, want)
 	}
 
-	if got, want := len(si[0].Snapshots), numSuccessfulSnapshots; got != want {
+	numSnapsListed := 0
+	for _, source := range si {
+		numSnapsListed += len(source.Snapshots)
+	}
+
+	if got, want := numSnapsListed, numSuccessfulSnapshots; got != want {
 		t.Fatalf("got %v snapshots, wanted %v", got, want)
 	}
 }
 
-func findASubDirFilePath(t *testing.T, parent string) string {
-	fileInfoList, err := ioutil.ReadDir(parent)
+func createSimplestFileTree(t *testing.T, dirDepth, currDepth int, currPath string) {
+	dirname := fmt.Sprintf("dir%d", currDepth)
+	dirPath := filepath.Join(currPath, dirname)
+	err := os.MkdirAll(dirPath, 0700)
 	testenv.AssertNoError(t, err)
 
-	for _, fi := range fileInfoList {
-		if fi.IsDir() {
-			return filepath.Join(parent, fi.Name())
-		}
+	// Put an empty directory in the new directory
+	emptyDirName := fmt.Sprintf("emptyDir%v", currDepth+1)
+	emptyDirPath := filepath.Join(dirPath, emptyDirName)
+	err = os.MkdirAll(emptyDirPath, 0700)
+	testenv.AssertNoError(t, err)
+
+	// Put a file in the new directory
+	fileName := fmt.Sprintf("file%d", currDepth+1)
+	filePath := filepath.Join(dirPath, fileName)
+
+	testenv.MustCreateRandomFile(t, filePath, testenv.DirectoryTreeOptions{}, nil)
+
+	if dirDepth > currDepth+1 {
+		createSimplestFileTree(t, dirDepth, currDepth+1, dirPath)
 	}
-
-	t.Fatalf("Could not find a subdirectory in parent dir %v", parent)
-
-	return ""
 }
-
-// Perm constants
-const (
-	execOffset     = 0
-	readOffset     = 2
-	userPermOffset = 6
-)
 
 // testPermissions iterates over readable and executable permission states, testing
 // files and directories (if present). It issues the kopia snapshot command
 // against "source" and will test permissions against all entries in "parentDir".
 // It returns the number of successful snapshot operations.
-func testPermissions(e *testenv.CLITest, t *testing.T, source, parentDir string) int {
+func testPermissions(e *testenv.CLITest, t *testing.T, source, modifyEntry, restoreDir string, expectSuccess map[os.FileMode]bool) int {
 	t.Helper()
-
-	fileList, err := ioutil.ReadDir(parentDir)
-	testenv.AssertNoError(t, err)
 
 	var numSuccessfulSnapshots int
 
-	for _, changeFile := range fileList {
-		// Iterate over all permission bit configurations
-		for _, readPermission := range []uint32{0, 1} {
-			for _, executePermission := range []uint32{0, 1} {
-				name := changeFile.Name()
-				mode := changeFile.Mode()
-				fp := filepath.Join(parentDir, name)
-				perm := readPermission<<readOffset | executePermission<<execOffset
-				chmod := os.FileMode(perm << userPermOffset)
-				t.Logf("Chmod: path: %s, isDir: %v, prevMode: %v, newMode: %v", fp, changeFile.IsDir(), mode, chmod)
+	changeFile, err := os.Stat(modifyEntry)
+	testenv.AssertNoError(t, err)
 
-				err := os.Chmod(fp, chmod)
-				testenv.AssertNoError(t, err)
+	// Iterate over all permission bit configurations
+	for chmod, shouldSucceed := range expectSuccess {
+		mode := changeFile.Mode()
+		t.Logf("Chmod: path: %s, isDir: %v, prevMode: %v, newMode: %v", modifyEntry, changeFile.IsDir(), mode, chmod)
 
-				// Directory listing will fail if either the read or executed permissions are unset on the directory itself
-				if changeFile.IsDir() && readPermission&executePermission == 0 {
-					e.RunAndExpectFailure(t, "snapshot", "create", source)
-				} else {
-					// Currently by default, the uploader has IgnoreFileErrors set to true.
-					// Expect warning and successful snapshot creation
-					e.RunAndExpectSuccess(t, "snapshot", "create", source)
-					numSuccessfulSnapshots++
-				}
+		err := os.Chmod(modifyEntry, chmod)
+		testenv.AssertNoError(t, err)
 
-				// Change permissions back and expect success
-				os.Chmod(fp, mode.Perm())
-				e.RunAndExpectSuccess(t, "snapshot", "create", source)
-				numSuccessfulSnapshots++
-			}
+		if shouldSucceed {
+			// Currently by default, the uploader has IgnoreFileErrors set to true.
+			// Expect warning and successful snapshot creation
+			_, errOut := e.RunAndExpectSuccessWithErrOut(t, "snapshot", "create", source)
+			snapID := parseSnapID(t, errOut)
+			numSuccessfulSnapshots++
+
+			// Expect that since the snapshot succeeded, the data can be restored
+			e.RunAndExpectSuccess(t, "snapshot", "restore", snapID, restoreDir)
+
+		} else {
+			e.RunAndExpectFailure(t, "snapshot", "create", source)
 		}
+
+		// Change permissions back and expect success
+		os.Chmod(modifyEntry, mode.Perm())
+		e.RunAndExpectSuccess(t, "snapshot", "create", source)
+		numSuccessfulSnapshots++
 	}
 
 	return numSuccessfulSnapshots
+}
+
+func parseSnapID(t *testing.T, lines []string) string {
+	pattern := regexp.MustCompile(`uploaded snapshot ([\S]+)`)
+	for _, l := range lines {
+		match := pattern.FindAllStringSubmatch(l, 1)
+		if len(match) > 0 && len(match[0]) > 1 {
+			return match[0][1]
+		}
+	}
+	t.Fatal("Snap ID could not be parsed")
+	return ""
 }
