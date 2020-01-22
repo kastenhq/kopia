@@ -64,8 +64,10 @@ func TestRestoreFail(t *testing.T) {
 		t.Fatal("Could not find a pack blob in the list of blobs created by snapshot")
 	}
 
+	// Delete a pack blob
 	e.RunAndExpectSuccess(t, "blob", "delete", blobIDToDelete)
 
+	// Expect a subsequent restore to fail
 	e.RunAndExpectFailure(t, "snapshot", "restore", snapID, targetDir)
 }
 
