@@ -2,13 +2,28 @@ package endtoend_test
 
 import (
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/tests/testenv"
 )
 
+// TestRestoreFail
+// Motivation: Cause a kopia snapshot restore command to fail, ensure error returns
+// Description:
+//		1. Create kopia repo
+//		2. Create a directory tree for testing
+//		3. Issue kopia blob list before issuing any snapshots
+//		4. Create a snapshot of the source directory, parse the snapshot ID
+//		5. Issue another kopia blob list, find the blob IDs that were not
+//			present in the previous blob list.
+//		6. Find a pack blob by searching for a blob ID with the "p" prefix
+//		7. Issue kopia blob delete on the ID of the found pack blob
+//		8. Attempt a snapshot restore on the snapshot, expecting failure
+// Pass Criteria: Kopia commands issue successfully, except the final restore
+//		command is expected to fail. Expect to find new blobs after a snapshot
+//		and expect one of them is a pack blob type prefixed with "p".
 func TestRestoreFail(t *testing.T) {
 	t.Parallel()
 
@@ -17,15 +32,15 @@ func TestRestoreFail(t *testing.T) {
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
-	e.RunAndExpectSuccess(t, "policy", "set", "--global", "--keep-latest", strconv.Itoa(1<<31-1))
 
 	scratchDir := makeScratchDir(t)
 	sourceDir := filepath.Join(scratchDir, "source")
 	targetDir := filepath.Join(scratchDir, "target")
+
 	testenv.MustCreateDirectoryTree(t, sourceDir, testenv.DirectoryTreeOptions{
 		Depth:                  2,
-		MaxSubdirsPerDirectory: 2,
-		MaxFilesPerDirectory:   2,
+		MaxSubdirsPerDirectory: 10,
+		MaxFilesPerDirectory:   10,
 	})
 
 	beforeBlobList := e.RunAndExpectSuccess(t, "blob", "list")
@@ -37,15 +52,26 @@ func TestRestoreFail(t *testing.T) {
 
 	newBlobIDs := getNewBlobIDs(beforeBlobList, afterBlobList)
 
+	var blobIDToDelete string
+
 	for _, blobID := range newBlobIDs {
-		e.RunAndExpectSuccess(t, "blob", "delete", blobID)
+		if strings.Contains(blobID, string(content.PackBlobIDPrefixRegular)) {
+			blobIDToDelete = blobID
+		}
 	}
+
+	if blobIDToDelete == "" {
+		t.Fatal("Could not find a pack blob in the list of blobs created by snapshot")
+	}
+
+	e.RunAndExpectSuccess(t, "blob", "delete", blobIDToDelete)
 
 	e.RunAndExpectFailure(t, "snapshot", "restore", snapID, targetDir)
 }
 
-func getNewBlobIDs(before []string, after []string) []string {
+func getNewBlobIDs(before, after []string) []string {
 	newIDMap := make(map[string]struct{})
+
 	// Add all blob IDs seen after the snapshot
 	for _, outputStr := range after {
 		blobID := parseBlobIDFromBlobList(outputStr)
