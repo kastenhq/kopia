@@ -54,5 +54,11 @@ else
 	curl -LsS https://github.com/gohugoio/hugo/releases/download/v$(HUGO_VERSION)/hugo_extended_$(HUGO_VERSION)_macOS-64bit.tar.gz | tar zxv -C $(TOOLS_DIR)/hugo
 endif
 
+# fio
+fio:
+	sudo apt-get -qq update
+	sudo apt-get -y install fio
+
 clean-tools:
 	rm -rf $(TOOLS_DIR)
+	sudo apt-get -y purge fio

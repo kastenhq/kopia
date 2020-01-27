@@ -16,7 +16,7 @@ quick-install:
 	# same as install but assumes HTMLUI has been built
 	go install -tags embedhtml
 
-install-noui: 
+install-noui:
 	go install
 
 escape-analysis:
@@ -75,7 +75,7 @@ html-ui-bindata-fallback: $(BINDATA_TOOL)
 travis-release: test-with-coverage lint vet verify-release integration-tests upload-coverage website stress-test
 
 verify-release:
-	curl -sL https://git.io/goreleaser | bash /dev/stdin --skip-publish --skip-sign --rm-dist --snapshot 
+	curl -sL https://git.io/goreleaser | bash /dev/stdin --skip-publish --skip-sign --rm-dist --snapshot
 
 tagged-release:
 	curl -sL https://git.io/goreleaser | bash /dev/stdin --rm-dist
@@ -102,7 +102,7 @@ dev-deps:
 	GO111MODULE=off go get -u github.com/lukehoban/go-outline
 	GO111MODULE=off go get -u github.com/newhook/go-symbols
 	GO111MODULE=off go get -u github.com/sqs/goreturns
-	
+
 test-with-coverage:
 	$(GO_TEST) -count=1 -coverprofile=tmp.cov --coverpkg $(COVERAGE_PACKAGES) -timeout 90s github.com/kopia/kopia/...
 
@@ -120,6 +120,9 @@ dist-binary:
 
 integration-tests: dist-binary
 	KOPIA_EXE=$(CURDIR)/dist/integration/kopia $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 300s github.com/kopia/kopia/tests/end_to_end_test
+
+robustness-tests: fio
+	FIO_EXE=fio $(GO_TEST) -count=1 -timeout 90s github.com/kopia/kopia/tests/tools/...
 
 stress-test:
 	KOPIA_LONG_STRESS_TEST=1 $(GO_TEST) -count=1 -timeout 200s github.com/kopia/kopia/tests/stress_test
@@ -147,7 +150,7 @@ travis-install-gpg-key:
 	@echo Installing GPG key...
 	openssl aes-256-cbc -K "$(encrypted_fa1db4b894bb_key)" -iv "$(encrypted_fa1db4b894bb_iv)" -in kopia.gpg.enc -out /tmp/kopia.gpg -d
 	gpg --import /tmp/kopia.gpg
-	
+
 travis-install-test-credentials:
 	@echo Installing test credentials...
 	openssl aes-256-cbc -K "$(encrypted_fa1db4b894bb_key)" -iv "$(encrypted_fa1db4b894bb_iv)" -in tests/credentials/gcs/test_service_account.json.enc -out repo/blob/gcs/test_service_account.json -d
