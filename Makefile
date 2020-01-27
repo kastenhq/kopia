@@ -72,7 +72,7 @@ html-ui-bindata: html-ui $(BINDATA_TOOL)
 html-ui-bindata-fallback: $(BINDATA_TOOL)
 	(cd internal/server && $(BINDATA_TOOL) -fs -tags !embedhtml -o "$(CURDIR)/internal/server/htmlui_fallback.go" -pkg server index.html)
 
-travis-release: test-with-coverage lint vet verify-release integration-tests upload-coverage website stress-test
+travis-release: test-with-coverage lint vet verify-release integration-tests robustness-tests upload-coverage website stress-test
 
 verify-release:
 	curl -sL https://git.io/goreleaser | bash /dev/stdin --skip-publish --skip-sign --rm-dist --snapshot
