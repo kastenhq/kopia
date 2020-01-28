@@ -10,7 +10,7 @@ import (
 )
 
 // TestRestoreFail
-// Motivation: Cause a kopia snapshot restore command to fail, ensure error returns
+// Motivation: Cause a kopia snapshot restore command to fail, ensure non-zero exit code.
 // Description:
 //		1. Create kopia repo
 //		2. Create a directory tree for testing
