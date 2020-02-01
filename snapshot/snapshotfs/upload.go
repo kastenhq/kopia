@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"hash/fnv"
 	"io"
 	"os"
@@ -38,6 +39,9 @@ type Uploader struct {
 
 	// ignore file read errors
 	IgnoreFileErrors bool
+
+	// ignore file read errors
+	IgnoreDirErrors bool
 
 	// probability with cached entries will be ignored, must be [0..100]
 	// 0=always use cached object entries if possible
@@ -536,7 +540,7 @@ func (u *Uploader) launchWorkItems(workItems []*uploadWorkItem, wg *sync.WaitGro
 	}
 }
 
-func (u *Uploader) processUploadWorkItems(workItems []*uploadWorkItem, dirManifest *snapshot.DirManifest) error {
+func (u *Uploader) processUploadWorkItems(workItems []*uploadWorkItem, dirManifest *snapshot.DirManifest, ignoreFileErrs bool) error {
 	var wg sync.WaitGroup
 
 	u.launchWorkItems(workItems, &wg)
@@ -550,7 +554,7 @@ func (u *Uploader) processUploadWorkItems(workItems []*uploadWorkItem, dirManife
 		}
 
 		if result.err != nil {
-			if u.IgnoreFileErrors {
+			if ignoreFileErrs {
 				u.stats.ReadErrors++
 
 				log.Warningf("unable to hash file %q: %s, ignoring", it.entryRelativePath, result.err)
@@ -629,7 +633,14 @@ func uploadDirInternal(
 
 	log.Debugf("finished reading directory %v", dirRelativePath)
 
+	errHandlingPolicy := policyTree.EffectivePolicy().ErrorHandlingPolicy
+	fmt.Println("ERR HANDLING POLICY", errHandlingPolicy)
+
 	if direrr != nil {
+		if errHandlingPolicy.IgnoreDirectoryErrors {
+			log.Warningf("unable to read directory %q: %s, ignoring", directory.Name(), direrr)
+			return "", fs.DirectorySummary{}, nil
+		}
 		return "", fs.DirectorySummary{}, direrr
 	}
 
@@ -663,7 +674,9 @@ func uploadDirInternal(
 		return "", fs.DirectorySummary{}, workItemErr
 	}
 
-	if err := u.processUploadWorkItems(workItems, dirManifest); err != nil && err != errCancelled {
+	ignoreFileErrs := u.IgnoreFileErrors || errHandlingPolicy.IgnoreFileErrors
+
+	if err := u.processUploadWorkItems(workItems, dirManifest, ignoreFileErrs); err != nil && err != errCancelled {
 		return "", fs.DirectorySummary{}, err
 	}
 
@@ -690,7 +703,7 @@ func NewUploader(r *repo.Repository) *Uploader {
 	return &Uploader{
 		repo:             r,
 		Progress:         &nullUploadProgress{},
-		IgnoreFileErrors: true,
+		IgnoreFileErrors: false,
 		ParallelUploads:  1,
 	}
 }
