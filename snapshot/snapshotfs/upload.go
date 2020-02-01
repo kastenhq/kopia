@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"hash/fnv"
 	"io"
 	"os"
@@ -634,7 +633,6 @@ func uploadDirInternal(
 	log.Debugf("finished reading directory %v", dirRelativePath)
 
 	errHandlingPolicy := policyTree.EffectivePolicy().ErrorHandlingPolicy
-	fmt.Println("ERR HANDLING POLICY", errHandlingPolicy)
 
 	if direrr != nil {
 		if errHandlingPolicy.IgnoreDirectoryErrors {
