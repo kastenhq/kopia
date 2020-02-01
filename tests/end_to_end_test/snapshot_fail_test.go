@@ -20,6 +20,7 @@ func TestSnapshotFail(t *testing.T) {
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 	e.RunAndExpectSuccess(t, "policy", "set", "--global", "--keep-latest", strconv.Itoa(1<<31-1))
+	e.RunAndExpectSuccess(t, "policy", "set", "--global", "--ignore-dir-errors", "false", "--ignore-file-errors", "true")
 
 	scratchDir := makeScratchDir(t)
 
