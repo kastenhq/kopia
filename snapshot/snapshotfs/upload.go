@@ -80,6 +80,14 @@ func (u *Uploader) cancelReason() string {
 	return ""
 }
 
+type FileReadError struct {
+	error
+}
+
+type DirReadError struct {
+	error
+}
+
 func (u *Uploader) uploadFileInternal(ctx context.Context, f fs.File, pol *policy.Policy) entryResult {
 	file, err := f.Open(ctx)
 	if err != nil {
@@ -332,6 +340,11 @@ func (u *Uploader) processSubdirectories(ctx context.Context, relativePath strin
 		}
 
 		if err != nil {
+			ignoreDirErr := policyTree.EffectivePolicy().ErrorHandlingPolicy.IgnoreDirectoryErrors
+			if _, ok := err.(DirReadError); ok && ignoreDirErr {
+				log.Warningf("unable to read directory %q: %s, ignoring", dir.Name(), err)
+				return nil
+			}
 			return errors.Errorf("unable to process directory %q: %s", entry.Name(), err)
 		}
 
@@ -561,7 +574,7 @@ func (u *Uploader) processUploadWorkItems(workItems []*uploadWorkItem, dirManife
 				continue
 			}
 
-			return errors.Errorf("unable to process %q: %s", it.entryRelativePath, result.err)
+			return FileReadError{errors.Errorf("unable to process %q: %s", it.entryRelativePath, result.err)}
 		}
 
 		dirManifest.Entries = append(dirManifest.Entries, result.de)
@@ -632,14 +645,8 @@ func uploadDirInternal(
 
 	log.Debugf("finished reading directory %v", dirRelativePath)
 
-	errHandlingPolicy := policyTree.EffectivePolicy().ErrorHandlingPolicy
-
 	if direrr != nil {
-		if errHandlingPolicy.IgnoreDirectoryErrors {
-			log.Warningf("unable to read directory %q: %s, ignoring", directory.Name(), direrr)
-			return "", fs.DirectorySummary{}, nil
-		}
-		return "", fs.DirectorySummary{}, direrr
+		return "", fs.DirectorySummary{}, DirReadError{direrr}
 	}
 
 	var prevEntries []fs.Entries
@@ -672,6 +679,7 @@ func uploadDirInternal(
 		return "", fs.DirectorySummary{}, workItemErr
 	}
 
+	errHandlingPolicy := policyTree.EffectivePolicy().ErrorHandlingPolicy
 	ignoreFileErrs := u.IgnoreFileErrors || errHandlingPolicy.IgnoreFileErrors
 
 	if err := u.processUploadWorkItems(workItems, dirManifest, ignoreFileErrs); err != nil && err != errCancelled {
