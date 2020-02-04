@@ -8,9 +8,9 @@ import (
 )
 
 func TestSetErrorHandlingPolicyFromFlags(t *testing.T) {
-
 	initialFileFlagVal := *policyIgnoreFileErrors
 	initialDirFlagVal := *policyIgnoreDirectoryErrors
+
 	defer func() {
 		*policyIgnoreFileErrors = initialFileFlagVal
 		*policyIgnoreDirectoryErrors = initialDirFlagVal
