@@ -58,7 +58,7 @@ func TestErrorHandlingPolicyMerge(t *testing.T) {
 				src: ErrorHandlingPolicy{
 					IgnoreFileErrors:         true,
 					IgnoreFileErrorsSet:      false,
-					IgnoreDirectoryErrors:    false,
+					IgnoreDirectoryErrors:    true,
 					IgnoreDirectoryErrorsSet: false,
 				},
 			},
@@ -74,7 +74,7 @@ func TestErrorHandlingPolicyMerge(t *testing.T) {
 			fields: fields{
 				IgnoreFileErrors:         true,
 				IgnoreFileErrorsSet:      false,
-				IgnoreDirectoryErrors:    false,
+				IgnoreDirectoryErrors:    true,
 				IgnoreDirectoryErrorsSet: false,
 			},
 			args: args{
@@ -88,7 +88,7 @@ func TestErrorHandlingPolicyMerge(t *testing.T) {
 			expResult: ErrorHandlingPolicy{
 				IgnoreFileErrors:         true,
 				IgnoreFileErrorsSet:      false,
-				IgnoreDirectoryErrors:    false,
+				IgnoreDirectoryErrors:    true,
 				IgnoreDirectoryErrorsSet: false,
 			},
 		},
@@ -105,87 +105,18 @@ func TestErrorHandlingPolicyMerge(t *testing.T) {
 					IgnoreFileErrors:         false,
 					IgnoreFileErrorsSet:      true,
 					IgnoreDirectoryErrors:    false,
-					IgnoreDirectoryErrorsSet: false,
+					IgnoreDirectoryErrorsSet: true,
 				},
 			},
 			expResult: ErrorHandlingPolicy{
 				IgnoreFileErrors:         false,
 				IgnoreFileErrorsSet:      true,
 				IgnoreDirectoryErrors:    false,
-				IgnoreDirectoryErrorsSet: false,
+				IgnoreDirectoryErrorsSet: true,
 			},
 		},
 		{
 			name: "Policy being merged has a value set at true - expect result to have value set at true",
-			fields: fields{
-				IgnoreFileErrors:         false,
-				IgnoreFileErrorsSet:      false,
-				IgnoreDirectoryErrors:    false,
-				IgnoreDirectoryErrorsSet: false,
-			},
-			args: args{
-				src: ErrorHandlingPolicy{
-					IgnoreFileErrors:         true,
-					IgnoreFileErrorsSet:      true,
-					IgnoreDirectoryErrors:    false,
-					IgnoreDirectoryErrorsSet: false,
-				},
-			},
-			expResult: ErrorHandlingPolicy{
-				IgnoreFileErrors:         true,
-				IgnoreFileErrorsSet:      true,
-				IgnoreDirectoryErrors:    false,
-				IgnoreDirectoryErrorsSet: false,
-			},
-		},
-		{
-			name: "Starting policy already has a value set at false - expect no change from merged policy",
-			fields: fields{
-				IgnoreFileErrors:         false,
-				IgnoreFileErrorsSet:      true,
-				IgnoreDirectoryErrors:    false,
-				IgnoreDirectoryErrorsSet: false,
-			},
-			args: args{
-				src: ErrorHandlingPolicy{
-					IgnoreFileErrors:         true,
-					IgnoreFileErrorsSet:      true,
-					IgnoreDirectoryErrors:    false,
-					IgnoreDirectoryErrorsSet: false,
-				},
-			},
-			expResult: ErrorHandlingPolicy{
-				IgnoreFileErrors:         false,
-				IgnoreFileErrorsSet:      true,
-				IgnoreDirectoryErrors:    false,
-				IgnoreDirectoryErrorsSet: false,
-			},
-		},
-		{
-			name: "Policy being merged has a value set at true - expect no change from merged policy",
-			fields: fields{
-				IgnoreFileErrors:         true,
-				IgnoreFileErrorsSet:      true,
-				IgnoreDirectoryErrors:    false,
-				IgnoreDirectoryErrorsSet: false,
-			},
-			args: args{
-				src: ErrorHandlingPolicy{
-					IgnoreFileErrors:         false,
-					IgnoreFileErrorsSet:      true,
-					IgnoreDirectoryErrors:    false,
-					IgnoreDirectoryErrorsSet: false,
-				},
-			},
-			expResult: ErrorHandlingPolicy{
-				IgnoreFileErrors:         true,
-				IgnoreFileErrorsSet:      true,
-				IgnoreDirectoryErrors:    false,
-				IgnoreDirectoryErrorsSet: false,
-			},
-		},
-		{
-			name: "Both error behavior changed at once",
 			fields: fields{
 				IgnoreFileErrors:         false,
 				IgnoreFileErrorsSet:      false,
@@ -203,6 +134,98 @@ func TestErrorHandlingPolicyMerge(t *testing.T) {
 			expResult: ErrorHandlingPolicy{
 				IgnoreFileErrors:         true,
 				IgnoreFileErrorsSet:      true,
+				IgnoreDirectoryErrors:    true,
+				IgnoreDirectoryErrorsSet: true,
+			},
+		},
+		{
+			name: "Starting policy already has a value set at false - expect no change from merged policy",
+			fields: fields{
+				IgnoreFileErrors:         false,
+				IgnoreFileErrorsSet:      true,
+				IgnoreDirectoryErrors:    false,
+				IgnoreDirectoryErrorsSet: true,
+			},
+			args: args{
+				src: ErrorHandlingPolicy{
+					IgnoreFileErrors:         true,
+					IgnoreFileErrorsSet:      true,
+					IgnoreDirectoryErrors:    true,
+					IgnoreDirectoryErrorsSet: true,
+				},
+			},
+			expResult: ErrorHandlingPolicy{
+				IgnoreFileErrors:         false,
+				IgnoreFileErrorsSet:      true,
+				IgnoreDirectoryErrors:    false,
+				IgnoreDirectoryErrorsSet: true,
+			},
+		},
+		{
+			name: "Value was true in starting policy but not set - expect to be overridden by incoming policy",
+			fields: fields{
+				IgnoreFileErrors:         true,
+				IgnoreFileErrorsSet:      false,
+				IgnoreDirectoryErrors:    true,
+				IgnoreDirectoryErrorsSet: false,
+			},
+			args: args{
+				src: ErrorHandlingPolicy{
+					IgnoreFileErrors:         false,
+					IgnoreFileErrorsSet:      true,
+					IgnoreDirectoryErrors:    false,
+					IgnoreDirectoryErrorsSet: true,
+				},
+			},
+			expResult: ErrorHandlingPolicy{
+				IgnoreFileErrors:         false,
+				IgnoreFileErrorsSet:      true,
+				IgnoreDirectoryErrors:    false,
+				IgnoreDirectoryErrorsSet: true,
+			},
+		},
+		{
+			name: "Policy being merged has a value set at true - expect no change from merged policy",
+			fields: fields{
+				IgnoreFileErrors:         true,
+				IgnoreFileErrorsSet:      true,
+				IgnoreDirectoryErrors:    true,
+				IgnoreDirectoryErrorsSet: true,
+			},
+			args: args{
+				src: ErrorHandlingPolicy{
+					IgnoreFileErrors:         false,
+					IgnoreFileErrorsSet:      true,
+					IgnoreDirectoryErrors:    false,
+					IgnoreDirectoryErrorsSet: true,
+				},
+			},
+			expResult: ErrorHandlingPolicy{
+				IgnoreFileErrors:         true,
+				IgnoreFileErrorsSet:      true,
+				IgnoreDirectoryErrors:    true,
+				IgnoreDirectoryErrorsSet: true,
+			},
+		},
+		{
+			name: "Change just one param",
+			fields: fields{
+				IgnoreFileErrors:         false,
+				IgnoreFileErrorsSet:      false,
+				IgnoreDirectoryErrors:    false,
+				IgnoreDirectoryErrorsSet: false,
+			},
+			args: args{
+				src: ErrorHandlingPolicy{
+					IgnoreFileErrors:         false,
+					IgnoreFileErrorsSet:      false,
+					IgnoreDirectoryErrors:    true,
+					IgnoreDirectoryErrorsSet: true,
+				},
+			},
+			expResult: ErrorHandlingPolicy{
+				IgnoreFileErrors:         false,
+				IgnoreFileErrorsSet:      false,
 				IgnoreDirectoryErrors:    true,
 				IgnoreDirectoryErrorsSet: true,
 			},
