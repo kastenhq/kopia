@@ -69,7 +69,6 @@ func TestSnapshotFail(t *testing.T) {
 						0000: false, // --- permission: cannot read directory
 						0100: true,  // --X permission: can enter directory and take snapshot of the file (with full permissions)
 						0400: false, // R-- permission: can read the file name, but will be unable to snapshot it without entering directory
-						0500: true,  // R-W permission: full permission to read dir and enter for snapshot execution
 					},
 				},
 				{
@@ -80,7 +79,6 @@ func TestSnapshotFail(t *testing.T) {
 						0000: false,
 						0100: true,
 						0400: false,
-						0500: true,
 					},
 				},
 				{
@@ -91,7 +89,6 @@ func TestSnapshotFail(t *testing.T) {
 						0000: false,
 						0100: true,
 						0400: false,
-						0500: true,
 					},
 				},
 				{
@@ -102,7 +99,6 @@ func TestSnapshotFail(t *testing.T) {
 						0000: false,
 						0100: false,
 						0400: true,
-						0500: true,
 					},
 				},
 				{
@@ -113,7 +109,6 @@ func TestSnapshotFail(t *testing.T) {
 						0000: false,
 						0100: false,
 						0400: false,
-						0500: true,
 					},
 				},
 				{
@@ -124,7 +119,6 @@ func TestSnapshotFail(t *testing.T) {
 						0000: false,
 						0100: false,
 						0400: true,
-						0500: true,
 					},
 				},
 				{
@@ -135,7 +129,6 @@ func TestSnapshotFail(t *testing.T) {
 						0000: ignoringFiles,
 						0100: ignoringFiles,
 						0400: true,
-						0500: true,
 					},
 				},
 				{
@@ -146,7 +139,6 @@ func TestSnapshotFail(t *testing.T) {
 						0000: ignoringDirs,
 						0100: ignoringDirs,
 						0400: ignoringDirs,
-						0500: true,
 					},
 				},
 				{
@@ -157,7 +149,6 @@ func TestSnapshotFail(t *testing.T) {
 						0000: ignoringDirs,
 						0100: ignoringDirs,
 						0400: true,
-						0500: true,
 					},
 				},
 				{
@@ -168,7 +159,6 @@ func TestSnapshotFail(t *testing.T) {
 						0000: ignoringFiles,
 						0100: ignoringFiles,
 						0400: true,
-						0500: true,
 					},
 				},
 				{
@@ -179,7 +169,6 @@ func TestSnapshotFail(t *testing.T) {
 						0000: ignoringDirs,
 						0100: ignoringDirs,
 						0400: ignoringDirs,
-						0500: true,
 					},
 				},
 				{
@@ -190,7 +179,6 @@ func TestSnapshotFail(t *testing.T) {
 						0000: ignoringDirs,
 						0100: ignoringDirs,
 						0400: true,
-						0500: true,
 					},
 				},
 			} {
