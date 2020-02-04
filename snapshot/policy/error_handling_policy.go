@@ -1,14 +1,18 @@
 package policy
 
-// ErrorHandlingPolicy describes files to be ignored when taking snapshots.
+// ErrorHandlingPolicy controls error hadnling behavior when taking snapshots.
 type ErrorHandlingPolicy struct {
-	IgnoreFileErrors         bool `json:"ignoreFileErrs,omitempty"`
-	IgnoreFileErrorsSet      bool `json:"ignoreFileErrsSet,omitempty"`
-	NoParentIgnoreFileErrors bool `json:"noParentIgnoreFileErrs,omitempty"`
+	// IgnoreFileErrors controls whether or not snapshot operation should terminate when a file throws an error on being read
+	IgnoreFileErrors bool `json:"ignoreFileErrs,omitempty"`
 
-	IgnoreDirectoryErrors         bool `json:"ignoreDirErrs,omitempty"`
-	IgnoreDirectoryErrorsSet      bool `json:"ignoreDirErrsSet,omitempty"`
-	NoParentIgnoreDirectoryErrors bool `json:"noParentIgnoreDirErrs,omitempty"`
+	// IgnoreFileErrorSet denotes whether the IgnoreFileErrors bool was actually set in this policy, or if it should be inherited
+	IgnoreFileErrorsSet bool `json:"ignoreFileErrsSet,omitempty"`
+
+	// IgnoreDirectoryErrors controls whether or not snapshot operation should terminate when a directory throws an error on being read or opened
+	IgnoreDirectoryErrors bool `json:"ignoreDirErrs,omitempty"`
+
+	// IgnoreDirectoryErrorsSet denotes whether the IgnoreDirectoryErrors bool was actually set in this policy, or if it should be inherited
+	IgnoreDirectoryErrorsSet bool `json:"ignoreDirErrsSet,omitempty"`
 }
 
 // Merge applies default values from the provided policy.
