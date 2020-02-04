@@ -80,10 +80,6 @@ func (u *Uploader) cancelReason() string {
 	return ""
 }
 
-type FileReadError struct {
-	error
-}
-
 type DirReadError struct {
 	error
 }
@@ -574,7 +570,7 @@ func (u *Uploader) processUploadWorkItems(workItems []*uploadWorkItem, dirManife
 				continue
 			}
 
-			return FileReadError{errors.Errorf("unable to process %q: %s", it.entryRelativePath, result.err)}
+			return errors.Errorf("unable to process %q: %s", it.entryRelativePath, result.err)
 		}
 
 		dirManifest.Entries = append(dirManifest.Entries, result.de)
