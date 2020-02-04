@@ -1,6 +1,6 @@
 package policy
 
-// ErrorHandlingPolicy describes files to be ignored when taking snapshots.
+// ErrorHandlingPolicy controls error hadnling behavior when taking snapshots.
 type ErrorHandlingPolicy struct {
 	IgnoreFileErrors    bool `json:"ignoreFileErrs,omitempty"`
 	IgnoreFileErrorsSet bool `json:"ignoreFileErrsSet,omitempty"`
