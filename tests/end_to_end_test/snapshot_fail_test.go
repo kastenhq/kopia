@@ -2,6 +2,7 @@ package endtoend_test
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,11 +40,20 @@ func TestSnapshotFail(t *testing.T) {
 	numSuccessfulSnapshots := 1
 	uniqueSourceMap := make(map[string]struct{})
 
-	for _, ignoreFileErr := range []string{"true", "false", "inherit"} {
-		for _, ignoreDirErr := range []string{"true", "false", "inherit"} {
+	for _, ignoreFileErr := range []string{"true", "false"} {
+		for _, ignoreDirErr := range []string{"true", "false"} {
 
 			ignoringDirs := ignoreDirErr == "true"
 			ignoringFiles := ignoreFileErr == "true"
+
+			// Use "inherit" instead of "false" sometimes. Inherit defaults to false
+			if !ignoringFiles && rand.Intn(2) == 0 {
+				ignoreFileErr = "inherit"
+			}
+
+			if !ignoringDirs && rand.Intn(2) == 0 {
+				ignoreDirErr = "inherit"
+			}
 
 			// Test the root dir permissions
 			for ti, tc := range []struct {
@@ -191,6 +201,8 @@ func TestSnapshotFail(t *testing.T) {
 				uniqueSourceMap[tc.snapSource] = struct{}{}
 				restoreDir := fmt.Sprintf("%s%d_%v_%v", restoreDirPrefix, ti, ignoreDirErr, ignoreFileErr)
 				numSuccessfulSnapshots += testPermissions(e, t, tc.snapSource, tc.modifyEntry, restoreDir, tc.expectSuccess)
+
+				e.RunAndExpectSuccess(t, "policy", "remove", tc.snapSource)
 			}
 		}
 	}
