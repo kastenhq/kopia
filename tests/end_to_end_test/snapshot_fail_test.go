@@ -42,7 +42,6 @@ func TestSnapshotFail(t *testing.T) {
 
 	for _, ignoreFileErr := range []string{"true", "false"} {
 		for _, ignoreDirErr := range []string{"true", "false"} {
-
 			ignoringDirs := ignoreDirErr == "true"
 			ignoringFiles := ignoreFileErr == "true"
 

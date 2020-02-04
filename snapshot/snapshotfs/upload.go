@@ -80,10 +80,6 @@ func (u *Uploader) cancelReason() string {
 	return ""
 }
 
-type DirReadError struct {
-	error
-}
-
 func (u *Uploader) uploadFileInternal(ctx context.Context, f fs.File, pol *policy.Policy) entryResult {
 	file, err := f.Open(ctx)
 	if err != nil {
@@ -616,6 +612,12 @@ func uniqueDirectories(dirs []fs.Directory) []fs.Directory {
 	}
 
 	return result
+}
+
+// DirReadError distinguishes an error thrown when attempting to
+// read a directory
+type DirReadError struct {
+	error
 }
 
 func uploadDirInternal(
