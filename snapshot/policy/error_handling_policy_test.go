@@ -12,10 +12,12 @@ func TestErrorHandlingPolicyMerge(t *testing.T) {
 		IgnoreDirectoryErrors    bool
 		IgnoreDirectoryErrorsSet bool
 	}
+
 	type args struct {
 		src ErrorHandlingPolicy
 	}
-	tests := []struct {
+
+	for _, tt := range []struct {
 		name      string
 		fields    fields
 		args      args
@@ -205,20 +207,19 @@ func TestErrorHandlingPolicyMerge(t *testing.T) {
 				IgnoreDirectoryErrorsSet: true,
 			},
 		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := &ErrorHandlingPolicy{
-				IgnoreFileErrors:         tt.fields.IgnoreFileErrors,
-				IgnoreFileErrorsSet:      tt.fields.IgnoreFileErrorsSet,
-				IgnoreDirectoryErrors:    tt.fields.IgnoreDirectoryErrors,
-				IgnoreDirectoryErrorsSet: tt.fields.IgnoreDirectoryErrorsSet,
-			}
-			p.Merge(tt.args.src)
+	} {
+		t.Log(tt.name)
 
-			if !reflect.DeepEqual(*p, tt.expResult) {
-				t.Errorf("Policy after merge was not what was expected\n%v != %v", p, tt.expResult)
-			}
-		})
+		p := &ErrorHandlingPolicy{
+			IgnoreFileErrors:         tt.fields.IgnoreFileErrors,
+			IgnoreFileErrorsSet:      tt.fields.IgnoreFileErrorsSet,
+			IgnoreDirectoryErrors:    tt.fields.IgnoreDirectoryErrors,
+			IgnoreDirectoryErrorsSet: tt.fields.IgnoreDirectoryErrorsSet,
+		}
+		p.Merge(tt.args.src)
+
+		if !reflect.DeepEqual(*p, tt.expResult) {
+			t.Errorf("Policy after merge was not what was expected\n%v != %v", p, tt.expResult)
+		}
 	}
 }
