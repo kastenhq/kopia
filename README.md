@@ -3,6 +3,7 @@ Kopia
 
 ![Kopia](icons/kopia.svg)
 [![Linux/macOS Build Status](https://travis-ci.org/kopia/kopia.svg?branch=master)](https://travis-ci.org/kopia/kopia)
+[![Slack](https://img.shields.io/badge/discuss-slack-blue.svg)](https://slack.kopia.io/) 
 [![GoDoc](https://godoc.org/github.com/kopia/kopia/repo?status.svg)](https://godoc.org/github.com/kopia/kopia/repo)
 [![Coverage Status](https://coveralls.io/repos/github/kopia/kopia/badge.svg?branch=master)](https://coveralls.io/github/kopia/kopia?branch=master)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kopia/kopia)](https://goreportcard.com/report/github.com/kopia/kopia)
@@ -34,7 +35,7 @@ Kopia is open source and contributions are welcome. For more information on how 
 
 Reporting Security Issues
 ---
-If you find a security issue you'd like to disclose privately, please contact `jaak@jkowalski.net` or via direct message on [Slack](https://join.slack.com/t/kopia/shared_invite/enQtNjMxMTcxMTMxNDYwLWI4YzVkMzFhN2QwZGVhMzgwZDk2MGUzNmZhOWZkMmIzMDBlYzhmZTI3NTYxZWE1YWI4YWY1N2VhMGM4ZjJiNGQ).
+If you find a security issue you'd like to disclose privately, please contact `jaak@jkowalski.net` or via direct message on [Slack](https://slack.kopia.io).
 
 
 Disclaimer
