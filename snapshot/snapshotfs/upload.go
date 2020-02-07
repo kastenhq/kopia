@@ -330,7 +330,7 @@ func (u *Uploader) processSubdirectories(ctx context.Context, relativePath strin
 
 		if err != nil {
 			ignoreDirErr := policyTree.EffectivePolicy().ErrorHandlingPolicy.IgnoreDirectoryErrors
-			if _, ok := err.(DirReadError); ok && ignoreDirErr {
+			if _, ok := err.(dirReadError); ok && ignoreDirErr {
 				log.Warningf("unable to read directory %q: %s, ignoring", dir.Name(), err)
 				return nil
 			}
@@ -611,9 +611,8 @@ func uniqueDirectories(dirs []fs.Directory) []fs.Directory {
 	return result
 }
 
-// DirReadError distinguishes an error thrown when attempting to
-// read a directory
-type DirReadError struct {
+// dirReadError distinguishes an error thrown when attempting to read a directory
+type dirReadError struct {
 	error
 }
 
@@ -641,7 +640,7 @@ func uploadDirInternal(
 	log.Debugf("finished reading directory %v", dirRelativePath)
 
 	if direrr != nil {
-		return "", fs.DirectorySummary{}, DirReadError{direrr}
+		return "", fs.DirectorySummary{}, dirReadError{direrr}
 	}
 
 	var prevEntries []fs.Entries
