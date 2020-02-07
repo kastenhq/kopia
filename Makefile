@@ -76,7 +76,7 @@ else
 travis-release: goreleaser kopia-ui website
 	$(MAKE) test-all
 	$(MAKE) integration-tests
-	$(MAKE) robustness-tests
+	$(MAKE) robustness-tool-tests
 	$(MAKE) stress-test
 ifneq ($(TRAVIS_TAG),)
 	$(MAKE) travis-create-long-term-repository
@@ -139,7 +139,7 @@ dist-binary:
 integration-tests: dist-binary
 	KOPIA_EXE=$(CURDIR)/dist/integration/kopia $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 300s github.com/kopia/kopia/tests/end_to_end_test
 
-robustness-tests: fio
+robustness-tool-tests: fio
 	FIO_EXE=$(shell which fio) $(GO_TEST) -v -count=1 -timeout 90s github.com/kopia/kopia/tests/tools/...
 
 stress-test:
