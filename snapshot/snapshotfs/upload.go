@@ -331,7 +331,7 @@ func (u *Uploader) processSubdirectories(ctx context.Context, relativePath strin
 		if err != nil {
 			// Note: This only catches errors in subdirectories of the snapshot root, not on the snapshot
 			// root itself. The intention is to always fail if the top level directory can't be read,
-			// otherwise a meaningless snapshot is created that can't be restored.
+			// otherwise a meaningless, empty snapshot is created that can't be restored.
 			ignoreDirErr := u.IgnoreReadErrors || policyTree.EffectivePolicy().ErrorHandlingPolicy.IgnoreDirectoryErrors
 			if _, ok := err.(dirReadError); ok && ignoreDirErr {
 				log.Warningf("unable to read directory %q: %s, ignoring", dir.Name(), err)
