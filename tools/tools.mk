@@ -57,7 +57,7 @@ endif
 
 # fio
 fio:
-ifeq ($(uname),Linux)
+ifneq (, $(strip $(shell which apt-get)))
 	sudo apt-get -qq update
 	sudo apt-get -y install fio
 endif
@@ -71,4 +71,3 @@ $(GORELEASER_TOOL):
 
 clean-tools:
 	rm -rf $(TOOLS_DIR)
-	sudo apt-get -y purge fio
