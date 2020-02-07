@@ -39,9 +39,6 @@ type Uploader struct {
 	// ignore file read errors
 	IgnoreFileErrors bool
 
-	// ignore directory read errors
-	IgnoreDirErrors bool
-
 	// probability with cached entries will be ignored, must be [0..100]
 	// 0=always use cached object entries if possible
 	// 100=never use cached entries
