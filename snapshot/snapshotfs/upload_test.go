@@ -223,7 +223,7 @@ func TestUpload_SubDirectoryReadFailure(t *testing.T) {
 	th.sourceDir.Subdir("d1").FailReaddir(errTest)
 
 	u := NewUploader(th.repo)
-	u.IgnoreFileErrors = false
+	u.IgnoreReadErrors = false
 
 	policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
 

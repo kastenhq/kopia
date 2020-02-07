@@ -36,8 +36,8 @@ type Uploader struct {
 	// automatically cancel the Upload after certain number of bytes
 	MaxUploadBytes int64
 
-	// ignore file read errors
-	IgnoreFileErrors bool
+	// ignore read errors
+	IgnoreReadErrors bool
 
 	// probability with cached entries will be ignored, must be [0..100]
 	// 0=always use cached object entries if possible
@@ -329,7 +329,7 @@ func (u *Uploader) processSubdirectories(ctx context.Context, relativePath strin
 		}
 
 		if err != nil {
-			ignoreDirErr := policyTree.EffectivePolicy().ErrorHandlingPolicy.IgnoreDirectoryErrors
+			ignoreDirErr := u.IgnoreReadErrors || policyTree.EffectivePolicy().ErrorHandlingPolicy.IgnoreDirectoryErrors
 			if _, ok := err.(dirReadError); ok && ignoreDirErr {
 				log.Warningf("unable to read directory %q: %s, ignoring", dir.Name(), err)
 				return nil
@@ -674,7 +674,7 @@ func uploadDirInternal(
 	}
 
 	errHandlingPolicy := policyTree.EffectivePolicy().ErrorHandlingPolicy
-	ignoreFileErrs := u.IgnoreFileErrors || errHandlingPolicy.IgnoreFileErrors
+	ignoreFileErrs := u.IgnoreReadErrors || errHandlingPolicy.IgnoreFileErrors
 
 	if err := u.processUploadWorkItems(workItems, dirManifest, ignoreFileErrs); err != nil && err != errCancelled {
 		return "", fs.DirectorySummary{}, err
@@ -703,7 +703,7 @@ func NewUploader(r *repo.Repository) *Uploader {
 	return &Uploader{
 		repo:             r,
 		Progress:         &nullUploadProgress{},
-		IgnoreFileErrors: false,
+		IgnoreReadErrors: false,
 		ParallelUploads:  1,
 	}
 }
