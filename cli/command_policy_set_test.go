@@ -120,6 +120,74 @@ func TestSetErrorHandlingPolicyFromFlags(t *testing.T) {
 			expErr:         false,
 			expChangeCount: 2,
 		},
+		{
+			name: "File false, dir true",
+			startingPolicy: &policy.ErrorHandlingPolicy{
+				IgnoreFileErrors:      true,
+				IgnoreDirectoryErrors: true,
+			},
+			fileArg: "false",
+			dirArg:  "true",
+			expResult: &policy.ErrorHandlingPolicy{
+				IgnoreFileErrors:         false,
+				IgnoreFileErrorsSet:      true,
+				IgnoreDirectoryErrors:    true,
+				IgnoreDirectoryErrorsSet: true,
+			},
+			expErr:         false,
+			expChangeCount: 2,
+		},
+		{
+			name: "File true, dir false",
+			startingPolicy: &policy.ErrorHandlingPolicy{
+				IgnoreFileErrors:      true,
+				IgnoreDirectoryErrors: true,
+			},
+			fileArg: "true",
+			dirArg:  "false",
+			expResult: &policy.ErrorHandlingPolicy{
+				IgnoreFileErrors:         true,
+				IgnoreFileErrorsSet:      true,
+				IgnoreDirectoryErrors:    false,
+				IgnoreDirectoryErrorsSet: true,
+			},
+			expErr:         false,
+			expChangeCount: 2,
+		},
+		{
+			name: "File inherit, dir true",
+			startingPolicy: &policy.ErrorHandlingPolicy{
+				IgnoreFileErrors:      true,
+				IgnoreDirectoryErrors: true,
+			},
+			fileArg: "inherit",
+			dirArg:  "true",
+			expResult: &policy.ErrorHandlingPolicy{
+				IgnoreFileErrors:         true,
+				IgnoreFileErrorsSet:      false,
+				IgnoreDirectoryErrors:    true,
+				IgnoreDirectoryErrorsSet: true,
+			},
+			expErr:         false,
+			expChangeCount: 2,
+		},
+		{
+			name: "File true, dir inherit",
+			startingPolicy: &policy.ErrorHandlingPolicy{
+				IgnoreFileErrors:      true,
+				IgnoreDirectoryErrors: true,
+			},
+			fileArg: "true",
+			dirArg:  "inherit",
+			expResult: &policy.ErrorHandlingPolicy{
+				IgnoreFileErrors:         true,
+				IgnoreFileErrorsSet:      true,
+				IgnoreDirectoryErrors:    true,
+				IgnoreDirectoryErrorsSet: false,
+			},
+			expErr:         false,
+			expChangeCount: 2,
+		},
 	} {
 		t.Log(tc.name)
 
