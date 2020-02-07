@@ -329,6 +329,11 @@ func (u *Uploader) processSubdirectories(ctx context.Context, relativePath strin
 		}
 
 		if err != nil {
+			ignoreDirErr := policyTree.EffectivePolicy().ErrorHandlingPolicy.IgnoreDirectoryErrors
+			if _, ok := err.(DirReadError); ok && ignoreDirErr {
+				log.Warningf("unable to read directory %q: %s, ignoring", dir.Name(), err)
+				return nil
+			}
 			return errors.Errorf("unable to process directory %q: %s", entry.Name(), err)
 		}
 
@@ -536,7 +541,7 @@ func (u *Uploader) launchWorkItems(workItems []*uploadWorkItem, wg *sync.WaitGro
 	}
 }
 
-func (u *Uploader) processUploadWorkItems(workItems []*uploadWorkItem, dirManifest *snapshot.DirManifest) error {
+func (u *Uploader) processUploadWorkItems(workItems []*uploadWorkItem, dirManifest *snapshot.DirManifest, ignoreFileErrs bool) error {
 	var wg sync.WaitGroup
 
 	u.launchWorkItems(workItems, &wg)
@@ -550,7 +555,7 @@ func (u *Uploader) processUploadWorkItems(workItems []*uploadWorkItem, dirManife
 		}
 
 		if result.err != nil {
-			if u.IgnoreFileErrors {
+			if ignoreFileErrs {
 				u.stats.ReadErrors++
 
 				log.Warningf("unable to hash file %q: %s, ignoring", it.entryRelativePath, result.err)
@@ -606,6 +611,12 @@ func uniqueDirectories(dirs []fs.Directory) []fs.Directory {
 	return result
 }
 
+// DirReadError distinguishes an error thrown when attempting to
+// read a directory
+type DirReadError struct {
+	error
+}
+
 func uploadDirInternal(
 	ctx context.Context,
 	u *Uploader,
@@ -630,7 +641,7 @@ func uploadDirInternal(
 	log.Debugf("finished reading directory %v", dirRelativePath)
 
 	if direrr != nil {
-		return "", fs.DirectorySummary{}, direrr
+		return "", fs.DirectorySummary{}, DirReadError{direrr}
 	}
 
 	var prevEntries []fs.Entries
@@ -663,7 +674,10 @@ func uploadDirInternal(
 		return "", fs.DirectorySummary{}, workItemErr
 	}
 
-	if err := u.processUploadWorkItems(workItems, dirManifest); err != nil && err != errCancelled {
+	errHandlingPolicy := policyTree.EffectivePolicy().ErrorHandlingPolicy
+	ignoreFileErrs := u.IgnoreFileErrors || errHandlingPolicy.IgnoreFileErrors
+
+	if err := u.processUploadWorkItems(workItems, dirManifest, ignoreFileErrs); err != nil && err != errCancelled {
 		return "", fs.DirectorySummary{}, err
 	}
 
@@ -690,7 +704,7 @@ func NewUploader(r *repo.Repository) *Uploader {
 	return &Uploader{
 		repo:             r,
 		Progress:         &nullUploadProgress{},
-		IgnoreFileErrors: true,
+		IgnoreFileErrors: false,
 		ParallelUploads:  1,
 	}
 }
