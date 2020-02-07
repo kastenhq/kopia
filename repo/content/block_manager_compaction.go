@@ -35,7 +35,7 @@ func (bm *Manager) CompactIndexes(ctx context.Context, opt CompactOptions) error
 
 	contentsToCompact := bm.getContentsToCompact(indexBlobs, opt)
 
-	if err := bm.compactAndDeleteIndexBlobs(ctx, contentsToCompact, opt); err != nil {
+	if err := bm.compactAndDeleteIndexBlobs(ctx, contentsToCompact); err != nil {
 		log.Warningf("error performing quick compaction: %v", err)
 	}
 
@@ -82,7 +82,7 @@ func (bm *Manager) getContentsToCompact(indexBlobs []IndexBlobInfo, opt CompactO
 	return nonCompactedBlobs
 }
 
-func (bm *Manager) compactAndDeleteIndexBlobs(ctx context.Context, indexBlobs []IndexBlobInfo, opt CompactOptions) error {
+func (bm *Manager) compactAndDeleteIndexBlobs(ctx context.Context, indexBlobs []IndexBlobInfo) error {
 	if len(indexBlobs) <= 1 {
 		return nil
 	}
@@ -93,7 +93,7 @@ func (bm *Manager) compactAndDeleteIndexBlobs(ctx context.Context, indexBlobs []
 	bld := make(packIndexBuilder)
 
 	for _, indexBlob := range indexBlobs {
-		if err := bm.addIndexBlobsToBuilder(ctx, bld, indexBlob, opt); err != nil {
+		if err := bm.addIndexBlobsToBuilder(ctx, bld, indexBlob); err != nil {
 			return err
 		}
 	}
@@ -125,7 +125,7 @@ func (bm *Manager) compactAndDeleteIndexBlobs(ctx context.Context, indexBlobs []
 	return nil
 }
 
-func (bm *Manager) addIndexBlobsToBuilder(ctx context.Context, bld packIndexBuilder, indexBlob IndexBlobInfo, opt CompactOptions) error {
+func (bm *Manager) addIndexBlobsToBuilder(ctx context.Context, bld packIndexBuilder, indexBlob IndexBlobInfo) error {
 	data, err := bm.getIndexBlobInternal(ctx, indexBlob.BlobID)
 	if err != nil {
 		return err
