@@ -137,10 +137,6 @@ func (bm *Manager) addIndexBlobsToBuilder(ctx context.Context, bld packIndexBuil
 	}
 
 	_ = index.Iterate("", func(i Info) error {
-		if i.Deleted && opt.SkipDeletedOlderThan > 0 && time.Since(i.Timestamp()) > opt.SkipDeletedOlderThan {
-			log.Debugf("skipping content %v deleted at %v", i.ID, i.Timestamp())
-			return nil
-		}
 		bld.Add(i)
 		return nil
 	})
