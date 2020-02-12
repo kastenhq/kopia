@@ -578,7 +578,6 @@ func Test_validateReport(t *testing.T) {
 }
 
 func Test_rerootWithCheckRename(t *testing.T) {
-
 	for _, tt := range []struct {
 		name     string
 		file     *fspb.File
