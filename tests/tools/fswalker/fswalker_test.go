@@ -358,6 +358,36 @@ func Test_isRootDirectoryRename(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "Check path is \"./\", equivalent representation of root dir",
+			args: args{
+				diffItem: "name: \"fio-data-902268402\" => \"restore-snap-43720e98eaa9b40ec0be735e347bb853964221402\"",
+				mod: fswalker.ActionData{
+					Before: &fspb.File{
+						Path: "./",
+						Info: &fspb.FileInfo{
+							IsDir: true,
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Check path is \"./asdf/bsdf/../../\", equivalent representation of root dir",
+			args: args{
+				diffItem: "name: \"fio-data-902268402\" => \"restore-snap-43720e98eaa9b40ec0be735e347bb853964221402\"",
+				mod: fswalker.ActionData{
+					Before: &fspb.File{
+						Path: "./asdf/bsdf/../../",
+						Info: &fspb.FileInfo{
+							IsDir: true,
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
 			name: "Check a root name change",
 			args: args{
 				diffItem: "name: \"fio-data-902268402\" => \"restore-snap-43720e98eaa9b40ec0be735e347bb853964221402\"",
@@ -400,7 +430,7 @@ func Test_isRootDirectoryRename(t *testing.T) {
 					},
 				},
 			},
-			want: false,
+			want: true,
 		},
 		{
 			name: "Check a non-name change diff item on root",

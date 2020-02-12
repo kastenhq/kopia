@@ -163,7 +163,15 @@ func isRootDirectoryRename(diffItem string, mod fswalker.ActionData) bool {
 		return false
 	}
 
-	return mod.Before.Info.IsDir && mod.Before.Path == "."
+	// The mod.Before.Path may be given from fswalker Report as "./". Get its
+	// path relative to ".", which should be "." independent of representation
+	// if it is the root directory.
+	rel, err := filepath.Rel(mod.Before.Path, ".")
+	if err != nil {
+		return false
+	}
+
+	return mod.Before.Info.IsDir && rel == "."
 }
 
 func validateReport(report *fswalker.Report) error {
