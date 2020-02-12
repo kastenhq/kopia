@@ -163,7 +163,7 @@ func isRootDirectoryRename(diffItem string, mod fswalker.ActionData) bool {
 		return false
 	}
 
-	return mod.Before.Info.IsDir && filepath.Dir(mod.Before.Path) == "."
+	return mod.Before.Info.IsDir && mod.Before.Path == "."
 }
 
 func validateReport(report *fswalker.Report) error {

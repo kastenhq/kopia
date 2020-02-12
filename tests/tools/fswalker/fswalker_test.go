@@ -348,7 +348,7 @@ func Test_isRootDirectoryRename(t *testing.T) {
 				diffItem: "name: \"fio-data-902268402\" => \"restore-snap-43720e98eaa9b40ec0be735e347bb853964221402\"",
 				mod: fswalker.ActionData{
 					Before: &fspb.File{
-						Path: "this_is_restore_directory_root",
+						Path: ".",
 						Info: &fspb.FileInfo{
 							IsDir: true,
 						},
@@ -356,6 +356,21 @@ func Test_isRootDirectoryRename(t *testing.T) {
 				},
 			},
 			want: true,
+		},
+		{
+			name: "Check a root name change",
+			args: args{
+				diffItem: "name: \"fio-data-902268402\" => \"restore-snap-43720e98eaa9b40ec0be735e347bb853964221402\"",
+				mod: fswalker.ActionData{
+					Before: &fspb.File{
+						Path: "this_is_in_the_root",
+						Info: &fspb.FileInfo{
+							IsDir: true,
+						},
+					},
+				},
+			},
+			want: false,
 		},
 		{
 			name: "Check a non-root name change",
@@ -385,7 +400,7 @@ func Test_isRootDirectoryRename(t *testing.T) {
 					},
 				},
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name: "Check a non-name change diff item on root",
@@ -528,6 +543,61 @@ func Test_validateReport(t *testing.T) {
 
 		if err := validateReport(tc.args.report); (err != nil) != tc.wantErr {
 			t.Errorf("validateReport() error = %v, wantErr %v", err, tc.wantErr)
+		}
+	}
+}
+
+func Test_rerootWithCheckRename(t *testing.T) {
+
+	for _, tt := range []struct {
+		name     string
+		file     *fspb.File
+		newRoot  string
+		diffItem string
+		want     bool
+	}{
+		{
+			name: "diff item refers to root dir",
+			file: &fspb.File{
+				Path: "/some/absolute/path/to/source",
+				Info: &fspb.FileInfo{
+					Name:  "source",
+					IsDir: true,
+				},
+			},
+			newRoot:  "/some/absolute/path/to/source",
+			diffItem: "name: \"source\" => \"target\"",
+			want:     true,
+		},
+		{
+			name: "diff item refers to a subdir of root dir",
+			file: &fspb.File{
+				Path: "/some/absolute/path/to/source/subdir",
+				Info: &fspb.FileInfo{
+					Name:  "subdir",
+					IsDir: true,
+				},
+			},
+			newRoot:  "/some/absolute/path/to/source",
+			diffItem: "name: \"subdir\" => \"some_unexpected_name\"",
+			want:     false,
+		},
+	} {
+		t.Log(tt.name)
+
+		walk := &fspb.Walk{
+			File: []*fspb.File{
+				tt.file,
+			},
+		}
+
+		err := rerootWalkDataPaths(walk, tt.newRoot)
+		if err != nil {
+			t.Errorf("rerootWalkDataPaths() error = %v", err)
+		}
+
+		if got := isRootDirectoryRename(tt.diffItem, fswalker.ActionData{Before: tt.file}); got != tt.want {
+			t.Errorf("isRootDirectoryRename() got = %v, want %v", got, tt.want)
 		}
 	}
 }
