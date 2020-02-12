@@ -1,3 +1,5 @@
+// +build linux
+
 // Package fswalker provides the checker.Comparer interface using FSWalker
 // walker and reporter.
 package fswalker
