@@ -1,0 +1,13 @@
+dist: bionic
+language: go
+go:
+- 1.16.x
+os:
+- linux
+install: echo
+script: docker/kopia-alpine/build.sh kanisterio/kopia
+git:
+  depth: 10
+env:
+- GO111MODULE=on
+import: docker/travis.yml
