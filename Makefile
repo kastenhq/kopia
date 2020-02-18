@@ -81,18 +81,15 @@ html-ui-bindata-fallback: $(go_bindata)
 kopia-ui:
 	$(MAKE) -C app build-electron
 
+#	$(MAKE) goreleaser
 travis-release:
-	$(retry) $(MAKE) goreleaser
-	$(retry) $(MAKE) kopia-ui
-	$(MAKE) lint vet test-with-coverage html-ui-tests
+	$(MAKE) lint vet test-with-coverage
 	$(retry) $(MAKE) layering-test
 	$(retry) $(MAKE) integration-tests
 ifeq ($(TRAVIS_OS_NAME),linux)
 	$(MAKE) robustness-tool-tests
-	$(MAKE) website
 	$(MAKE) stress-test
 	$(MAKE) travis-create-long-term-repository
-	$(MAKE) upload-coverage
 endif
 
 # goreleaser - builds binaries for all platforms
