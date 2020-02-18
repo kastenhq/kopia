@@ -123,7 +123,7 @@ travis-release:
 	$(MAKE) lint
 else
 
-travis-release:
+travis-release: gotestsum
 ifeq ($(TRAVIS_PULL_REQUEST),false)
 	$(retry) $(MAKE) goreleaser
 	$(retry) $(MAKE) kopia-ui
@@ -138,7 +138,6 @@ ifeq ($(TRAVIS_OS_NAME),linux)
 	$(MAKE) robustness-tool-tests
 	$(MAKE) stress-test
 	$(MAKE) travis-create-long-term-repository
-	$(MAKE) upload-coverage
 endif
 
 endif

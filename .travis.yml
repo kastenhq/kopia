@@ -1,0 +1,13 @@
+dist: bionic
+osx_image: xcode11.3
+language: go
+go:
+- 1.15.x
+os:
+- linux
+install: go mod download
+script: make travis-release
+git:
+  depth: 10
+env:
+- GO111MODULE=on
