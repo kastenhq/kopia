@@ -87,7 +87,7 @@ travis-release: install kopia-ui
 endif
 
 ifeq ($(TRAVIS_OS_NAME),linux)
-travis-release: goreleaser kopia-ui website
+travis-release: install-noui
 	$(MAKE) test-all
 	$(MAKE) integration-tests
 	$(MAKE) stress-test
