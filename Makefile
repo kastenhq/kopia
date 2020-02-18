@@ -18,7 +18,8 @@ endif
 include tools/tools.mk
 
 GOTESTSUM_FORMAT=pkgname-and-test-fails
-GO_TEST=$(gotestsum) --format=$(GOTESTSUM_FORMAT) --no-summary=skipped --
+GOTESTSUM_FLAGS=--format=$(GOTESTSUM_FORMAT) --no-summary=skipped 
+GO_TEST=$(gotestsum) $(GOTESTSUM_FLAGS) --
 
 LINTER_DEADLINE=300s
 UNIT_TESTS_TIMEOUT=300s
@@ -352,6 +353,6 @@ perf-benchmark-test-all:
 	$(MAKE) perf-benchmark-test PERF_BENCHMARK_VERSION=0.7.0~rc1
 
 perf-benchmark-results:
-	gcloud compute scp $(PERF_BENCHMARK_INSTANCE):psrecord-* tests/perf_benchmark --zone=$(PERF_BENCHMARK_INSTANCE_ZONE) 
+	gcloud compute scp $(PERF_BENCHMARK_INSTANCE):psrecord-* tests/perf_benchmark --zone=$(PERF_BENCHMARK_INSTANCE_ZONE)
 	gcloud compute scp $(PERF_BENCHMARK_INSTANCE):repo-size-* tests/perf_benchmark --zone=$(PERF_BENCHMARK_INSTANCE_ZONE)
 	(cd tests/perf_benchmark && go run process_results.go)
