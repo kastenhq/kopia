@@ -5,10 +5,11 @@ import "sync"
 var _ Store = &Simple{}
 
 // Simple is a snapstore implementation that stores
-// snapshot metadata as a byte slice in a map in memory
+// snapshot metadata as a byte slice in a map in memory.
+// A Simple should not be copied.
 type Simple struct {
 	m map[string][]byte
-	l *sync.Mutex
+	l sync.Mutex
 }
 
 // NewSimple instantiates a new Simple snapstore and
@@ -16,7 +17,6 @@ type Simple struct {
 func NewSimple() *Simple {
 	return &Simple{
 		m: make(map[string][]byte),
-		l: new(sync.Mutex),
 	}
 }
 
