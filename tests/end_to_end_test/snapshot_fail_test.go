@@ -34,7 +34,7 @@ func TestSnapshotFail(t *testing.T) {
 		t.Skip("this test does not work on Windows")
 	}
 
-	dir0Path := ""
+	dir0Path := "dir0"
 
 	for _, ignoreFileErr := range []string{"true", "false"} {
 		for _, ignoreDirErr := range []string{"true", "false"} {
@@ -183,6 +183,7 @@ func TestSnapshotFail(t *testing.T) {
 				tcIgnoreFileErr := ignoreFileErr
 				tcIdx := ti
 				tc := tt
+				tname := fmt.Sprintf("%s_ignoreFileErr_%s_ignoreDirErr_%s", tc.desc, ignoreDirErr, ignoreFileErr)
 
 				t.Run(tc.desc, func(t *testing.T) {
 					t.Parallel()
