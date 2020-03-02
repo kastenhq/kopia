@@ -169,7 +169,7 @@ robustness-tool-tests: fio-docker-build
 	FIO_EXE="$(shell which fio)" \
 	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
 	FIO_USE_DOCKER=1 \
-	$(GO_TEST) -v -count=1 -timeout 90s github.com/kopia/kopia/tests/tools/...
+	$(GO_TEST) -count=1 -timeout 90s github.com/kopia/kopia/tests/tools/...
 
 stress-test:
 	KOPIA_LONG_STRESS_TEST=1 $(GO_TEST) -count=1 -timeout 200s github.com/kopia/kopia/tests/stress_test
