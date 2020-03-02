@@ -24,6 +24,10 @@ func (fi ctrEncryptor) IsAuthenticated() bool {
 	return false
 }
 
+func (fi ctrEncryptor) IsDeprecated() bool {
+	return true
+}
+
 func symmetricEncrypt(createCipher func() (cipher.Block, error), iv, b []byte) ([]byte, error) {
 	blockCipher, err := createCipher()
 	if err != nil {
@@ -70,7 +74,7 @@ func newCTREncryptorFactory(keySize int, createCipherWithKey func(key []byte) (c
 }
 
 func init() {
-	Register("AES-128-CTR", "AES-128 in CTR mode", false, newCTREncryptorFactory(16, aes.NewCipher)) //nolint:gomnd
-	Register("AES-192-CTR", "AES-192 in CTR mode", false, newCTREncryptorFactory(24, aes.NewCipher)) //nolint:gomnd
-	Register("AES-256-CTR", "AES-256 in CTR mode", false, newCTREncryptorFactory(32, aes.NewCipher)) //nolint:gomnd
+	Register("AES-128-CTR", "DEPRECATED: AES-128 in CTR mode", true, newCTREncryptorFactory(16, aes.NewCipher)) //nolint:gomnd
+	Register("AES-192-CTR", "DEPRECATED: AES-192 in CTR mode", true, newCTREncryptorFactory(24, aes.NewCipher)) //nolint:gomnd
+	Register("AES-256-CTR", "DEPRECATED: AES-256 in CTR mode", true, newCTREncryptorFactory(32, aes.NewCipher)) //nolint:gomnd
 }

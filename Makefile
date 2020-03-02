@@ -7,6 +7,12 @@ FIO_DOCKER_TAG=kopia-test-fio
 
 all: test lint vet integration-tests
 
+retry=
+
+ifneq ($(TRAVIS_OS_NAME),)
+retry=$(CURDIR)/tools/retry.sh
+endif
+
 include tools/tools.mk
 
 -include ./Makefile.local.mk
@@ -64,13 +70,14 @@ html-ui-bindata: html-ui $(go_bindata)
 html-ui-bindata-fallback: $(go_bindata)
 	(cd internal/server && $(go_bindata) -fs -tags !embedhtml -o "$(CURDIR)/internal/server/htmlui_fallback.go" -pkg server index.html)
 
-kopia-ui: goreleaser
+kopia-ui:
 	$(MAKE) -C app build-electron
 
 travis-release:
-	$(MAKE) goreleaser kopia-ui
-	$(MAKE) -j4 lint vet test-with-coverage html-ui-tests
-	$(MAKE) integration-tests
+	$(retry) $(MAKE) goreleaser
+	$(retry) $(MAKE) kopia-ui
+	$(MAKE) lint vet test-with-coverage html-ui-tests
+	$(retry) $(MAKE) integration-tests
 ifeq ($(TRAVIS_OS_NAME),linux)
 	$(MAKE) robustness-tool-tests
 	$(MAKE) website
@@ -113,7 +120,6 @@ GORELEASER_OPTIONS+=--skip-publish
 endif
 
 goreleaser: $(goreleaser)
-	# print current git diff, pipe through cat to avoid blocking the build on pager
 	-git diff | cat
 	$(goreleaser) release $(GORELEASER_OPTIONS)
 
@@ -124,7 +130,7 @@ upload-coverage: $(GOVERALLS_TOOL)
 
 else
 
-uload-coverage:
+upload-coverage:
 	@echo Not uploading coverage during PR build.
 
 endif
