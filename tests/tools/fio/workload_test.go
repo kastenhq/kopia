@@ -17,9 +17,9 @@ func TestWriteFiles(t *testing.T) {
 	defer r.Cleanup()
 
 	relativeWritePath := "some/path/to/check"
-	writeSizeB := int64(256 * 1024 * 1024) // 256 MiB
+	writeFileSizeB := int64(256 * 1024) // 256 KiB
 	numFiles := 13
-	fioOpt := Options{}.WithSize(writeSizeB).WithNumFiles(numFiles)
+	fioOpt := Options{}.WithFileSize(writeFileSizeB).WithNumFiles(numFiles).WithBlockSize(4096)
 
 	// Test a call to WriteFiles
 	err = r.WriteFiles(relativeWritePath, fioOpt)
@@ -36,11 +36,10 @@ func TestWriteFiles(t *testing.T) {
 	sizeTot := int64(0)
 
 	for _, fi := range dir {
-		fmt.Println(fi.Name(), fi.Size())
 		sizeTot += fi.Size()
 	}
 
-	want := (writeSizeB / int64(numFiles)) * int64(numFiles)
+	want := writeFileSizeB * int64(numFiles)
 	if got := sizeTot; got != want {
 		t.Errorf("Did not get the expected amount of data written %v (actual) != %v (expected)", got, want)
 	}
