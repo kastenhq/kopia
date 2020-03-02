@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"runtime"
 	"testing"
-	"time"
 
 	"github.com/kopia/kopia/tests/testenv"
 )
@@ -30,8 +29,6 @@ func TestSnapshotNonexistent(t *testing.T) {
 
 func TestSnapshotFail(t *testing.T) {
 	t.Parallel()
-
-	st := time.Now()
 
 	if runtime.GOOS == "windows" {
 		t.Skip("this test does not work on Windows")
@@ -216,10 +213,6 @@ func TestSnapshotFail(t *testing.T) {
 				})
 			}
 		}
-	}
-
-	if dur, timeout := time.Since(st), 30*time.Second; dur > timeout {
-		t.Errorf("Test took longer than timeout: %v > %v", dur, timeout)
 	}
 }
 func createSimplestFileTree(t *testing.T, dirDepth, currDepth int, currPath string) {
