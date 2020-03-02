@@ -185,7 +185,7 @@ func TestSnapshotFail(t *testing.T) {
 				tc := tt
 				tname := fmt.Sprintf("%s_ignoreFileErr_%s_ignoreDirErr_%s", tc.desc, ignoreDirErr, ignoreFileErr)
 
-				t.Run(tc.desc, func(t *testing.T) {
+				t.Run(tname, func(t *testing.T) {
 					t.Parallel()
 
 					e := testenv.NewCLITest(t)
