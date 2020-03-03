@@ -90,6 +90,7 @@ ifeq ($(TRAVIS_OS_NAME),linux)
 	$(MAKE) robustness-tool-tests
 	$(MAKE) stress-test
 	$(MAKE) travis-create-long-term-repository
+	$(MAKE) upload-coverage
 endif
 
 # goreleaser - builds binaries for all platforms
