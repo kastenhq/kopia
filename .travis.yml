@@ -5,9 +5,10 @@ go:
 - 1.14.x
 os:
 - linux
-install: go mod download
-script: make travis-release
+install: echo
+script: docker/kopia-alpine/build.sh kanisterio/kopia
 git:
   depth: 10
 env:
 - GO111MODULE=on
+import: docker/travis.yml
