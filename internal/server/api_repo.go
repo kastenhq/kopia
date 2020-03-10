@@ -12,8 +12,9 @@ import (
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/compression"
-	"github.com/kopia/kopia/repo/content"
-	"github.com/kopia/kopia/repo/object"
+	"github.com/kopia/kopia/repo/encryption"
+	"github.com/kopia/kopia/repo/hashing"
+	"github.com/kopia/kopia/repo/splitter"
 	"github.com/kopia/kopia/snapshot/policy"
 )
 
@@ -36,7 +37,7 @@ func (s *Server) handleRepoStatus(ctx context.Context, r *http.Request) (interfa
 	}, nil
 }
 
-func maybeDecodeToken(req *serverapi.ConnectRequest) *apiError {
+func maybeDecodeToken(req *serverapi.ConnectRepositoryRequest) *apiError {
 	if req.Token != "" {
 		ci, password, err := repo.DecodeToken(req.Token)
 		if err != nil {
@@ -57,13 +58,13 @@ func (s *Server) handleRepoCreate(ctx context.Context, r *http.Request) (interfa
 		return nil, requestError(serverapi.ErrorAlreadyConnected, "already connected")
 	}
 
-	var req serverapi.CreateRequest
+	var req serverapi.CreateRepositoryRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, requestError(serverapi.ErrorMalformedRequest, "unable to decode request: "+err.Error())
 	}
 
-	if err := maybeDecodeToken(&req.ConnectRequest); err != nil {
+	if err := maybeDecodeToken(&req.ConnectRepositoryRequest); err != nil {
 		return nil, err
 	}
 
@@ -97,7 +98,7 @@ func (s *Server) handleRepoConnect(ctx context.Context, r *http.Request) (interf
 		return nil, requestError(serverapi.ErrorAlreadyConnected, "already connected")
 	}
 
-	var req serverapi.ConnectRequest
+	var req serverapi.ConnectRepositoryRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, requestError(serverapi.ErrorMalformedRequest, "unable to decode request: "+err.Error())
@@ -116,14 +117,14 @@ func (s *Server) handleRepoConnect(ctx context.Context, r *http.Request) (interf
 
 func (s *Server) handleRepoSupportedAlgorithms(ctx context.Context, r *http.Request) (interface{}, *apiError) {
 	res := &serverapi.SupportedAlgorithmsResponse{
-		DefaultHashAlgorithm: content.DefaultHash,
-		HashAlgorithms:       content.SupportedHashAlgorithms(),
+		DefaultHashAlgorithm: hashing.DefaultAlgorithm,
+		HashAlgorithms:       hashing.SupportedAlgorithms(),
 
-		DefaultEncryptionAlgorithm: content.DefaultEncryption,
-		EncryptionAlgorithms:       content.SupportedEncryptionAlgorithms(),
+		DefaultEncryptionAlgorithm: encryption.DefaultAlgorithm,
+		EncryptionAlgorithms:       encryption.SupportedAlgorithms(false),
 
-		DefaultSplitterAlgorithm: object.DefaultSplitter,
-		SplitterAlgorithms:       object.SupportedSplitters,
+		DefaultSplitterAlgorithm: splitter.DefaultAlgorithm,
+		SplitterAlgorithms:       splitter.SupportedAlgorithms(),
 	}
 
 	for k := range compression.ByName {
@@ -174,7 +175,7 @@ func (s *Server) handleRepoDisconnect(ctx context.Context, r *http.Request) (int
 		return nil, internalServerError(err)
 	}
 
-	if err := repo.Disconnect(s.options.ConfigFile); err != nil {
+	if err := repo.Disconnect(ctx, s.options.ConfigFile); err != nil {
 		return nil, internalServerError(err)
 	}
 

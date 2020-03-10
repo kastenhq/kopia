@@ -22,6 +22,10 @@ type Repository struct {
 
 	ConfigFile string
 
+	Hostname string // connected (localhost) hostname
+	Username string // connected username
+
+	timeNow    func() time.Time
 	formatBlob *formatBlob
 	masterKey  []byte
 }
@@ -63,13 +67,13 @@ func (r *Repository) Refresh(ctx context.Context) error {
 		return nil
 	}
 
-	log.Debugf("content index refreshed")
+	log(ctx).Debugf("content index refreshed")
 
 	if err := r.Manifests.Refresh(ctx); err != nil {
 		return errors.Wrap(err, "error reloading manifests")
 	}
 
-	log.Debugf("manifests refreshed")
+	log(ctx).Debugf("manifests refreshed")
 
 	return nil
 }
@@ -83,8 +87,21 @@ func (r *Repository) RefreshPeriodically(ctx context.Context, interval time.Dura
 
 		case <-time.After(interval):
 			if err := r.Refresh(ctx); err != nil {
-				log.Warningf("error refreshing repository: %v", err)
+				log(ctx).Warningf("error refreshing repository: %v", err)
 			}
 		}
 	}
+}
+
+// Time returns the current local time for the repo
+func (r *Repository) Time() time.Time {
+	return defaultTime(r.timeNow)()
+}
+
+func defaultTime(f func() time.Time) func() time.Time {
+	if f != nil {
+		return f
+	}
+
+	return time.Now // allow:no-inject-time
 }

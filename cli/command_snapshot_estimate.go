@@ -70,7 +70,11 @@ func runSnapshotEstimateCommand(ctx context.Context, rep *repo.Repository) error
 		return errors.Errorf("invalid path: '%s': %s", path, err)
 	}
 
-	sourceInfo := snapshot.SourceInfo{Path: filepath.Clean(path), Host: getHostName(), UserName: getUserName()}
+	sourceInfo := snapshot.SourceInfo{
+		Path:     filepath.Clean(path),
+		Host:     rep.Hostname,
+		UserName: rep.Username,
+	}
 
 	var stats snapshot.Stats
 
@@ -78,7 +82,7 @@ func runSnapshotEstimateCommand(ctx context.Context, rep *repo.Repository) error
 	eb := makeBuckets()
 
 	onIgnoredFile := func(relativePath string, e fs.Entry) {
-		log.Noticef("ignoring %v", relativePath)
+		log(ctx).Infof("ignoring %v", relativePath)
 		eb.add(relativePath, e.Size())
 
 		if e.IsDir() {
@@ -89,7 +93,7 @@ func runSnapshotEstimateCommand(ctx context.Context, rep *repo.Repository) error
 		}
 	}
 
-	entry, err := getLocalFSEntry(path)
+	entry, err := getLocalFSEntry(ctx, path)
 	if err != nil {
 		return err
 	}
@@ -167,6 +171,5 @@ func estimate(ctx context.Context, relativePath string, entry fs.Entry, stats *s
 }
 
 func init() {
-	addUserAndHostFlags(snapshotEstimate)
 	snapshotEstimate.Action(repositoryAction(runSnapshotEstimateCommand))
 }

@@ -5,25 +5,25 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"path/filepath"
+	"time"
 
 	"github.com/pkg/errors"
 
-	"github.com/kopia/kopia/internal/repologging"
 	"github.com/kopia/kopia/repo/blob"
-	"github.com/kopia/kopia/repo/blob/logging"
+	loggingwrapper "github.com/kopia/kopia/repo/blob/logging"
 	"github.com/kopia/kopia/repo/content"
+	"github.com/kopia/kopia/repo/logging"
 	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/repo/object"
 )
 
-var (
-	log = repologging.Logger("kopia/repo")
-)
+var log = logging.GetContextLoggerFunc("kopia/repo")
 
 // Options provides configuration parameters for connection to a repository.
 type Options struct {
 	TraceStorage         func(f string, args ...interface{}) // Logs all storage access using provided Printf-style function
 	ObjectManagerOptions object.ManagerOptions
+	TimeNowFunc          func() time.Time // Time provider
 }
 
 // ErrInvalidPassword is returned when repository password is invalid.
@@ -33,7 +33,7 @@ var ErrInvalidPassword = errors.Errorf("invalid repository password")
 func Open(ctx context.Context, configFile, password string, options *Options) (rep *Repository, err error) {
 	defer func() {
 		if err != nil {
-			log.Errorf("failed to open repository: %v", err)
+			log(ctx).Errorf("failed to open repository: %v", err)
 		}
 	}()
 
@@ -57,13 +57,24 @@ func Open(ctx context.Context, configFile, password string, options *Options) (r
 	}
 
 	if options.TraceStorage != nil {
-		st = logging.NewWrapper(st, logging.Prefix("[STORAGE] "), logging.Output(options.TraceStorage))
+		st = loggingwrapper.NewWrapper(st, options.TraceStorage, "[STORAGE] ")
 	}
 
 	r, err := OpenWithConfig(ctx, st, lc, password, options, lc.Caching)
 	if err != nil {
 		st.Close(ctx) //nolint:errcheck
 		return nil, err
+	}
+
+	r.Hostname = lc.Hostname
+	r.Username = lc.Username
+
+	if r.Hostname == "" {
+		r.Hostname = getDefaultHostName(ctx)
+	}
+
+	if r.Username == "" {
+		r.Username = getDefaultUserName(ctx)
 	}
 
 	r.ConfigFile = configFile
@@ -108,7 +119,12 @@ func OpenWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 		fo.MaxPackSize = 20 << 20 // nolint:gomnd
 	}
 
-	cm, err := content.NewManager(ctx, st, fo, caching, fb)
+	cmOpts := content.ManagerOptions{
+		RepositoryFormatBytes: fb,
+		TimeNow:               defaultTime(options.TimeNowFunc),
+	}
+
+	cm, err := content.NewManager(ctx, st, fo, caching, cmOpts)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to open content manager")
 	}
@@ -118,7 +134,7 @@ func OpenWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 		return nil, errors.Wrap(err, "unable to open object manager")
 	}
 
-	manifests, err := manifest.NewManager(ctx, cm)
+	manifests, err := manifest.NewManager(ctx, cm, manifest.ManagerOptions{TimeNow: cmOpts.TimeNow})
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to open manifests")
 	}
@@ -132,17 +148,18 @@ func OpenWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 
 		formatBlob: f,
 		masterKey:  masterKey,
+		timeNow:    cmOpts.TimeNow,
 	}, nil
 }
 
 // SetCachingConfig changes caching configuration for a given repository.
-func (r *Repository) SetCachingConfig(opt content.CachingOptions) error {
+func (r *Repository) SetCachingConfig(ctx context.Context, opt content.CachingOptions) error {
 	lc, err := loadConfigFromFile(r.ConfigFile)
 	if err != nil {
 		return err
 	}
 
-	if err = setupCaching(r.ConfigFile, lc, opt, r.UniqueID); err != nil {
+	if err = setupCaching(ctx, r.ConfigFile, lc, opt, r.UniqueID); err != nil {
 		return errors.Wrap(err, "unable to set up caching")
 	}
 
@@ -176,7 +193,7 @@ func readAndCacheFormatBlobBytes(ctx context.Context, st blob.Storage, cacheDire
 
 	if cacheDirectory != "" {
 		if err := ioutil.WriteFile(cachedFile, b, 0600); err != nil {
-			log.Warningf("warning: unable to write cache: %v", err)
+			log(ctx).Warningf("warning: unable to write cache: %v", err)
 		}
 	}
 

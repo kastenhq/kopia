@@ -14,7 +14,6 @@ var (
 )
 
 func init() {
-	addUserAndHostFlags(policyRemoveCommand)
 	policyRemoveCommand.Action(repositoryAction(removePolicy))
 }
 
@@ -25,7 +24,7 @@ func removePolicy(ctx context.Context, rep *repo.Repository) error {
 	}
 
 	for _, target := range targets {
-		log.Infof("Removing policy on %q...", target)
+		log(ctx).Infof("Removing policy on %q...", target)
 
 		if err := policy.RemovePolicy(ctx, rep, target); err != nil {
 			return err

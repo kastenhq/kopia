@@ -9,6 +9,8 @@ const { stopServer, actuateServer, getServerAddress, getServerCertSHA256, getSer
 const log = require("electron-log")
 const firstRun = require('electron-first-run');
 
+app.name = 'KopiaUI';
+
 ipcMain.on('fetch-config', (event, arg) => {
   event.sender.send('config-updated', config.all());
 })
@@ -24,7 +26,7 @@ let tray = null
 let configWindow = null;
 let mainWindow = null;
 
-function advancedConfiguration() {
+function serverConfiguration() {
   if (configWindow) {
     configWindow.focus();
     return;
@@ -35,21 +37,23 @@ function advancedConfiguration() {
     height: 700,
     autoHideMenuBar: true,
     webPreferences: {
-      nodeIntegration: true
+      nodeIntegration: true,
     },
   })
 
   if (isDev) {
-    configWindow.loadURL('http://localhost:3000');
+    configWindow.loadURL('http://localhost:3000/?ts=' + new Date().valueOf());
   } else {
     configWindow.loadFile('./build/index.html');
   }
+  updateDockIcon();
 
   configWindow.on('closed', function () {
     ipcMain.removeAllListeners('status-updated-event');
     ipcMain.removeAllListeners('logs-updated-event');
     // forget the reference.
     configWindow = null;
+    updateDockIcon();
   });
 }
 
@@ -64,6 +68,9 @@ function showMainWindow() {
     height: 700,
     title: 'Kopia UI Loading...',
     autoHideMenuBar: true,
+    webPreferences: {
+      nodeIntegration: true,
+    },
   })
 
   mainWindow.webContents.on('did-fail-load', () => {
@@ -81,10 +88,12 @@ function showMainWindow() {
   })
 
   mainWindow.loadURL(getServerAddress() + '/?ts=' + new Date().valueOf());
+  updateDockIcon();
 
   mainWindow.on('closed', function () {
     // forget the reference.
     mainWindow = null;
+    updateDockIcon();
   });
 }
 
@@ -163,35 +172,13 @@ function maybeMoveToApplicationsFolder() {
   return false;
 }
 
-function setMenuBar() {
+function updateDockIcon() {
   if (process.platform === 'darwin') {
-    let template = []
-    const name = app.getName();
-    template.unshift({
-      label: name,
-      submenu: [
-        {
-          label: 'About KopiaUI',
-          role: 'about'
-        },
-        {
-          label: 'Quit',
-          accelerator: 'Command+Q',
-          click() { app.quit(); }
-        },
-      ]
-    })
-
-    // Create the Menu
-    const menu = Menu.buildFromTemplate(template);
-    Menu.setApplicationMenu(menu);
-  }
-}
-
-
-function hideFromDock() {
-  if (process.platform === 'darwin') {
-    app.dock.hide();
+    if (configWindow || mainWindow) {
+      app.dock.show();
+    } else {
+      app.dock.hide();
+    }
   }
 }
 
@@ -199,12 +186,11 @@ app.on('ready', () => {
   log.transports.file.level = "debug"
   autoUpdater.logger = log
 
-  setMenuBar();
   if (maybeMoveToApplicationsFolder()) {
     return
   }
 
-  hideFromDock();
+  updateDockIcon();
 
   checkForUpdates();
 
@@ -229,7 +215,7 @@ function updateTrayContextMenu() {
   console.log('updating tray...');
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Show Main Window', click: showMainWindow },
-    { label: 'Advanced Configuration...', click: advancedConfiguration },
+    { label: 'Server Configuration...', click: serverConfiguration },
     { label: 'Check For Updates Now', click: checkForUpdates },
     { type: 'separator' },
     { label: 'Launch At Startup', type: 'checkbox', click: toggleLaunchAtStartup, checked: willLaunchAtStartup() },

@@ -4,8 +4,10 @@ package serverapi
 import (
 	"time"
 
+	"github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
@@ -25,6 +27,9 @@ type StatusResponse struct {
 
 // SourcesResponse is the response of 'sources' HTTP API command.
 type SourcesResponse struct {
+	LocalUsername string `json:"localUsername"`
+	LocalHost     string `json:"localHost"`
+
 	Sources []*SourceStatus `json:"sources"`
 }
 
@@ -33,7 +38,8 @@ type SourceStatus struct {
 	Source           snapshot.SourceInfo        `json:"source"`
 	Status           string                     `json:"status"`
 	SchedulingPolicy policy.SchedulingPolicy    `json:"schedule"`
-	LastSnapshotTime time.Time                  `json:"lastSnapshotTime,omitempty"`
+	LastSnapshotSize *int64                     `json:"lastSnapshotSize,omitempty"`
+	LastSnapshotTime *time.Time                 `json:"lastSnapshotTime,omitempty"`
 	NextSnapshotTime *time.Time                 `json:"nextSnapshotTime,omitempty"`
 	UploadCounters   *snapshotfs.UploadCounters `json:"upload,omitempty"`
 }
@@ -60,15 +66,16 @@ type APIErrorCode string
 // Supported error codes.
 const (
 	ErrorInternal           APIErrorCode = "INTERNAL"
-	ErrorMalformedRequest   APIErrorCode = "MALFORMED_REQUEST"
-	ErrorInvalidToken       APIErrorCode = "INVALID_TOKEN"
-	ErrorStorageConnection  APIErrorCode = "STORAGE_CONNECTION"
-	ErrorAlreadyInitialized APIErrorCode = "ALREADY_INITIALIZED"
-	ErrorNotInitialized     APIErrorCode = "NOT_INITIALIZED"
 	ErrorAlreadyConnected   APIErrorCode = "ALREADY_CONNECTED"
-	ErrorNotConnected       APIErrorCode = "NOT_CONNECTED"
+	ErrorAlreadyInitialized APIErrorCode = "ALREADY_INITIALIZED"
 	ErrorInvalidPassword    APIErrorCode = "INVALID_PASSWORD"
+	ErrorInvalidToken       APIErrorCode = "INVALID_TOKEN"
+	ErrorMalformedRequest   APIErrorCode = "MALFORMED_REQUEST"
+	ErrorNotConnected       APIErrorCode = "NOT_CONNECTED"
 	ErrorNotFound           APIErrorCode = "NOT_FOUND"
+	ErrorNotInitialized     APIErrorCode = "NOT_INITIALIZED"
+	ErrorPathNotFound       APIErrorCode = "PATH_NOT_FOUND"
+	ErrorStorageConnection  APIErrorCode = "STORAGE_CONNECTION"
 )
 
 // ErrorResponse represents error response.
@@ -87,14 +94,14 @@ type MultipleSourceActionResponse struct {
 	Sources map[string]SourceActionResponse `json:"sources"`
 }
 
-// CreateRequest contains request to create a repository in a given storage
-type CreateRequest struct {
-	ConnectRequest
+// CreateRepositoryRequest contains request to create a repository in a given storage
+type CreateRepositoryRequest struct {
+	ConnectRepositoryRequest
 	NewRepositoryOptions repo.NewRepositoryOptions `json:"options"`
 }
 
-// ConnectRequest contains request to connect to a repository.
-type ConnectRequest struct {
+// ConnectRepositoryRequest contains request to connect to a repository.
+type ConnectRepositoryRequest struct {
 	Storage  blob.ConnectionInfo `json:"storage"`
 	Password string              `json:"password"`
 	Token    string              `json:"token"` // when set, overrides Storage and Password
@@ -109,4 +116,35 @@ type SupportedAlgorithmsResponse struct {
 	EncryptionAlgorithms       []string `json:"encryption"`
 	SplitterAlgorithms         []string `json:"splitter"`
 	CompressionAlgorithms      []string `json:"compression"`
+}
+
+// CreateSnapshotSourceRequest contains request to create snapshot source and optionally create first snapshot.
+type CreateSnapshotSourceRequest struct {
+	Path           string        `json:"path"`
+	CreateSnapshot bool          `json:"createSnapshot"`
+	InitialPolicy  policy.Policy `json:"initialPolicy"` // policy to set on the source when first created, ignored if already exists
+}
+
+// CreateSnapshotSourceResponse contains response of creating snapshot source.
+type CreateSnapshotSourceResponse struct {
+	Created         bool `json:"created"`     // whether the source was created (false==previously existed)
+	SnapshotStarted bool `json:"snapshotted"` // whether snapshotting has been started
+}
+
+// Snapshot describes single snapshot entry.
+type Snapshot struct {
+	ID               manifest.ID          `json:"id"`
+	Source           snapshot.SourceInfo  `json:"source"`
+	Description      string               `json:"description"`
+	StartTime        time.Time            `json:"startTime"`
+	EndTime          time.Time            `json:"endTime"`
+	IncompleteReason string               `json:"incomplete,omitempty"`
+	Summary          *fs.DirectorySummary `json:"summary"`
+	RootEntry        string               `json:"rootID"`
+	RetentionReasons []string             `json:"retention"`
+}
+
+// SnapshotsResponse contains a list of snapshots.
+type SnapshotsResponse struct {
+	Snapshots []*Snapshot `json:"snapshots"`
 }

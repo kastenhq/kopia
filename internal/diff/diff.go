@@ -13,11 +13,11 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/fs"
-	"github.com/kopia/kopia/internal/kopialogging"
+	"github.com/kopia/kopia/repo/logging"
 	"github.com/kopia/kopia/repo/object"
 )
 
-var log = kopialogging.Logger("diff")
+var log = logging.GetContextLoggerFunc("diff")
 
 // Comparer outputs diff information between two filesystems.
 type Comparer struct {
@@ -39,7 +39,7 @@ func (c *Comparer) Close() error {
 }
 
 func (c *Comparer) compareDirectories(ctx context.Context, dir1, dir2 fs.Directory, parent string) error {
-	log.Debugf("comparing directories %v", parent)
+	log(ctx).Debugf("comparing directories %v", parent)
 
 	var entries1, entries2 fs.Entries
 
@@ -68,7 +68,7 @@ func (c *Comparer) compareEntry(ctx context.Context, e1, e2 fs.Entry, path strin
 	if h1, ok := e1.(object.HasObjectID); ok {
 		if h2, ok := e2.(object.HasObjectID); ok {
 			if h1.ObjectID() == h2.ObjectID() {
-				log.Debugf("unchanged %v", path)
+				log(ctx).Debugf("unchanged %v", path)
 				return nil
 			}
 		}
@@ -125,7 +125,7 @@ func (c *Comparer) compareEntry(ctx context.Context, e1, e2 fs.Entry, path strin
 
 	if isDir2 {
 		// left is non-directory, right is a directory
-		log.Infof("changed %v from non-directory to a directory", path)
+		log(ctx).Infof("changed %v from non-directory to a directory", path)
 		return nil
 	}
 
@@ -230,10 +230,10 @@ func (c *Comparer) compareFiles(ctx context.Context, f1, f2 fs.File, fname strin
 	newName := "/dev/null"
 
 	if f1 != nil {
-		oldName = filepath.Clean("old/" + fname)
+		oldName = filepath.Join("old", fname)
 		oldFile := filepath.Join(c.tmpDir, oldName)
 
-		if err := c.downloadFile(ctx, f1, oldFile); err != nil {
+		if err := downloadFile(ctx, f1, oldFile); err != nil {
 			return errors.Wrap(err, "error downloading old file")
 		}
 
@@ -241,10 +241,10 @@ func (c *Comparer) compareFiles(ctx context.Context, f1, f2 fs.File, fname strin
 	}
 
 	if f2 != nil {
-		newName = filepath.Clean("new/" + fname)
+		newName = filepath.Join("new", fname)
 		newFile := filepath.Join(c.tmpDir, newName)
 
-		if err := c.downloadFile(ctx, f2, newFile); err != nil {
+		if err := downloadFile(ctx, f2, newFile); err != nil {
 			return errors.Wrap(err, "error downloading new file")
 		}
 		defer os.Remove(newFile) //nolint:errcheck
@@ -263,7 +263,7 @@ func (c *Comparer) compareFiles(ctx context.Context, f1, f2 fs.File, fname strin
 	return nil
 }
 
-func (c *Comparer) downloadFile(ctx context.Context, f fs.File, fname string) error {
+func downloadFile(ctx context.Context, f fs.File, fname string) error {
 	if err := os.MkdirAll(filepath.Dir(fname), 0700); err != nil {
 		return err
 	}

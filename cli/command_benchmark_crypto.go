@@ -6,15 +6,18 @@ import (
 
 	"github.com/kopia/kopia/internal/units"
 	"github.com/kopia/kopia/repo/content"
+	"github.com/kopia/kopia/repo/encryption"
+	"github.com/kopia/kopia/repo/hashing"
 
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
-	benchmarkCryptoCommand    = benchmarkCommands.Command("crypto", "Run hash and encryption benchmarks")
-	benchmarkCryptoBlockSize  = benchmarkCryptoCommand.Flag("block-size", "Size of a block to encrypt").Default("1MB").Bytes()
-	benchmarkCryptoEncryption = benchmarkCryptoCommand.Flag("encryption", "Test encrypted formats").Default("true").Bool()
-	benchmarkCryptoRepeat     = benchmarkCryptoCommand.Flag("repeat", "Number of repetitions").Default("100").Int()
+	benchmarkCryptoCommand              = benchmarkCommands.Command("crypto", "Run hash and encryption benchmarks")
+	benchmarkCryptoBlockSize            = benchmarkCryptoCommand.Flag("block-size", "Size of a block to encrypt").Default("1MB").Bytes()
+	benchmarkCryptoEncryption           = benchmarkCryptoCommand.Flag("encryption", "Test encrypted formats").Default("true").Bool()
+	benchmarkCryptoRepeat               = benchmarkCryptoCommand.Flag("repeat", "Number of repetitions").Default("100").Int()
+	benchmarkCryptoDeprecatedAlgorithms = benchmarkCryptoCommand.Flag("deprecated", "Include deprecated algorithms").Bool()
 )
 
 func runBenchmarkCryptoAction(ctx *kingpin.ParseContext) error {
@@ -28,9 +31,9 @@ func runBenchmarkCryptoAction(ctx *kingpin.ParseContext) error {
 
 	data := make([]byte, *benchmarkCryptoBlockSize)
 
-	for _, ha := range content.SupportedHashAlgorithms() {
-		for _, ea := range content.SupportedEncryptionAlgorithms() {
-			isEncrypted := ea != "NONE"
+	for _, ha := range hashing.SupportedAlgorithms() {
+		for _, ea := range encryption.SupportedAlgorithms(*benchmarkCryptoDeprecatedAlgorithms) {
+			isEncrypted := ea != encryption.NoneAlgorithm
 			if *benchmarkCryptoEncryption != isEncrypted {
 				continue
 			}
@@ -45,7 +48,7 @@ func runBenchmarkCryptoAction(ctx *kingpin.ParseContext) error {
 				continue
 			}
 
-			log.Infof("Benchmarking hash '%v' and encryption '%v'... (%v x %v bytes)", ha, ea, *benchmarkCryptoRepeat, len(data))
+			printStderr("Benchmarking hash '%v' and encryption '%v'... (%v x %v bytes)\n", ha, ea, *benchmarkCryptoRepeat, len(data))
 
 			t0 := time.Now()
 
@@ -53,7 +56,7 @@ func runBenchmarkCryptoAction(ctx *kingpin.ParseContext) error {
 			for i := 0; i < hashCount; i++ {
 				contentID := h(data)
 				if _, encerr := e.Encrypt(data, contentID); encerr != nil {
-					log.Warningf("encryption failed: %v", encerr)
+					printStderr("encryption failed: %v\n", encerr)
 					break
 				}
 			}

@@ -8,16 +8,19 @@ import (
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/content"
+	"github.com/kopia/kopia/repo/encryption"
+	"github.com/kopia/kopia/repo/hashing"
 	"github.com/kopia/kopia/repo/object"
+	"github.com/kopia/kopia/repo/splitter"
 	"github.com/kopia/kopia/snapshot/policy"
 )
 
 var (
 	createCommand = repositoryCommands.Command("create", "Create new repository in a specified location.")
 
-	createBlockHashFormat       = createCommand.Flag("block-hash", "Block hash algorithm.").PlaceHolder("ALGO").Default(content.DefaultHash).Enum(content.SupportedHashAlgorithms()...)
-	createBlockEncryptionFormat = createCommand.Flag("encryption", "Block encryption algorithm.").PlaceHolder("ALGO").Default(content.DefaultEncryption).Enum(content.SupportedEncryptionAlgorithms()...)
-	createSplitter              = createCommand.Flag("object-splitter", "The splitter to use for new objects in the repository").Default(object.DefaultSplitter).Enum(object.SupportedSplitters...)
+	createBlockHashFormat       = createCommand.Flag("block-hash", "Content hash algorithm.").PlaceHolder("ALGO").Default(hashing.DefaultAlgorithm).Enum(hashing.SupportedAlgorithms()...)
+	createBlockEncryptionFormat = createCommand.Flag("encryption", "Content encryption algorithm.").PlaceHolder("ALGO").Default(encryption.DefaultAlgorithm).Enum(encryption.SupportedAlgorithms(false)...)
+	createSplitter              = createCommand.Flag("object-splitter", "The splitter to use for new objects in the repository").Default(splitter.DefaultAlgorithm).Enum(splitter.SupportedAlgorithms()...)
 
 	createOnly = createCommand.Flag("create-only", "Create repository, but don't connect to it.").Short('c').Bool()
 )
@@ -60,7 +63,7 @@ func runCreateCommandWithStorage(ctx context.Context, st blob.Storage) error {
 
 	options := newRepositoryOptionsFromFlags()
 
-	password, err := getPasswordFromFlags(true, false)
+	password, err := getPasswordFromFlags(ctx, true, false)
 	if err != nil {
 		return errors.Wrap(err, "getting password")
 	}
@@ -86,7 +89,7 @@ func runCreateCommandWithStorage(ctx context.Context, st blob.Storage) error {
 }
 
 func populateRepository(ctx context.Context, password string) error {
-	rep, err := repo.Open(ctx, repositoryConfigFileName(), password, applyOptionsFromFlags(nil))
+	rep, err := repo.Open(ctx, repositoryConfigFileName(), password, applyOptionsFromFlags(ctx, nil))
 	if err != nil {
 		return errors.Wrap(err, "unable to open repository")
 	}

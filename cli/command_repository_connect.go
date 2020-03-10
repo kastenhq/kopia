@@ -20,6 +20,9 @@ var (
 	connectMaxCacheSizeMB         int64
 	connectMaxMetadataCacheSizeMB int64
 	connectMaxListCacheDuration   time.Duration
+	connectHostname               string
+	connectUsername               string
+	connectCheckForUpdates        bool
 )
 
 func setupConnectOptions(cmd *kingpin.CmdClause) {
@@ -28,18 +31,24 @@ func setupConnectOptions(cmd *kingpin.CmdClause) {
 	cmd.Flag("persist-credentials", "Persist credentials").Default("true").BoolVar(&connectPersistCredentials)
 	cmd.Flag("cache-directory", "Cache directory").PlaceHolder("PATH").StringVar(&connectCacheDirectory)
 	cmd.Flag("content-cache-size-mb", "Size of local content cache").PlaceHolder("MB").Default("5000").Int64Var(&connectMaxCacheSizeMB)
-	cmd.Flag("metadata-cache-size-mb", "Size of local metadata cache").PlaceHolder("MB").Default("500").Int64Var(&connectMaxMetadataCacheSizeMB)
+	cmd.Flag("metadata-cache-size-mb", "Size of local metadata cache").PlaceHolder("MB").Default("5000").Int64Var(&connectMaxMetadataCacheSizeMB)
 	cmd.Flag("max-list-cache-duration", "Duration of index cache").Default("600s").Hidden().DurationVar(&connectMaxListCacheDuration)
+	cmd.Flag("override-hostname", "Override hostname used by this repository connection").Hidden().StringVar(&connectHostname)
+	cmd.Flag("override-username", "Override username used by this repository connection").Hidden().StringVar(&connectUsername)
+	cmd.Flag("check-for-updates", "Periodically check for Kopia updates on GitHub").Default("true").Envar(checkForUpdatesEnvar).BoolVar(&connectCheckForUpdates)
 }
 
 func connectOptions() *repo.ConnectOptions {
 	return &repo.ConnectOptions{
 		PersistCredentials: connectPersistCredentials,
 		CachingOptions: content.CachingOptions{
-			CacheDirectory:          connectCacheDirectory,
-			MaxCacheSizeBytes:       connectMaxCacheSizeMB << 20, //nolint:gomnd
-			MaxListCacheDurationSec: int(connectMaxListCacheDuration.Seconds()),
+			CacheDirectory:            connectCacheDirectory,
+			MaxCacheSizeBytes:         connectMaxCacheSizeMB << 20,         //nolint:gomnd
+			MaxMetadataCacheSizeBytes: connectMaxMetadataCacheSizeMB << 20, //nolint:gomnd
+			MaxListCacheDurationSec:   int(connectMaxListCacheDuration.Seconds()),
 		},
+		HostnameOverride: connectHostname,
+		UsernameOverride: connectUsername,
 	}
 }
 
@@ -48,7 +57,7 @@ func init() {
 }
 
 func runConnectCommandWithStorage(ctx context.Context, st blob.Storage) error {
-	password, err := getPasswordFromFlags(false, false)
+	password, err := getPasswordFromFlags(ctx, false, false)
 	if err != nil {
 		return errors.Wrap(err, "getting password")
 	}
@@ -63,6 +72,7 @@ func runConnectCommandWithStorageAndPassword(ctx context.Context, st blob.Storag
 	}
 
 	printStderr("Connected to repository.\n")
+	maybeInitializeUpdateCheck(ctx)
 
 	return nil
 }

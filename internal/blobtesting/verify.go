@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"context"
 	"reflect"
-	"testing"
 
 	"github.com/kopia/kopia/repo/blob"
 )
 
 // VerifyStorage verifies the behavior of the specified storage.
-func VerifyStorage(ctx context.Context, t *testing.T, r blob.Storage) {
+func VerifyStorage(ctx context.Context, t testingT, r blob.Storage) {
 	t.Helper()
 
 	blocks := []struct {
@@ -29,13 +28,9 @@ func VerifyStorage(ctx context.Context, t *testing.T, r blob.Storage) {
 		AssertGetBlobNotFound(ctx, t, r, b.blk)
 	}
 
-	ctx2 := blob.WithUploadProgressCallback(ctx, func(desc string, completed, total int64) {
-		log.Infof("progress %v: %v/%v", desc, completed, total)
-	})
-
 	// Now add blocks.
 	for _, b := range blocks {
-		if err := r.PutBlob(ctx2, b.blk, b.contents); err != nil {
+		if err := r.PutBlob(ctx, b.blk, b.contents); err != nil {
 			t.Errorf("can't put blob: %v", err)
 		}
 
@@ -68,7 +63,7 @@ func VerifyStorage(ctx context.Context, t *testing.T, r blob.Storage) {
 
 // AssertConnectionInfoRoundTrips verifies that the ConnectionInfo returned by a given storage can be used to create
 // equivalent storage
-func AssertConnectionInfoRoundTrips(ctx context.Context, t *testing.T, s blob.Storage) {
+func AssertConnectionInfoRoundTrips(ctx context.Context, t testingT, s blob.Storage) {
 	t.Helper()
 
 	ci := s.ConnectionInfo()

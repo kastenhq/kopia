@@ -1,10 +1,17 @@
 COVERAGE_PACKAGES=github.com/kopia/kopia/repo/...,github.com/kopia/kopia/fs/...,github.com/kopia/kopia/snapshot/...
 GO_TEST=go test
 PARALLEL=8
-TEST_FLAGS=
+TEST_FLAGS?=
 KOPIA_INTEGRATION_EXE=$(CURDIR)/dist/integration/kopia.exe
+FIO_DOCKER_TAG=ljishen/fio
 
 all: test lint vet integration-tests
+
+retry=
+
+ifneq ($(TRAVIS_OS_NAME),)
+retry=$(CURDIR)/tools/retry.sh
+endif
 
 include tools/tools.mk
 
@@ -17,7 +24,7 @@ quick-install:
 	# same as install but assumes HTMLUI has been built
 	go install -tags embedhtml
 
-install-noui: 
+install-noui:
 	go install
 
 escape-analysis:
@@ -37,13 +44,22 @@ lint: $(linter)
 lint-and-log: $(linter)
 	$(linter) --deadline 180s run $(linter_flags) | tee .linterr.txt
 
-vet:
+
+vet-time-inject:
+	! find repo snapshot -name '*.go' -not -path 'repo/blob/logging/*' -not -name '*_test.go' \
+	-exec grep -n -e time.Now -e time.Since -e time.Until {} + \
+	| grep -v -e allow:no-inject-time
+
+vet: vet-time-inject
 	go vet -all .
 
 travis-setup: travis-install-gpg-key travis-install-test-credentials all-tools
 	go mod download
 	make -C htmlui node_modules
 	make -C app node_modules
+ifneq ($(TRAVIS_OS_NAME),)
+	-git checkout go.mod go.sum
+endif
 
 website:
 	$(MAKE) -C site build
@@ -60,35 +76,25 @@ html-ui-bindata: html-ui $(go_bindata)
 html-ui-bindata-fallback: $(go_bindata)
 	(cd internal/server && $(go_bindata) -fs -tags !embedhtml -o "$(CURDIR)/internal/server/htmlui_fallback.go" -pkg server index.html)
 
-kopia-ui: goreleaser
+kopia-ui:
 	$(MAKE) -C app build-electron
 
-ifeq ($(TRAVIS_OS_NAME),windows)
-travis-release: install kopia-ui
-	$(MAKE) lint test html-ui-tests
-	$(MAKE) integration-tests
-endif
-
-ifeq ($(TRAVIS_OS_NAME),osx)
-travis-release: install kopia-ui
-	$(MAKE) lint test html-ui-tests
-	$(MAKE) integration-tests
-endif
-
+travis-release:
+	$(retry) $(MAKE) goreleaser
+	$(retry) $(MAKE) kopia-ui
+	$(MAKE) lint vet test-with-coverage html-ui-tests
+	$(retry) $(MAKE) layering-test
+	$(retry) $(MAKE) integration-tests
 ifeq ($(TRAVIS_OS_NAME),linux)
-travis-release: goreleaser kopia-ui website
-	$(MAKE) test-all
-	$(MAKE) integration-tests
+	$(MAKE) robustness-tool-tests
+	$(MAKE) website
 	$(MAKE) stress-test
-ifneq ($(TRAVIS_TAG),)
 	$(MAKE) travis-create-long-term-repository
+	$(MAKE) upload-coverage
 endif
-endif
-
-test-all: lint vet test-with-coverage html-ui-tests html-ui-tests
 
 # goreleaser - builds binaries for all platforms
-GORELEASER_OPTIONS=--rm-dist --skip-publish --parallelism=6
+GORELEASER_OPTIONS=--rm-dist --parallelism=6
 
 sign_gpg=1
 ifneq ($(TRAVIS_PULL_REQUEST),false)
@@ -105,22 +111,33 @@ ifeq ($(sign_gpg),0)
 GORELEASER_OPTIONS+=--skip-sign
 endif
 
+publish_binaries=1
+
 ifeq ($(TRAVIS_TAG),)
 	# not a tagged release
 	GORELEASER_OPTIONS+=--snapshot
+	publish_binaries=0
+endif
+
+ifneq ($(TRAVIS_OS_NAME),linux)
+	publish_binaries=0
+endif
+ifeq ($(publish_binaries),0)
+GORELEASER_OPTIONS+=--skip-publish
 endif
 
 goreleaser: $(goreleaser)
+	-git diff | cat
 	$(goreleaser) release $(GORELEASER_OPTIONS)
 
 ifeq ($(TRAVIS_PULL_REQUEST),false)
 
-upload-coverage: $(GOVERALLS_TOOL) test-with-coverage
+upload-coverage: $(GOVERALLS_TOOL)
 	$(GOVERALLS_TOOL) -service=travis-ci -coverprofile=tmp.cov
 
 else
 
-uload-coverage:
+upload-coverage:
 	@echo Not uploading coverage during PR build.
 
 endif
@@ -133,7 +150,7 @@ dev-deps:
 	GO111MODULE=off go get -u github.com/lukehoban/go-outline
 	GO111MODULE=off go get -u github.com/newhook/go-symbols
 	GO111MODULE=off go get -u github.com/sqs/goreturns
-	
+
 test-with-coverage:
 	$(GO_TEST) -count=1 -coverprofile=tmp.cov --coverpkg $(COVERAGE_PACKAGES) -timeout 90s `go list ./...`
 
@@ -150,11 +167,31 @@ dist-binary:
 	go build -o $(KOPIA_INTEGRATION_EXE) github.com/kopia/kopia
 
 integration-tests: dist-binary
-	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 300s github.com/kopia/kopia/tests/end_to_end_test
+	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 600s github.com/kopia/kopia/tests/end_to_end_test
+
+robustness-tool-tests:
+	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
+	$(GO_TEST) $(TEST_FLAGS) -count=1 -timeout 90s github.com/kopia/kopia/tests/tools/...
 
 stress-test:
 	KOPIA_LONG_STRESS_TEST=1 $(GO_TEST) -count=1 -timeout 200s github.com/kopia/kopia/tests/stress_test
 	$(GO_TEST) -count=1 -timeout 200s github.com/kopia/kopia/tests/repository_stress_test
+
+layering-test:
+ifneq ($(uname),Windows)
+	# verify that code under repo/ can only import code also under repo/ + some
+	# whitelisted internal packages.
+	find repo/ -name '*.go' | xargs grep "^\t\"github.com/kopia/kopia" \
+	   | grep -v -e github.com/kopia/kopia/repo \
+	             -e github.com/kopia/kopia/internal/retry \
+	             -e github.com/kopia/kopia/internal/throttle \
+	             -e github.com/kopia/kopia/internal/blobtesting \
+	             -e github.com/kopia/kopia/internal/repotesting \
+	             -e github.com/kopia/kopia/internal/testlogging \
+	             -e github.com/kopia/kopia/internal/hmac \
+	             -e github.com/kopia/kopia/internal/ctxutil \
+	             -e github.com/kopia/kopia/issues && exit 0 || echo repo/ layering ok
+endif
 
 godoc:
 	godoc -http=:33333

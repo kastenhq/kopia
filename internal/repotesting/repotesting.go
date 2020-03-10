@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/filesystem"
 	"github.com/kopia/kopia/repo/content"
+	"github.com/kopia/kopia/repo/encryption"
 	"github.com/kopia/kopia/repo/object"
 )
 
@@ -30,7 +32,7 @@ type Environment struct {
 func (e *Environment) Setup(t *testing.T, opts ...func(*repo.NewRepositoryOptions)) *Environment {
 	var err error
 
-	ctx := context.Background()
+	ctx := testlogging.Context(t)
 
 	e.configDir, err = ioutil.TempDir("", "")
 	if err != nil {
@@ -46,7 +48,7 @@ func (e *Environment) Setup(t *testing.T, opts ...func(*repo.NewRepositoryOption
 		BlockFormat: content.FormattingOptions{
 			HMACSecret: []byte{},
 			Hash:       "HMAC-SHA256",
-			Encryption: "NONE",
+			Encryption: encryption.NoneAlgorithm,
 		},
 		ObjectFormat: object.Format{
 			Splitter: "FIXED-1M",
@@ -83,13 +85,13 @@ func (e *Environment) Setup(t *testing.T, opts ...func(*repo.NewRepositoryOption
 }
 
 // Close closes testing environment
-func (e *Environment) Close(t *testing.T) {
-	if err := e.Repository.Close(context.Background()); err != nil {
+func (e *Environment) Close(ctx context.Context, t *testing.T) {
+	if err := e.Repository.Close(ctx); err != nil {
 		t.Fatalf("unable to close: %v", err)
 	}
 
 	if e.connected {
-		if err := repo.Disconnect(e.configFile()); err != nil {
+		if err := repo.Disconnect(ctx, e.configFile()); err != nil {
 			t.Errorf("error disconnecting: %v", err)
 		}
 	}
@@ -110,12 +112,12 @@ func (e *Environment) configFile() string {
 
 // MustReopen closes and reopens the repository.
 func (e *Environment) MustReopen(t *testing.T) {
-	err := e.Repository.Close(context.Background())
+	err := e.Repository.Close(testlogging.Context(t))
 	if err != nil {
 		t.Fatalf("close error: %v", err)
 	}
 
-	e.Repository, err = repo.Open(context.Background(), e.configFile(), masterPassword, &repo.Options{})
+	e.Repository, err = repo.Open(testlogging.Context(t), e.configFile(), masterPassword, &repo.Options{})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -125,7 +127,7 @@ func (e *Environment) MustReopen(t *testing.T) {
 func (e *Environment) VerifyBlobCount(t *testing.T, want int) {
 	var got int
 
-	_ = e.Repository.Blobs.ListBlobs(context.Background(), "", func(_ blob.Metadata) error {
+	_ = e.Repository.Blobs.ListBlobs(testlogging.Context(t), "", func(_ blob.Metadata) error {
 		got++
 		return nil
 	})

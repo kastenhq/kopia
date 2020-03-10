@@ -45,6 +45,10 @@ export function parseQuery(queryString) {
 }
 
 export function rfc3339TimestampForDisplay(n) {
+    if (!n) {
+        return "";
+    }
+    
     let t = new Date(n);
     return t.toLocaleString();
 }
@@ -62,4 +66,11 @@ export function ownerName(s) {
 
 export function compare(a, b) {
     return (a < b ? -1 : (a > b ? 1 : 0));
+}
+
+export function redirectIfNotConnected(e) {
+    if (e && e.response && e.response.data && e.response.data.code === "NOT_CONNECTED") {
+        window.location.replace("/repo");
+        return;
+    }
 }

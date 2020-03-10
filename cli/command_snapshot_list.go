@@ -51,7 +51,7 @@ func findSnapshotsForSource(ctx context.Context, rep *repo.Repository, sourceInf
 			relPath = filepath.Base(sourceInfo.Path)
 		}
 
-		log.Debugf("No snapshots of %v@%v:%v", sourceInfo.UserName, sourceInfo.Host, sourceInfo.Path)
+		log(ctx).Debugf("No snapshots of %v@%v:%v", sourceInfo.UserName, sourceInfo.Host, sourceInfo.Path)
 
 		parentPath := filepath.Dir(sourceInfo.Path)
 		if parentPath == sourceInfo.Path {
@@ -70,7 +70,7 @@ func findManifestIDs(ctx context.Context, rep *repo.Repository, source string) (
 		return man, "", err
 	}
 
-	si, err := snapshot.ParseSourceInfo(source, getHostName(), getUserName())
+	si, err := snapshot.ParseSourceInfo(source, rep.Hostname, rep.Username)
 	if err != nil {
 		return nil, "", errors.Errorf("invalid directory: '%s': %s", source, err)
 	}
@@ -97,16 +97,16 @@ func runSnapshotsCommand(ctx context.Context, rep *repo.Repository) error {
 	return outputManifestGroups(ctx, rep, manifests, strings.Split(relPath, "/"))
 }
 
-func shouldOutputSnapshotSource(src snapshot.SourceInfo) bool {
+func shouldOutputSnapshotSource(rep *repo.Repository, src snapshot.SourceInfo) bool {
 	if *snapshotListShowAll {
 		return true
 	}
 
-	if src.Host != getHostName() {
+	if src.Host != rep.Hostname {
 		return false
 	}
 
-	return src.UserName == getUserName()
+	return src.UserName == rep.Username
 }
 
 func outputManifestGroups(ctx context.Context, rep *repo.Repository, manifests []*snapshot.Manifest, relPathParts []string) error {
@@ -116,8 +116,8 @@ func outputManifestGroups(ctx context.Context, rep *repo.Repository, manifests [
 
 	for _, snapshotGroup := range snapshot.GroupBySource(manifests) {
 		src := snapshotGroup[0].Source
-		if !shouldOutputSnapshotSource(src) {
-			log.Debugf("skipping %v", src)
+		if !shouldOutputSnapshotSource(rep, src) {
+			log(ctx).Debugf("skipping %v", src)
 			continue
 		}
 
@@ -128,7 +128,7 @@ func outputManifestGroups(ctx context.Context, rep *repo.Repository, manifests [
 
 		pol, _, err := policy.GetEffectivePolicy(ctx, rep, src)
 		if err != nil {
-			log.Warningf("unable to determine effective policy for %v", src)
+			log(ctx).Warningf("unable to determine effective policy for %v", src)
 		} else {
 			pol.RetentionPolicy.ComputeRetentionReasons(snapshotGroup)
 		}
@@ -186,7 +186,7 @@ func outputManifestFromSingleSource(ctx context.Context, rep *repo.Repository, m
 		}
 
 		if _, ok := ent.(object.HasObjectID); !ok {
-			log.Warningf("entry does not have object ID: %v", ent, err)
+			log(ctx).Warningf("entry does not have object ID: %v", ent, err)
 			continue
 		}
 
@@ -279,6 +279,5 @@ func deltaBytes(b int64) string {
 }
 
 func init() {
-	addUserAndHostFlags(snapshotListCommand)
 	snapshotListCommand.Action(repositoryAction(runSnapshotsCommand))
 }

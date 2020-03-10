@@ -7,6 +7,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/units"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/content"
 )
@@ -14,7 +15,6 @@ import (
 var (
 	contentRewriteCommand     = contentCommands.Command("rewrite", "Rewrite content using most recent format")
 	contentRewriteIDs         = contentRewriteCommand.Arg("contentID", "Identifiers of contents to rewrite").Strings()
-	contentRewritePrefixed    = contentRewriteCommand.Flag("prefixed", "Rewrite contents with a non-empty prefix").Bool()
 	contentRewriteParallelism = contentRewriteCommand.Flag("parallelism", "Number of parallel workers").Default("16").Int()
 
 	contentRewriteShortPacks    = contentRewriteCommand.Flag("short", "Rewrite contents from short packs").Bool()
@@ -49,7 +49,7 @@ func runContentRewriteCommand(ctx context.Context, rep *repo.Repository) error {
 
 			for c := range cnt {
 				if c.err != nil {
-					log.Errorf("got error: %v", c.err)
+					log(ctx).Errorf("got error: %v", c.err)
 					mu.Lock()
 					failedCount++
 					mu.Unlock()
@@ -62,7 +62,7 @@ func runContentRewriteCommand(ctx context.Context, rep *repo.Repository) error {
 					optDeleted = " (deleted)"
 				}
 
-				printStderr("Rewriting content %v (%v bytes) from pack %v%v\n", c.ID, c.Length, c.PackBlobID, optDeleted)
+				printStderr("Rewriting content %v (%v bytes) from pack %v%v %v\n", c.ID, c.Length, c.PackBlobID, optDeleted, formatTimestamp(c.Timestamp()))
 				mu.Lock()
 				totalBytes += int64(c.Length)
 				mu.Unlock()
@@ -72,7 +72,7 @@ func runContentRewriteCommand(ctx context.Context, rep *repo.Repository) error {
 				}
 
 				if err := rep.Content.RewriteContent(ctx, c.ID); err != nil {
-					log.Warningf("unable to rewrite content %q: %v", c.ID, err)
+					log(ctx).Warningf("unable to rewrite content %q: %v", c.ID, err)
 					mu.Lock()
 					failedCount++
 					mu.Unlock()
@@ -83,7 +83,7 @@ func runContentRewriteCommand(ctx context.Context, rep *repo.Repository) error {
 
 	wg.Wait()
 
-	printStderr("Total bytes rewritten %v\n", totalBytes)
+	printStderr("Total bytes rewritten %v\n", units.BytesStringBase10(totalBytes))
 
 	if failedCount == 0 {
 		return nil
@@ -104,12 +104,12 @@ func getContentToRewrite(ctx context.Context, rep *repo.Repository) <-chan conte
 		// add all content IDs from short packs
 		if *contentRewriteShortPacks {
 			threshold := int64(rep.Content.Format.MaxPackSize * shortPackThresholdPercent / 100) //nolint:gomnd
-			findContentInShortPacks(rep, ch, threshold)
+			findContentInShortPacks(ctx, rep, ch, threshold)
 		}
 
 		// add all blocks with given format version
 		if *contentRewriteFormatVersion != -1 {
-			findContentWithFormatVersion(rep, ch, *contentRewriteFormatVersion)
+			findContentWithFormatVersion(ctx, rep, ch, *contentRewriteFormatVersion)
 		}
 	}()
 
@@ -136,8 +136,9 @@ func findContentInfos(ctx context.Context, rep *repo.Repository, ch chan content
 	}
 }
 
-func findContentWithFormatVersion(rep *repo.Repository, ch chan contentInfoOrError, version int) {
+func findContentWithFormatVersion(ctx context.Context, rep *repo.Repository, ch chan contentInfoOrError, version int) {
 	_ = rep.Content.IterateContents(
+		ctx,
 		content.IterateOptions{IncludeDeleted: true},
 		func(b content.Info) error {
 			if int(b.FormatVersion) == version && strings.HasPrefix(string(b.PackBlobID), *contentRewritePackPrefix) {
@@ -147,11 +148,9 @@ func findContentWithFormatVersion(rep *repo.Repository, ch chan contentInfoOrErr
 		})
 }
 
-func findContentInShortPacks(rep *repo.Repository, ch chan contentInfoOrError, threshold int64) {
-	if err := rep.Content.IterateContentInShortPacks(threshold, func(ci content.Info) error {
-		if ci.ID.HasPrefix() == *contentRewritePrefixed {
-			ch <- contentInfoOrError{Info: ci}
-		}
+func findContentInShortPacks(ctx context.Context, rep *repo.Repository, ch chan contentInfoOrError, threshold int64) {
+	if err := rep.Content.IterateContentInShortPacks(ctx, threshold, func(ci content.Info) error {
+		ch <- contentInfoOrError{Info: ci}
 		return nil
 	}); err != nil {
 		ch <- contentInfoOrError{err: err}

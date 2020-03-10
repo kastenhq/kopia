@@ -55,7 +55,6 @@ var (
 )
 
 func init() {
-	addUserAndHostFlags(policyEditCommand)
 	policyEditCommand.Action(repositoryAction(editPolicy))
 }
 
@@ -80,7 +79,7 @@ func editPolicy(ctx context.Context, rep *repo.Repository) error {
 
 		var updated *policy.Policy
 
-		if err := editor.EditLoop("policy.conf", s, func(edited string) error {
+		if err := editor.EditLoop(ctx, "policy.conf", s, func(edited string) error {
 			updated = &policy.Policy{}
 			d := json.NewDecoder(bytes.NewBufferString(edited))
 			d.DisallowUnknownFields()

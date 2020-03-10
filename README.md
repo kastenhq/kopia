@@ -7,7 +7,6 @@ Kopia
 [![GoDoc](https://godoc.org/github.com/kopia/kopia/repo?status.svg)](https://godoc.org/github.com/kopia/kopia/repo)
 [![Coverage Status](https://coveralls.io/repos/github/kopia/kopia/badge.svg?branch=master)](https://coveralls.io/github/kopia/kopia?branch=master)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kopia/kopia)](https://goreportcard.com/report/github.com/kopia/kopia)
-[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fkopia%2Fkopia.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fkopia%2Fkopia?ref=badge_shield)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-v2.0%20adopted-ff69b4.svg)](CODE_OF_CONDUCT.md)
 
 > _n._
@@ -24,7 +23,13 @@ Unlike other cloud backup solutions, the user is in full control of the backup s
 Kopia in action
 ---
 
+Using `kopia` command line tool:
+
 [![asciicast](https://asciinema.org/a/ykx6uzEhKY3451fWEnX9nm9uo.svg)](https://asciinema.org/a/ykx6uzEhKY3451fWEnX9nm9uo)
+
+Kopia UI - experimental user interface
+
+[![Kopia UI Tutorial](https://img.youtube.com/vi/sHJjSpasWIo/0.jpg)](https://www.youtube.com/watch?v=sHJjSpasWIo)
 
 Getting Started
 ---
@@ -77,3 +82,6 @@ Cryptography Notice
 
 
 [![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fkopia%2Fkopia.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2Fkopia%2Fkopia?ref=badge_large)
+
+
+[![Netlify Status](https://api.netlify.com/api/v1/badges/6b5c1fe4-a0da-4e7e-939b-ff1105251985/deploy-status)](https://app.netlify.com/sites/kopia/deploys)

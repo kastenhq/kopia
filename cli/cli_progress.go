@@ -11,6 +11,7 @@ import (
 )
 
 const spinner = `|/-\`
+const hundredPercent = 100.0
 
 type cliProgress struct {
 	snapshotfs.NullUploadProgress
@@ -31,6 +32,12 @@ type cliProgress struct {
 	lastLineLength  int
 	spinPhase       int
 	uploadStartTime time.Time
+
+	previousFileCount int
+	previousTotalSize int64
+
+	// indicates shared instance that does not reset counters at the beginning of upload.
+	shared bool
 }
 
 func (p *cliProgress) FinishedHashingFile(fname string, totalSize int64) {
@@ -99,6 +106,15 @@ func (p *cliProgress) output() {
 		units.BytesStringBase10(uploadedBytes),
 	)
 
+	if p.previousTotalSize > 0 {
+		percent := (float64(hashedBytes+cachedBytes) * hundredPercent / float64(p.previousTotalSize))
+		if percent > hundredPercent {
+			percent = hundredPercent
+		}
+
+		line += fmt.Sprintf(" %.1f%%", percent)
+	}
+
 	var extraSpaces string
 
 	if len(line) < p.lastLineLength {
@@ -122,10 +138,30 @@ func (p *cliProgress) spinnerCharacter() string {
 	return s
 }
 
-func (p *cliProgress) UploadStarted() {
+func (p *cliProgress) StartShared() {
 	*p = cliProgress{
 		uploading:       1,
 		uploadStartTime: time.Now(),
+		shared:          true,
+	}
+}
+
+func (p *cliProgress) FinishShared() {
+	atomic.StoreInt32(&p.uploadFinished, 1)
+	p.output()
+}
+
+func (p *cliProgress) UploadStarted(previousFileCount int, previousTotalSize int64) {
+	if p.shared {
+		// do nothing
+		return
+	}
+
+	*p = cliProgress{
+		uploading:         1,
+		uploadStartTime:   time.Now(),
+		previousFileCount: previousFileCount,
+		previousTotalSize: previousTotalSize,
 	}
 }
 
@@ -135,6 +171,10 @@ func (p *cliProgress) UploadFinished() {
 }
 
 func (p *cliProgress) Finish() {
+	if p.shared {
+		return
+	}
+
 	atomic.StoreInt32(&p.uploadFinished, 1)
 	p.output()
 }
