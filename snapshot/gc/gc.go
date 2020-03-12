@@ -150,20 +150,20 @@ func markUnusedContent(ctx context.Context, rep *repo.DirectRepository, snapIDs 
 			return nil
 		}); err != nil {
 			errCh <- errors.Wrap(err, "error iterating contents")
-
-			cancel()
 		}
 	}()
 
 	const batchSize = 10000
-	if err := deleteUnused(ctx, rep, snapIDs, toDelete, batchSize); err != nil {
-		return st, err
-	}
+	err := deleteUnused(ctx, rep, snapIDs, toDelete, batchSize)
 
 	st.UnusedCount, st.UnusedBytes = unused.Approximate()
 	st.InUseCount, st.InUseBytes = inUse.Approximate()
 	st.SystemCount, st.SystemBytes = system.Approximate()
 	st.TooRecentCount, st.TooRecentBytes = tooRecent.Approximate()
+
+	if err != nil {
+		return st, err
+	}
 
 	return st, <-errCh
 }
