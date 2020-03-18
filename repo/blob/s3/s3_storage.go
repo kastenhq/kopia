@@ -4,6 +4,7 @@ package s3
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -236,6 +237,13 @@ func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 	cli, err := minio.NewWithCredentials(opt.Endpoint, credentials.NewStaticV4(opt.AccessKeyID, opt.SecretAccessKey, opt.SessionToken), !opt.DoNotUseTLS, opt.Region)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to create client")
+	}
+
+	if opt.DoNotVerifyTLS {
+		customTransport := http.DefaultTransport.(*http.Transport).Clone()
+		// nolint:gosec
+		customTransport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		cli.SetCustomTransport(customTransport)
 	}
 
 	downloadThrottler := iothrottler.NewIOThrottlerPool(toBandwidth(opt.MaxDownloadSpeedBytesPerSecond))

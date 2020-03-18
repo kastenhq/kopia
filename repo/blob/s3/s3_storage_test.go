@@ -153,55 +153,60 @@ func TestS3StorageAWSSTS(t *testing.T) {
 func TestS3StorageMinio(t *testing.T) {
 	t.Parallel()
 
-	testutil.Retry(t, func(t *testutil.RetriableT) {
-		options := &Options{
-			Endpoint:        minioEndpoint,
-			AccessKeyID:     minioAccessKeyID,
-			SecretAccessKey: minioSecretAccessKey,
-			BucketName:      minioBucketName,
-			Region:          minioRegion,
-			DoNotUseTLS:     !minioUseSSL,
-		}
+	for _, disableTlsVerify := range []bool{true, false} {
+		testutil.Retry(t, func(t *testutil.RetriableT) {
+			options := &Options{
+				Endpoint:        minioEndpoint,
+				AccessKeyID:     minioAccessKeyID,
+				SecretAccessKey: minioSecretAccessKey,
+				BucketName:      minioBucketName,
+				Region:          minioRegion,
+				DoNotUseTLS:     !minioUseSSL,
+				DoNotVerifyTLS:  disableTlsVerify,
+			}
 
-		if !endpointReachable(options.Endpoint) {
-			t.Skip("endpoint not reachable")
-		}
+			if !endpointReachable(options.Endpoint) {
+				t.Skip("endpoint not reachable")
+			}
 
-		createBucket(t, options)
-		testStorage(t, options)
-	})
+			createBucket(t, options)
+			testStorage(t, options)
+		})
+	}
+
 }
 
 func TestS3StorageMinioSTS(t *testing.T) {
 	t.Parallel()
+	for _, disableTlsVerify := range []bool{true, false} {
+		testutil.Retry(t, func(t *testutil.RetriableT) {
+			// create kopia user and session token
+			kopiaUserName := generateName("kopiauser")
+			kopiaUserPasswd := generateName("kopiapassword")
 
-	testutil.Retry(t, func(t *testutil.RetriableT) {
+			createMinioUser(t, kopiaUserName, kopiaUserPasswd)
+			defer deleteMinioUser(t, kopiaUserName)
+			kopiaAccessKeyID, kopiaSecretKey, kopiaSessionToken := createMinioSessionToken(t, kopiaUserName, kopiaUserPasswd, minioBucketName)
 
-		// create kopia user and session token
-		kopiaUserName := generateName("kopiauser")
-		kopiaUserPasswd := generateName("kopiapassword")
+			options := &Options{
+				Endpoint:        minioEndpoint,
+				AccessKeyID:     kopiaAccessKeyID,
+				SecretAccessKey: kopiaSecretKey,
+				SessionToken:    kopiaSessionToken,
+				BucketName:      minioBucketName,
+				Region:          minioRegion,
+				DoNotUseTLS:     !minioUseSSL,
+				DoNotVerifyTLS:  disableTlsVerify,
+			}
 
-		createMinioUser(t, kopiaUserName, kopiaUserPasswd)
-		defer deleteMinioUser(t, kopiaUserName)
-		kopiaAccessKeyID, kopiaSecretKey, kopiaSessionToken := createMinioSessionToken(t, kopiaUserName, kopiaUserPasswd, minioBucketName)
+			if !endpointReachable(options.Endpoint) {
+				t.Skip("endpoint not reachable")
+			}
 
-		options := &Options{
-			Endpoint:        minioEndpoint,
-			AccessKeyID:     kopiaAccessKeyID,
-			SecretAccessKey: kopiaSecretKey,
-			SessionToken:    kopiaSessionToken,
-			BucketName:      minioBucketName,
-			Region:          minioRegion,
-			DoNotUseTLS:     !minioUseSSL,
-		}
-
-		if !endpointReachable(options.Endpoint) {
-			t.Skip("endpoint not reachable")
-		}
-
-		createBucket(t, options)
-		testStorage(t, options)
-	})
+			createBucket(t, options)
+			testStorage(t, options)
+		})
+	}
 }
 
 func testStorage(t *testutil.RetriableT, options *Options) {
