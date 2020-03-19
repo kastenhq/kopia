@@ -234,7 +234,7 @@ func testStorage(t *testutil.RetriableT, options *Options) {
 	}
 
 	v, err := retry.WithExponentialBackoff(ctx, "New() S3 storage", attempt, func(err error) bool { return err != nil })
-	if err == nil {
+	if err != nil {
 		t.Fatalf("err: %v, options:%v", err, options)
 	}
 
