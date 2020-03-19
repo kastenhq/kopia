@@ -232,8 +232,8 @@ func testStorage(t *testutil.RetriableT, options *Options) {
 	}
 
 	v, err := retry.WithExponentialBackoff(ctx, "New() S3 storage", attempt, func(err error) bool { return err != nil })
-	if err != nil {
-		t.Fatalf("err: %v", err)
+	if err == nil {
+		t.Fatalf("err: %v, options:%v", err, options)
 	}
 
 	st := v.(blob.Storage)
@@ -267,7 +267,7 @@ func testURL(url string, t *testing.T) {
 
 	err = getURL(url, false)
 	if err == nil {
-		t.Fatalf("expected a failure, but none found for url:%s", url)
+		t.Fatalf("expected a TLS issue, but none found for url:%s", url)
 	}
 }
 
