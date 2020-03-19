@@ -160,7 +160,7 @@ func TestS3StorageAWSSTS(t *testing.T) {
 func TestS3StorageMinio(t *testing.T) {
 	t.Parallel()
 
-	for _, disableTLSVerify := range []bool{true, true} {
+	for _, disableTLSVerify := range []bool{true, false} {
 		disableTLSVerify := disableTLSVerify
 		testutil.Retry(t, func(t *testutil.RetriableT) {
 			options := &Options{
