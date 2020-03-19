@@ -52,11 +52,10 @@ const (
 	testSTSSecretAccessKeyEnv = "KOPIA_S3_TEST_STS_SECRET_ACCESS_KEY"
 	testSessionTokenEnv       = "KOPIA_S3_TEST_SESSION_TOKEN"
 
-	expiredBadSSL         = "https://expired.badssl.com/"
-	selfSignedBadSSL      = "https://self-signed.badssl.com/"
-	untrustedRootBadSSL   = "https://untrusted-root.badssl.com/"
-	wrongHostBadSSL       = "https://wrong.host.badssl.com/"
-	incompleteChainBadSSL = "https://incomplete-chain.badssl.com/"
+	expiredBadSSL       = "https://expired.badssl.com/"
+	selfSignedBadSSL    = "https://self-signed.badssl.com/"
+	untrustedRootBadSSL = "https://untrusted-root.badssl.com/"
+	wrongHostBadSSL     = "https://wrong.host.badssl.com/"
 )
 
 var minioBucketName = getBucketName()
@@ -252,7 +251,6 @@ func TestCustomTransportNoSSLVerify(t *testing.T) {
 	testURL(selfSignedBadSSL, t)
 	testURL(untrustedRootBadSSL, t)
 	testURL(wrongHostBadSSL, t)
-	testURL(incompleteChainBadSSL, t)
 }
 
 func getURL(url string, insecureSkipVerify bool) error {

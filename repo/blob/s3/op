@@ -1,0 +1,201 @@
+2020/03/18 22:28:06 created session token with assume role: expiration: 2020-03-19 05:43:05 +0000 UTC
+2020/03/18 22:28:13 created session token with assume role: expiration: 2020-03-19 05:43:13 +0000 UTC
+2020/03/18 22:28:17 created session token with assume role: expiration: 2020-03-19 05:43:17 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	17.919s
+2020/03/18 22:28:25 created session token with assume role: expiration: 2020-03-19 05:43:25 +0000 UTC
+2020/03/18 22:28:29 created session token with assume role: expiration: 2020-03-19 05:43:29 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	11.095s
+2020/03/18 22:28:37 created session token with assume role: expiration: 2020-03-19 05:43:36 +0000 UTC
+2020/03/18 22:28:40 created session token with assume role: expiration: 2020-03-19 05:43:40 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	11.207s
+2020/03/18 22:28:49 created session token with assume role: expiration: 2020-03-19 05:43:48 +0000 UTC
+2020/03/18 22:28:54 created session token with assume role: expiration: 2020-03-19 05:43:53 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	11.469s
+2020/03/18 22:29:02 created session token with assume role: expiration: 2020-03-19 05:44:01 +0000 UTC
+2020/03/18 22:29:05 created session token with assume role: expiration: 2020-03-19 05:44:05 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	10.127s
+2020/03/18 22:29:14 created session token with assume role: expiration: 2020-03-19 05:44:13 +0000 UTC
+2020/03/18 22:29:18 created session token with assume role: expiration: 2020-03-19 05:44:17 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	13.202s
+2020/03/18 22:29:28 created session token with assume role: expiration: 2020-03-19 05:44:28 +0000 UTC
+2020/03/18 22:29:33 created session token with assume role: expiration: 2020-03-19 05:44:33 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	11.576s
+2020/03/18 22:29:41 created session token with assume role: expiration: 2020-03-19 05:44:40 +0000 UTC
+2020/03/18 22:29:45 created session token with assume role: expiration: 2020-03-19 05:44:45 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	12.250s
+2020/03/18 22:29:54 created session token with assume role: expiration: 2020-03-19 05:44:54 +0000 UTC
+2020/03/18 22:29:58 created session token with assume role: expiration: 2020-03-19 05:44:58 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	10.603s
+2020/03/18 22:30:06 created session token with assume role: expiration: 2020-03-19 05:45:06 +0000 UTC
+2020/03/18 22:30:12 created session token with assume role: expiration: 2020-03-19 05:45:11 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	14.347s
+2020/03/18 22:30:26 created session token with assume role: expiration: 2020-03-19 05:45:26 +0000 UTC
+2020/03/18 22:30:31 created session token with assume role: expiration: 2020-03-19 05:45:30 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	17.791s
+2020/03/18 22:30:42 created session token with assume role: expiration: 2020-03-19 05:45:41 +0000 UTC
+2020/03/18 22:30:53 created session token with assume role: expiration: 2020-03-19 05:45:53 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	25.468s
+2020/03/18 22:31:08 created session token with assume role: expiration: 2020-03-19 05:46:08 +0000 UTC
+2020/03/18 22:31:13 created session token with assume role: expiration: 2020-03-19 05:46:12 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	13.446s
+2020/03/18 22:31:24 created session token with assume role: expiration: 2020-03-19 05:46:24 +0000 UTC
+2020/03/18 22:31:29 created session token with assume role: expiration: 2020-03-19 05:46:29 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	15.369s
+2020/03/18 22:31:38 created session token with assume role: expiration: 2020-03-19 05:46:38 +0000 UTC
+2020/03/18 22:31:42 created session token with assume role: expiration: 2020-03-19 05:46:42 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	11.739s
+2020/03/18 22:31:50 created session token with assume role: expiration: 2020-03-19 05:46:49 +0000 UTC
+2020/03/18 22:31:55 created session token with assume role: expiration: 2020-03-19 05:46:54 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	12.850s
+2020/03/18 22:32:05 created session token with assume role: expiration: 2020-03-19 05:47:04 +0000 UTC
+2020/03/18 22:32:10 created session token with assume role: expiration: 2020-03-19 05:47:10 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	14.623s
+2020/03/18 22:32:23 created session token with assume role: expiration: 2020-03-19 05:47:23 +0000 UTC
+2020/03/18 22:32:28 created session token with assume role: expiration: 2020-03-19 05:47:28 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	15.227s
+2020/03/18 22:32:35 created session token with assume role: expiration: 2020-03-19 05:47:35 +0000 UTC
+2020/03/18 22:32:39 created session token with assume role: expiration: 2020-03-19 05:47:39 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	10.203s
+2020/03/18 22:32:47 created session token with assume role: expiration: 2020-03-19 05:47:46 +0000 UTC
+2020/03/18 22:32:51 created session token with assume role: expiration: 2020-03-19 05:47:50 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	10.194s
+2020/03/18 22:32:58 created session token with assume role: expiration: 2020-03-19 05:47:57 +0000 UTC
+2020/03/18 22:33:02 created session token with assume role: expiration: 2020-03-19 05:48:01 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	10.713s
+2020/03/18 22:33:10 created session token with assume role: expiration: 2020-03-19 05:48:09 +0000 UTC
+2020/03/18 22:33:15 created session token with assume role: expiration: 2020-03-19 05:48:14 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	12.889s
+2020/03/18 22:33:24 created session token with assume role: expiration: 2020-03-19 05:48:23 +0000 UTC
+2020/03/18 22:33:29 created session token with assume role: expiration: 2020-03-19 05:48:29 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	12.936s
+2020/03/18 22:33:38 created session token with assume role: expiration: 2020-03-19 05:48:37 +0000 UTC
+2020/03/18 22:33:43 created session token with assume role: expiration: 2020-03-19 05:48:43 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	13.655s
+2020/03/18 22:33:52 created session token with assume role: expiration: 2020-03-19 05:48:52 +0000 UTC
+2020/03/18 22:33:56 created session token with assume role: expiration: 2020-03-19 05:48:56 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	13.115s
+2020/03/18 22:34:06 created session token with assume role: expiration: 2020-03-19 05:49:06 +0000 UTC
+2020/03/18 22:34:11 created session token with assume role: expiration: 2020-03-19 05:49:10 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	12.278s
+2020/03/18 22:34:20 created session token with assume role: expiration: 2020-03-19 05:49:19 +0000 UTC
+2020/03/18 22:34:25 created session token with assume role: expiration: 2020-03-19 05:49:25 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	13.431s
+2020/03/18 22:34:36 created session token with assume role: expiration: 2020-03-19 05:49:36 +0000 UTC
+2020/03/18 22:34:43 created session token with assume role: expiration: 2020-03-19 05:49:43 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	16.112s
+2020/03/18 22:34:51 created session token with assume role: expiration: 2020-03-19 05:49:50 +0000 UTC
+2020/03/18 22:34:54 created session token with assume role: expiration: 2020-03-19 05:49:54 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	10.458s
+2020/03/18 22:35:02 created session token with assume role: expiration: 2020-03-19 05:50:02 +0000 UTC
+2020/03/18 22:35:06 created session token with assume role: expiration: 2020-03-19 05:50:06 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	10.869s
+2020/03/18 22:35:14 created session token with assume role: expiration: 2020-03-19 05:50:14 +0000 UTC
+2020/03/18 22:35:18 created session token with assume role: expiration: 2020-03-19 05:50:17 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	11.009s
+2020/03/18 22:35:27 created session token with assume role: expiration: 2020-03-19 05:50:27 +0000 UTC
+2020/03/18 22:35:31 created session token with assume role: expiration: 2020-03-19 05:50:30 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	11.352s
+2020/03/18 22:35:38 created session token with assume role: expiration: 2020-03-19 05:50:38 +0000 UTC
+2020/03/18 22:35:42 created session token with assume role: expiration: 2020-03-19 05:50:42 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	10.300s
+2020/03/18 22:35:50 created session token with assume role: expiration: 2020-03-19 05:50:49 +0000 UTC
+2020/03/18 22:35:54 created session token with assume role: expiration: 2020-03-19 05:50:53 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	11.028s
+2020/03/18 22:36:02 created session token with assume role: expiration: 2020-03-19 05:51:02 +0000 UTC
+2020/03/18 22:36:06 created session token with assume role: expiration: 2020-03-19 05:51:06 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	11.142s
+2020/03/18 22:36:14 created session token with assume role: expiration: 2020-03-19 05:51:13 +0000 UTC
+2020/03/18 22:36:18 created session token with assume role: expiration: 2020-03-19 05:51:18 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	10.541s
+2020/03/18 22:36:26 created session token with assume role: expiration: 2020-03-19 05:51:26 +0000 UTC
+2020/03/18 22:36:31 created session token with assume role: expiration: 2020-03-19 05:51:31 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	13.080s
+2020/03/18 22:36:40 created session token with assume role: expiration: 2020-03-19 05:51:39 +0000 UTC
+2020/03/18 22:36:44 created session token with assume role: expiration: 2020-03-19 05:51:44 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	11.580s
+2020/03/18 22:36:52 created session token with assume role: expiration: 2020-03-19 05:51:52 +0000 UTC
+2020/03/18 22:36:57 created session token with assume role: expiration: 2020-03-19 05:51:57 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	12.361s
+2020/03/18 22:37:08 created session token with assume role: expiration: 2020-03-19 05:52:07 +0000 UTC
+2020/03/18 22:37:12 created session token with assume role: expiration: 2020-03-19 05:52:12 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	14.334s
+2020/03/18 22:37:22 created session token with assume role: expiration: 2020-03-19 05:52:21 +0000 UTC
+2020/03/18 22:37:27 created session token with assume role: expiration: 2020-03-19 05:52:26 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	13.850s
+2020/03/18 22:37:38 created session token with assume role: expiration: 2020-03-19 05:52:37 +0000 UTC
+2020/03/18 22:37:44 created session token with assume role: expiration: 2020-03-19 05:52:44 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	14.279s
+2020/03/18 22:37:52 created session token with assume role: expiration: 2020-03-19 05:52:52 +0000 UTC
+2020/03/18 22:37:57 created session token with assume role: expiration: 2020-03-19 05:52:56 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	10.918s
+2020/03/18 22:38:05 created session token with assume role: expiration: 2020-03-19 05:53:04 +0000 UTC
+2020/03/18 22:38:09 created session token with assume role: expiration: 2020-03-19 05:53:09 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	12.483s
+2020/03/18 22:38:18 created session token with assume role: expiration: 2020-03-19 05:53:17 +0000 UTC
+2020/03/18 22:38:22 created session token with assume role: expiration: 2020-03-19 05:53:21 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	10.893s
+2020/03/18 22:38:30 created session token with assume role: expiration: 2020-03-19 05:53:29 +0000 UTC
+2020/03/18 22:38:34 created session token with assume role: expiration: 2020-03-19 05:53:34 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	11.204s
+2020/03/18 22:38:41 created session token with assume role: expiration: 2020-03-19 05:53:41 +0000 UTC
+2020/03/18 22:38:46 created session token with assume role: expiration: 2020-03-19 05:53:46 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	12.732s
+2020/03/18 22:38:56 created session token with assume role: expiration: 2020-03-19 05:53:55 +0000 UTC
+2020/03/18 22:39:02 created session token with assume role: expiration: 2020-03-19 05:54:01 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	16.877s
+2020/03/18 22:39:16 created session token with assume role: expiration: 2020-03-19 05:54:16 +0000 UTC
+2020/03/18 22:39:23 created session token with assume role: expiration: 2020-03-19 05:54:23 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	16.420s
+2020/03/18 22:39:31 created session token with assume role: expiration: 2020-03-19 05:54:31 +0000 UTC
+2020/03/18 22:39:36 created session token with assume role: expiration: 2020-03-19 05:54:36 +0000 UTC
+PASS
+ok  	github.com/kopia/kopia/repo/blob/s3	12.335s
