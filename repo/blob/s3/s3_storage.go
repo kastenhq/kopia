@@ -226,6 +226,13 @@ func toBandwidth(bytesPerSecond int) iothrottler.Bandwidth {
 	return iothrottler.Bandwidth(bytesPerSecond) * iothrottler.BytesPerSecond
 }
 
+func getCustomTransport(insecureSkipVerify bool) (transport *http.Transport) {
+	customTransport := http.DefaultTransport.(*http.Transport).Clone()
+	// nolint:gosec
+	customTransport.TLSClientConfig = &tls.Config{InsecureSkipVerify: insecureSkipVerify}
+	return customTransport
+}
+
 // New creates new S3-backed storage with specified options:
 //
 // - the 'BucketName' field is required and all other parameters are optional.
@@ -240,10 +247,7 @@ func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 	}
 
 	if opt.DoNotVerifyTLS {
-		customTransport := http.DefaultTransport.(*http.Transport).Clone()
-		// nolint:gosec
-		customTransport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-		cli.SetCustomTransport(customTransport)
+		cli.SetCustomTransport(getCustomTransport(true))
 	}
 
 	downloadThrottler := iothrottler.NewIOThrottlerPool(toBandwidth(opt.MaxDownloadSpeedBytesPerSecond))

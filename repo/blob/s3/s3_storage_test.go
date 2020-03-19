@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"testing"
 	"time"
@@ -50,6 +51,12 @@ const (
 	testSTSAccessKeyIDEnv     = "KOPIA_S3_TEST_STS_ACCESS_KEY_ID"
 	testSTSSecretAccessKeyEnv = "KOPIA_S3_TEST_STS_SECRET_ACCESS_KEY"
 	testSessionTokenEnv       = "KOPIA_S3_TEST_SESSION_TOKEN"
+
+	expiredBadSSL         = "https://expired.badssl.com/"
+	selfSignedBadSSL      = "https://self-signed.badssl.com/"
+	untrustedRootBadSSL   = "https://untrusted-root.badssl.com/"
+	wrongHostBadSSL       = "https://wrong.host.badssl.com/"
+	incompleteChainBadSSL = "https://incomplete-chain.badssl.com/"
 )
 
 var minioBucketName = getBucketName()
@@ -153,7 +160,8 @@ func TestS3StorageAWSSTS(t *testing.T) {
 func TestS3StorageMinio(t *testing.T) {
 	t.Parallel()
 
-	for _, disableTlsVerify := range []bool{true, false} {
+	for _, disableTLSVerify := range []bool{true, true} {
+		disableTLSVerify := disableTLSVerify
 		testutil.Retry(t, func(t *testutil.RetriableT) {
 			options := &Options{
 				Endpoint:        minioEndpoint,
@@ -162,7 +170,7 @@ func TestS3StorageMinio(t *testing.T) {
 				BucketName:      minioBucketName,
 				Region:          minioRegion,
 				DoNotUseTLS:     !minioUseSSL,
-				DoNotVerifyTLS:  disableTlsVerify,
+				DoNotVerifyTLS:  disableTLSVerify,
 			}
 
 			if !endpointReachable(options.Endpoint) {
@@ -178,7 +186,8 @@ func TestS3StorageMinio(t *testing.T) {
 
 func TestS3StorageMinioSTS(t *testing.T) {
 	t.Parallel()
-	for _, disableTlsVerify := range []bool{true, false} {
+	for _, disableTLSVerify := range []bool{true, false} {
+		disableTLSVerify := disableTLSVerify
 		testutil.Retry(t, func(t *testutil.RetriableT) {
 			// create kopia user and session token
 			kopiaUserName := generateName("kopiauser")
@@ -196,7 +205,7 @@ func TestS3StorageMinioSTS(t *testing.T) {
 				BucketName:      minioBucketName,
 				Region:          minioRegion,
 				DoNotUseTLS:     !minioUseSSL,
-				DoNotVerifyTLS:  disableTlsVerify,
+				DoNotVerifyTLS:  disableTLSVerify,
 			}
 
 			if !endpointReachable(options.Endpoint) {
@@ -233,6 +242,32 @@ func testStorage(t *testutil.RetriableT, options *Options) {
 
 	if err := st.Close(ctx); err != nil {
 		t.Fatalf("err: %v", err)
+	}
+}
+
+func TestCustomTransportNoSSLVerify(t *testing.T) {
+	testURL(expiredBadSSL, t)
+	testURL(selfSignedBadSSL, t)
+	testURL(untrustedRootBadSSL, t)
+	testURL(wrongHostBadSSL, t)
+	testURL(incompleteChainBadSSL, t)
+}
+
+func getURL(url string, insecureSkipVerify bool) error {
+	client := &http.Client{Transport: getCustomTransport(insecureSkipVerify)}
+	_, err := client.Get(url)
+	return err
+}
+
+func testURL(url string, t *testing.T) {
+	err := getURL(url, true)
+	if err != nil {
+		t.Fatalf("could not get url:%s, error:%v", url, err)
+	}
+
+	err = getURL(url, false)
+	if err == nil {
+		t.Fatalf("expected a failure, but none found for url:%s", url)
 	}
 }
 
