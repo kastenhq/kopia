@@ -162,6 +162,7 @@ func TestS3StorageMinio(t *testing.T) {
 
 	for _, disableTLSVerify := range []bool{true, false} {
 		disableTLSVerify := disableTLSVerify
+
 		testutil.Retry(t, func(t *testutil.RetriableT) {
 			options := &Options{
 				Endpoint:        minioEndpoint,
@@ -181,13 +182,14 @@ func TestS3StorageMinio(t *testing.T) {
 			testStorage(t, options)
 		})
 	}
-
 }
 
 func TestS3StorageMinioSTS(t *testing.T) {
 	t.Parallel()
+
 	for _, disableTLSVerify := range []bool{true, false} {
 		disableTLSVerify := disableTLSVerify
+
 		testutil.Retry(t, func(t *testutil.RetriableT) {
 			// create kopia user and session token
 			kopiaUserName := generateName("kopiauser")
@@ -255,8 +257,15 @@ func TestCustomTransportNoSSLVerify(t *testing.T) {
 
 func getURL(url string, insecureSkipVerify bool) error {
 	client := &http.Client{Transport: getCustomTransport(insecureSkipVerify)}
-	_, err := client.Get(url)
-	return err
+	resp, err := client.Get(url)
+
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	return nil
 }
 
 func testURL(url string, t *testing.T) {

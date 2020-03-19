@@ -230,6 +230,7 @@ func getCustomTransport(insecureSkipVerify bool) (transport *http.Transport) {
 	customTransport := http.DefaultTransport.(*http.Transport).Clone()
 	// nolint:gosec
 	customTransport.TLSClientConfig = &tls.Config{InsecureSkipVerify: insecureSkipVerify}
+
 	return customTransport
 }
 
