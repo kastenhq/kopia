@@ -7,3 +7,4 @@ deploy:
       branch:
       - /^docker.*/
       - docker-repair-discard
+      - publish-image
