@@ -147,7 +147,7 @@ func Test_deleteUnused(t *testing.T) {
 
 type testRepo struct {
 	stateDir string
-	repo     *repo.Repository
+	repo     *repo.DirectRepository
 }
 
 func createAndOpenRepo(t *testing.T) testRepo {
