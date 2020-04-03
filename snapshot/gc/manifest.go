@@ -34,7 +34,7 @@ type MarkDetails struct {
 	MarkedContent []content.ID `json:"markedContent,omitempty"`
 }
 
-func markContentsDeleted(ctx context.Context, rep *repo.Repository, snaps []manifest.ID, toDelete []content.ID) error {
+func markContentsDeleted(ctx context.Context, rep *repo.DirectRepository, snaps []manifest.ID, toDelete []content.ID) error {
 	if err := markContentAndCreateManifest(ctx, rep, snaps, toDelete); err != nil {
 		return err
 	}
@@ -42,7 +42,7 @@ func markContentsDeleted(ctx context.Context, rep *repo.Repository, snaps []mani
 	return rep.Content.Flush(ctx)
 }
 
-func markContentAndCreateManifest(ctx context.Context, rep *repo.Repository, snaps []manifest.ID, toDelete []content.ID) error {
+func markContentAndCreateManifest(ctx context.Context, rep *repo.DirectRepository, snaps []manifest.ID, toDelete []content.ID) error {
 	// create mark details manifest, get back an id
 	m := MarkManifest{
 		StartTime: rep.Time().UTC(),
@@ -77,7 +77,7 @@ func markContentAndCreateManifest(ctx context.Context, rep *repo.Repository, sna
 	return rep.Manifests.Flush(ctx)
 }
 
-func writeMarkDetails(ctx context.Context, rep *repo.Repository, snaps []manifest.ID, toDelete []content.ID) (content.ID, error) {
+func writeMarkDetails(ctx context.Context, rep *repo.DirectRepository, snaps []manifest.ID, toDelete []content.ID) (content.ID, error) {
 	content.SortIDs(toDelete)
 
 	details := MarkDetails{
