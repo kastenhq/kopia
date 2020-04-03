@@ -43,7 +43,7 @@ func TestMarkContentsDeleted(t *testing.T) {
 	check.Len(gcMans, 1, "expected a single GC mark manifest")
 
 	var man MarkManifest
-	err = th.repo.Manifests.Get(ctx, gcMans[0].ID, &man)
+	_, err = th.repo.Manifests.Get(ctx, gcMans[0].ID, &man)
 	check.NoError(err)
 
 	// check: is there a content with GC mark details?
