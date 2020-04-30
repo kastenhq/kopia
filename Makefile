@@ -46,9 +46,11 @@ lint-and-log: $(linter)
 
 
 vet-time-inject:
+ifneq ($(TRAVIS_OS_NAME),windows)
 	! find repo snapshot -name '*.go' -not -path 'repo/blob/logging/*' -not -name '*_test.go' \
 	-exec grep -n -e time.Now -e time.Since -e time.Until {} + \
 	| grep -v -e allow:no-inject-time
+endif
 
 vet: vet-time-inject
 	go vet -all .
@@ -126,7 +128,12 @@ ifeq ($(publish_binaries),0)
 GORELEASER_OPTIONS+=--skip-publish
 endif
 
-goreleaser: $(goreleaser)
+print_build_info:
+	@echo TRAVIS_TAG: $(TRAVIS_TAG)
+	@echo TRAVIS_PULL_REQUEST: $(TRAVIS_PULL_REQUEST)
+	@echo TRAVIS_OS_NAME: $(TRAVIS_OS_NAME)
+
+goreleaser: $(goreleaser) print_build_info
 	-git diff | cat
 	$(goreleaser) release $(GORELEASER_OPTIONS)
 
@@ -152,22 +159,23 @@ dev-deps:
 	GO111MODULE=off go get -u github.com/sqs/goreturns
 
 test-with-coverage:
-	$(GO_TEST) -count=1 -coverprofile=tmp.cov --coverpkg $(COVERAGE_PACKAGES) -timeout 90s `go list ./...`
+	$(GO_TEST) -count=1 -coverprofile=tmp.cov --coverpkg $(COVERAGE_PACKAGES) -timeout 90s $(shell go list ./...)
 
 test-with-coverage-pkgonly:
 	$(GO_TEST) -count=1 -coverprofile=tmp.cov -timeout 90s github.com/kopia/kopia/...
 
 test:
-	$(GO_TEST) -count=1 -timeout 90s github.com/kopia/kopia/...
+	$(GO_TEST) -count=1 -timeout 90s ./...
 
 vtest:
-	$(GO_TEST) -count=1 -short -v -timeout 90s github.com/kopia/kopia/...
+	$(GO_TEST) -count=1 -short -v -timeout 90s ./...
 
 dist-binary:
 	go build -o $(KOPIA_INTEGRATION_EXE) github.com/kopia/kopia
 
+integration-tests: export KOPIA_EXE ?= $(KOPIA_INTEGRATION_EXE)
 integration-tests: dist-binary
-	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 600s github.com/kopia/kopia/tests/end_to_end_test
+	 $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 600s github.com/kopia/kopia/tests/end_to_end_test
 
 robustness-tool-tests:
 	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
@@ -183,18 +191,7 @@ ifneq ($(uname),Windows)
 	# whitelisted internal packages.
 	find repo/ -name '*.go' | xargs grep "^\t\"github.com/kopia/kopia" \
 	   | grep -v -e github.com/kopia/kopia/repo \
-	             -e github.com/kopia/kopia/internal/retry \
-	             -e github.com/kopia/kopia/internal/buf \
-	             -e github.com/kopia/kopia/internal/throttle \
-	             -e github.com/kopia/kopia/internal/iocopy \
-	             -e github.com/kopia/kopia/internal/gather \
-	             -e github.com/kopia/kopia/internal/blobtesting \
-	             -e github.com/kopia/kopia/internal/repotesting \
-	             -e github.com/kopia/kopia/internal/testlogging \
-	             -e github.com/kopia/kopia/internal/hmac \
-	             -e github.com/kopia/kopia/internal/faketime \
-	             -e github.com/kopia/kopia/internal/testutil \
-	             -e github.com/kopia/kopia/internal/ctxutil \
+	             -e github.com/kopia/kopia/internal \
 	             -e github.com/kopia/kopia/issues && exit 1 || echo repo/ layering ok
 endif
 
@@ -216,9 +213,10 @@ goreturns:
 # this indicates we're running on Travis CI and NOT processing pull request.
 ifeq ($(TRAVIS_PULL_REQUEST),false)
 
+# https://travis-ci.community/t/windows-build-timeout-after-success-ps-shows-gpg-agent/4967/4
+
 travis-install-gpg-key:
 ifeq ($(TRAVIS_OS_NAME),windows)
-	# https://travis-ci.community/t/windows-build-timeout-after-success-ps-shows-gpg-agent/4967/4
 	@echo Not installing GPG key on Windows...
 else
 	@echo Installing GPG key...
@@ -228,9 +226,11 @@ endif
 
 travis-install-test-credentials:
 	@echo Installing test credentials...
+ifneq ($(TRAVIS_OS_NAME),windows)
 	openssl aes-256-cbc -K "$(encrypted_fa1db4b894bb_key)" -iv "$(encrypted_fa1db4b894bb_iv)" -in tests/credentials/gcs/test_service_account.json.enc -out repo/blob/gcs/test_service_account.json -d
 	openssl aes-256-cbc -K "$(encrypted_fa1db4b894bb_key)" -iv "$(encrypted_fa1db4b894bb_iv)" -in tests/credentials/sftp/id_kopia.enc -out repo/blob/sftp/id_kopia -d
 	openssl aes-256-cbc -K "$(encrypted_fa1db4b894bb_key)" -iv "$(encrypted_fa1db4b894bb_iv)" -in tests/credentials/sftp/known_hosts.enc -out repo/blob/sftp/known_hosts -d
+endif
 
 travis-install-cloud-sdk: travis-install-test-credentials
 	if [ ! -d $(HOME)/google-cloud-sdk ]; then curl https://sdk.cloud.google.com | CLOUDSDK_CORE_DISABLE_PROMPTS=1 bash; fi

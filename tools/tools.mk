@@ -6,6 +6,31 @@
 #
 # you will need to have git and golang too in the PATH.
 
+ifeq ($(TRAVIS_OS_NAME),windows)
+UNIX_SHELL_ON_WINDOWS=true
+endif
+
+ifneq ($(APPVEYOR),)
+
+UNIX_SHELL_ON_WINDOWS=false
+
+# running Windows build on AppVeyor
+# emulate Travis CI environment variables, so we can use TRAVIS logic everywhere
+
+ifeq ($(APPVEYOR_PULL_REQUEST_NUMBER),)
+export TRAVIS_PULL_REQUEST=false
+else
+export TRAVIS_PULL_REQUEST=$(APPVEYOR_PULL_REQUEST_NUMBER)
+endif
+
+ifneq ($(APPVEYOR_REPO_TAG_NAME),)
+export TRAVIS_TAG=$(APPVEYOR_REPO_TAG_NAME)
+endif
+
+TRAVIS_OS_NAME=windows
+
+endif
+
 # uname will be Windows, Darwin, Linux
 ifeq ($(OS),Windows_NT)
 	exe_suffix := .exe
@@ -15,7 +40,7 @@ ifeq ($(OS),Windows_NT)
 	path_separator=;
 	date_ymd := $(shell powershell -noprofile -executionpolicy bypass -Command "(Get-Date).ToString('yyyyMMdd')")
 	date_full := $(shell powershell -noprofile -executionpolicy bypass -Command "(Get-Date).datetime")
-ifeq ($(TRAVIS_OS_NAME),windows)
+ifeq ($(UNIX_SHELL_ON_WINDOWS),true)
 	mkdir=mkdir -p
 	move=mv
 	slash=/
@@ -34,6 +59,26 @@ else
 	date_ymd := $(shell date +%Y%m%d)
 	date_full := $(shell date)
 endif
+
+# compute build date and time from the current commit
+commit_date_ymd:=$(subst -,,$(word 1, $(shell git show -s --format=%ci HEAD)))
+
+# compute time of day as a decimal number, without leading zeroes
+# midnight will be 0
+# 00:01:00 becomes 100
+# 00:10:00 becomes 1000
+# 07:00:00 becomes 70000
+# end of day is 235959
+# time of day as hhmmss from 000000 to 235969
+commit_time_raw:=$(subst :,,$(word 2, $(shell git show -s --format=%ci HEAD)))
+commit_time_stripped1=$(commit_time_raw:0%=%)
+commit_time_stripped2=$(commit_time_stripped1:0%=%)
+commit_time_stripped3=$(commit_time_stripped2:0%=%)
+commit_time_stripped4=$(commit_time_stripped3:0%=%)
+
+# final time of day number
+commit_time_of_day=$(commit_time_stripped4:0%=%)
+
 
 SELF_DIR := $(subst /,$(slash),$(realpath $(dir $(lastword $(MAKEFILE_LIST)))))
 TOOLS_DIR:=$(SELF_DIR)$(slash).tools
@@ -153,7 +198,7 @@ ifneq ($(TRAVIS_TAG),)
 KOPIA_VERSION:=$(TRAVIS_TAG:v%=%)
 else
 # travis, non-tagged release
-KOPIA_VERSION:=$(date_ymd).0.$(TRAVIS_BUILD_NUMBER)
+KOPIA_VERSION:=$(commit_date_ymd).0.$(commit_time_of_day)
 endif
 
 else
@@ -170,4 +215,20 @@ export REACT_APP_FULL_VERSION_INFO:=$(KOPIA_VERSION) built on $(date_full) $(she
 clean-tools:
 	rm -rf $(TOOLS_DIR)
 
-all-tools: $(npm) $(goreleaser) $(linter) $(hugo) $(go_bindata)
+windows_signing_dir=$(TOOLS_DIR)$(slash)win_signing
+
+windows-signing-tools:
+ifeq ($(TRAVIS_OS_NAME),windows)
+ifneq ($(WINDOWS_SIGNING_TOOLS_URL),)
+	echo Installing Windows signing tools to $(windows_signing_dir)...
+	-$(mkdir) $(windows_signing_dir)
+	curl -LsS -o $(windows_signing_dir).zip $(WINDOWS_SIGNING_TOOLS_URL)
+	unzip -a -q $(windows_signing_dir).zip -d $(windows_signing_dir)
+	powershell -noprofile -executionpolicy bypass $(windows_signing_dir)\\setup.ps1
+else
+	echo Not installing Windows signing tools because WINDOWS_SIGNING_TOOLS_URL is not set
+endif
+endif
+
+all-tools: $(npm) $(goreleaser) $(linter) $(hugo) $(go_bindata) windows-signing-tools
+

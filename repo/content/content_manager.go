@@ -466,6 +466,29 @@ func (bm *Manager) RewriteContent(ctx context.Context, contentID ID) error {
 	return bm.addToPackUnlocked(ctx, contentID, data, bi.Deleted)
 }
 
+// UndeleteContent rewrites the content with the given ID if the content exists
+// and is mark deleted. If the content exists and is not marked deleted, this
+// operation is a no-op.
+func (bm *Manager) UndeleteContent(ctx context.Context, contentID ID) error {
+	log(ctx).Debugf("UndeleteContent(%q)", contentID)
+
+	pp, bi, err := bm.getContentInfo(contentID)
+	if err != nil {
+		return err
+	}
+
+	if !bi.Deleted {
+		return nil
+	}
+
+	data, err := bm.getContentDataUnlocked(ctx, pp, &bi)
+	if err != nil {
+		return err
+	}
+
+	return bm.addToPackUnlocked(ctx, contentID, data, false)
+}
+
 func packPrefixForContentID(contentID ID) blob.ID {
 	if contentID.HasPrefix() {
 		return PackBlobIDPrefixSpecial
@@ -657,7 +680,7 @@ func newManagerWithOptions(ctx context.Context, st blob.Storage, f *FormattingOp
 		return nil, err
 	}
 
-	contentCache, err := newContentCache(ctx, st, caching, caching.MaxCacheSizeBytes, "contents")
+	dataCache, err := newContentCache(ctx, st, caching, caching.MaxCacheSizeBytes, "contents")
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to initialize content cache")
 	}
@@ -691,7 +714,7 @@ func newManagerWithOptions(ctx context.Context, st blob.Storage, f *FormattingOp
 			minPreambleLength:       defaultMinPreambleLength,
 			maxPreambleLength:       defaultMaxPreambleLength,
 			paddingUnit:             defaultPaddingUnit,
-			contentCache:            contentCache,
+			contentCache:            dataCache,
 			metadataCache:           metadataCache,
 			listCache:               listCache,
 			st:                      st,
