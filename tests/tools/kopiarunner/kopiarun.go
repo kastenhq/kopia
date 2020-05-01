@@ -2,7 +2,6 @@
 package kopiarunner
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"io/ioutil"
@@ -11,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 )
 
 const (
@@ -72,53 +70,12 @@ func (kr *Runner) Run(args ...string) (stdout, stderr string, err error) {
 	c := exec.Command(kr.Exe, cmdArgs...)
 	c.Env = append(os.Environ(), kr.environment...)
 
-	stderrPipe, err := c.StderrPipe()
-	if err != nil {
-		return stdout, stderr, err
-	}
+	errOut := &bytes.Buffer{}
+	c.Stderr = errOut
 
-	var wg sync.WaitGroup
+	o, err := c.Output()
 
-	wg.Add(1)
+	log.Printf("finished '%s %v' with err=%v and output:\nSTDOUT:\n%v\nSTDERR:\n%v", kr.Exe, argsStr, err, string(o), errOut.String())
 
-	errOut := bytes.Buffer{}
-
-	go func() {
-		defer wg.Done()
-
-		scanner := bufio.NewScanner(stderrPipe)
-		for scanner.Scan() {
-			log.Println(scanner.Text())
-			errOut.Write(scanner.Bytes())
-			errOut.WriteByte('\n')
-		}
-	}()
-
-	stdoutPipe, err := c.StdoutPipe()
-	if err != nil {
-		return stdout, stderr, err
-	}
-
-	wg.Add(1)
-
-	o := bytes.Buffer{}
-
-	go func() {
-		defer wg.Done()
-
-		scanner := bufio.NewScanner(stdoutPipe)
-		for scanner.Scan() {
-			log.Println(scanner.Text())
-			o.Write(scanner.Bytes())
-			o.WriteByte('\n')
-		}
-	}()
-
-	err = c.Run()
-
-	wg.Wait()
-
-	log.Printf("finished '%s %v' with err=%v and output:\nSTDOUT:\n%v\nSTDERR:\n%v", kr.Exe, argsStr, err, o.String(), errOut.String())
-
-	return o.String(), errOut.String(), err
+	return string(o), errOut.String(), err
 }
