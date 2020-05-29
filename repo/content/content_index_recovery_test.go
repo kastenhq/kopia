@@ -28,7 +28,7 @@ func TestContentIndexRecovery(t *testing.T) {
 		return bm.st.DeleteBlob(ctx, bi.BlobID)
 	}))
 
-	bm.Close(ctx)
+	// bm.Close(ctx)
 
 	// now with index blobs gone, all contents appear to not be found
 	bm = newTestContentManager(t, data, keyTime, nil)
