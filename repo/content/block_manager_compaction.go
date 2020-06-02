@@ -16,9 +16,9 @@ var autoCompactionOptions = CompactOptions{
 
 // CompactOptions provides options for compaction
 type CompactOptions struct {
-	MaxSmallBlobs        int
-	AllIndexes           bool
-	SkipDeletedOlderThan time.Duration
+	MaxSmallBlobs     int
+	AllIndexes        bool
+	DropDeletedBefore time.Time
 }
 
 // CompactIndexes performs compaction of index blobs ensuring that # of small index blobs is below opt.maxSmallBlobs
@@ -136,8 +136,8 @@ func (bm *Manager) addIndexBlobsToBuilder(ctx context.Context, bld packIndexBuil
 		return errors.Wrapf(err, "unable to open index blob %q", indexBlob)
 	}
 
-	_ = index.Iterate("", func(i Info) error {
-		if i.Deleted && opt.SkipDeletedOlderThan > 0 && bm.timeNow().Sub(i.Timestamp()) > opt.SkipDeletedOlderThan {
+	_ = index.Iterate(AllIDs, func(i Info) error {
+		if i.Deleted && !opt.DropDeletedBefore.IsZero() && i.Timestamp().Before(opt.DropDeletedBefore) {
 			log(ctx).Debugf("skipping content %v deleted at %v", i.ID, i.Timestamp())
 			return nil
 		}

@@ -15,13 +15,14 @@ require (
 	github.com/chmduquesne/rollinghash v4.0.0+incompatible
 	github.com/efarrer/iothrottler v0.0.1
 	github.com/fatih/color v1.9.0
+	github.com/gofrs/flock v0.7.1
 	github.com/golang/protobuf v1.3.5
 	github.com/google/fswalker v0.2.0
 	github.com/google/readahead v0.0.0-20161222183148-eaceba169032 // indirect
 	github.com/google/wire v0.4.0 // indirect
 	github.com/gorilla/mux v1.7.4
-	github.com/klauspost/compress v1.10.3
-	github.com/klauspost/pgzip v1.2.2
+	github.com/klauspost/compress v1.10.5
+	github.com/klauspost/pgzip v1.2.4
 	github.com/kylelemons/godebug v1.1.0
 	github.com/mattn/go-colorable v0.1.6 // indirect
 	github.com/mattn/go-ieproxy v0.0.0-20200203040449-2dbc853185d9 // indirect
@@ -39,6 +40,7 @@ require (
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
 	github.com/stretchr/testify v1.4.0
 	github.com/studio-b12/gowebdav v0.0.0-20200303150724-9380631c29a1
+	github.com/tg123/go-htpasswd v1.0.0
 	github.com/zalando/go-keyring v0.0.0-20200121091418-667557018717
 	go.opencensus.io v0.22.3
 	gocloud.dev v0.19.0

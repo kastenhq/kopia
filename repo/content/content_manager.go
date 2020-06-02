@@ -466,6 +466,29 @@ func (bm *Manager) RewriteContent(ctx context.Context, contentID ID) error {
 	return bm.addToPackUnlocked(ctx, contentID, data, bi.Deleted)
 }
 
+// UndeleteContent rewrites the content with the given ID if the content exists
+// and is mark deleted. If the content exists and is not marked deleted, this
+// operation is a no-op.
+func (bm *Manager) UndeleteContent(ctx context.Context, contentID ID) error {
+	log(ctx).Debugf("UndeleteContent(%q)", contentID)
+
+	pp, bi, err := bm.getContentInfo(contentID)
+	if err != nil {
+		return err
+	}
+
+	if !bi.Deleted {
+		return nil
+	}
+
+	data, err := bm.getContentDataUnlocked(ctx, pp, &bi)
+	if err != nil {
+		return err
+	}
+
+	return bm.addToPackUnlocked(ctx, contentID, data, false)
+}
+
 func packPrefixForContentID(contentID ID) blob.ID {
 	if contentID.HasPrefix() {
 		return PackBlobIDPrefixSpecial
@@ -506,7 +529,7 @@ func (bm *Manager) WriteContent(ctx context.Context, data []byte, prefix ID) (ID
 	stats.Record(ctx, metricContentWriteContentCount.M(1))
 	stats.Record(ctx, metricContentWriteContentBytes.M(int64(len(data))))
 
-	if err := validatePrefix(prefix); err != nil {
+	if err := ValidatePrefix(prefix); err != nil {
 		return "", err
 	}
 
@@ -627,6 +650,17 @@ func (bm *Manager) Refresh(ctx context.Context) (bool, error) {
 	return updated, err
 }
 
+// SyncMetadataCache synchronizes metadata cache with metadata blobs in storage.
+func (bm *Manager) SyncMetadataCache(ctx context.Context) error {
+	if cm, ok := bm.metadataCache.(*contentCacheForMetadata); ok {
+		return cm.sync(ctx)
+	}
+
+	log(ctx).Debugf("metadata cache not enabled")
+
+	return nil
+}
+
 // ManagerOptions are the optional parameters for manager creation
 type ManagerOptions struct {
 	RepositoryFormatBytes []byte
@@ -657,7 +691,12 @@ func newManagerWithOptions(ctx context.Context, st blob.Storage, f *FormattingOp
 		return nil, err
 	}
 
-	contentCache, err := newContentCache(ctx, st, caching, caching.MaxCacheSizeBytes, "contents")
+	dataCacheStorage, err := newCacheStorageOrNil(ctx, caching.CacheDirectory, caching.MaxCacheSizeBytes, "contents")
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to initialize data cache storage")
+	}
+
+	dataCache, err := newContentCacheForData(ctx, st, dataCacheStorage, caching.MaxCacheSizeBytes, caching.HMACSecret)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to initialize content cache")
 	}
@@ -667,7 +706,12 @@ func newManagerWithOptions(ctx context.Context, st blob.Storage, f *FormattingOp
 		metadataCacheSize = caching.MaxCacheSizeBytes
 	}
 
-	metadataCache, err := newContentCache(ctx, st, caching, metadataCacheSize, "metadata")
+	metadataCacheStorage, err := newCacheStorageOrNil(ctx, caching.CacheDirectory, metadataCacheSize, "metadata")
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to initialize data cache storage")
+	}
+
+	metadataCache, err := newContentCacheForMetadata(ctx, st, metadataCacheStorage, metadataCacheSize)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to initialize metadata cache")
 	}
@@ -691,7 +735,7 @@ func newManagerWithOptions(ctx context.Context, st blob.Storage, f *FormattingOp
 			minPreambleLength:       defaultMinPreambleLength,
 			maxPreambleLength:       defaultMaxPreambleLength,
 			paddingUnit:             defaultPaddingUnit,
-			contentCache:            contentCache,
+			contentCache:            dataCache,
 			metadataCache:           metadataCache,
 			listCache:               listCache,
 			st:                      st,

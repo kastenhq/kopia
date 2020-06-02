@@ -3,7 +3,6 @@ package blob
 import (
 	"context"
 	"io"
-	"log"
 	"sync"
 	"time"
 
@@ -42,6 +41,9 @@ type Storage interface {
 	// If length>0, the the function retrieves a range of bytes [offset,offset+length)
 	// If length<0, the entire blob must be fetched.
 	GetBlob(ctx context.Context, blobID ID, offset, length int64) ([]byte, error)
+
+	// GetMetadata returns Metadata about single blob.
+	GetMetadata(ctx context.Context, blobID ID) (Metadata, error)
 
 	// ListBlobs invokes the provided callback for each blob in the storage.
 	// Iteration continues until the callback returns an error or until all matching blobs have been reported.
@@ -148,8 +150,6 @@ func ListAllBlobsConsistent(ctx context.Context, st Storage, prefix ID, maxAttem
 // sameBlobs returns true if b1 & b2 contain the same blobs (ignoring order).
 func sameBlobs(b1, b2 []Metadata) bool {
 	if len(b1) != len(b2) {
-		log.Printf("a")
-
 		return false
 	}
 

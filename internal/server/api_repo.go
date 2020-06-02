@@ -8,15 +8,34 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/remoterepoapi"
 	"github.com/kopia/kopia/internal/serverapi"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/repo/encryption"
 	"github.com/kopia/kopia/repo/hashing"
+	"github.com/kopia/kopia/repo/maintenance"
 	"github.com/kopia/kopia/repo/splitter"
 	"github.com/kopia/kopia/snapshot/policy"
 )
+
+func (s *Server) handleRepoParameters(ctx context.Context, r *http.Request) (interface{}, *apiError) {
+	dr, ok := s.rep.(*repo.DirectRepository)
+	if !ok {
+		return &serverapi.StatusResponse{
+			Connected: false,
+		}, nil
+	}
+
+	rp := &remoterepoapi.Parameters{
+		HashFunction: dr.Content.Format.Hash,
+		HMACSecret:   dr.Content.Format.HMACSecret,
+		Format:       dr.Objects.Format,
+	}
+
+	return rp, nil
+}
 
 func (s *Server) handleRepoStatus(ctx context.Context, r *http.Request) (interface{}, *apiError) {
 	if s.rep == nil {
@@ -91,6 +110,15 @@ func (s *Server) handleRepoCreate(ctx context.Context, r *http.Request) (interfa
 
 	if err := policy.SetPolicy(ctx, s.rep, policy.GlobalPolicySourceInfo, policy.DefaultPolicy); err != nil {
 		return nil, internalServerError(errors.Wrap(err, "set global policy"))
+	}
+
+	if dr, ok := s.rep.(*repo.DirectRepository); ok {
+		p := maintenance.DefaultParams()
+		p.Owner = s.rep.Username() + "@" + s.rep.Hostname()
+
+		if err := maintenance.SetParams(ctx, dr, &p); err != nil {
+			return nil, internalServerError(errors.Wrap(err, "unable to set maintenance params"))
+		}
 	}
 
 	if err := s.rep.Flush(ctx); err != nil {

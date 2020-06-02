@@ -30,8 +30,8 @@ type lockFreeManager struct {
 	Format         FormattingOptions
 	CachingOptions CachingOptions
 
-	contentCache      *contentCache
-	metadataCache     *contentCache
+	contentCache      contentCache
+	metadataCache     contentCache
 	committedContents *committedContentIndex
 
 	checkInvariantsOnUnlock bool
@@ -202,7 +202,8 @@ func (bm *lockFreeManager) unprocessedIndexBlobsUnlocked(ctx context.Context, co
 	return ch, totalSize, nil
 }
 
-func validatePrefix(prefix ID) error {
+// ValidatePrefix returns an error if a given prefix is invalid.
+func ValidatePrefix(prefix ID) error {
 	switch len(prefix) {
 	case 0:
 		return nil
@@ -215,7 +216,7 @@ func validatePrefix(prefix ID) error {
 	return errors.Errorf("invalid prefix, must be a empty or single letter between 'g' and 'z'")
 }
 
-func (bm *lockFreeManager) getCacheForContentID(id ID) *contentCache {
+func (bm *lockFreeManager) getCacheForContentID(id ID) contentCache {
 	if id.HasPrefix() {
 		return bm.metadataCache
 	}
@@ -321,7 +322,7 @@ func (bm *lockFreeManager) IndexBlobs(ctx context.Context) ([]IndexBlobInfo, err
 }
 
 func (bm *lockFreeManager) getIndexBlobInternal(ctx context.Context, blobID blob.ID) ([]byte, error) {
-	payload, err := bm.contentCache.getContent(ctx, cacheKey(blobID), blobID, 0, -1)
+	payload, err := bm.metadataCache.getContent(ctx, cacheKey(blobID), blobID, 0, -1)
 	if err != nil {
 		return nil, err
 	}
