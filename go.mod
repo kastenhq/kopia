@@ -46,14 +46,14 @@ require (
 	github.com/zalando/go-keyring v0.0.0-20200121091418-667557018717
 	go.opencensus.io v0.22.3
 	gocloud.dev v0.19.0
-	golang.org/x/crypto v0.0.0-20200510223506-06a226fb4e37
+	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a
 	golang.org/x/exp v0.0.0-20200513190911-00229845015e
 	golang.org/x/mod v0.3.0
-	golang.org/x/net v0.0.0-20200520182314-0ba52f642ac2
+	golang.org/x/net v0.0.0-20200602114024-627f9648deb9
 	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
 	golang.org/x/sync v0.0.0-20200317015054-43a5402ce75a
-	golang.org/x/sys v0.0.0-20200511232937-7e40ca221e25
-	golang.org/x/tools v0.0.0-20200521155704-91d71f6c2f04 // indirect
+	golang.org/x/sys v0.0.0-20200615200032-f1bc736245b1
+	golang.org/x/tools v0.0.0-20200618031402-d15173dcc7e4 // indirect
 	google.golang.org/api v0.25.0
 	google.golang.org/protobuf v1.23.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
