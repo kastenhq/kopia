@@ -63,7 +63,7 @@ func Connect(ctx context.Context, configFile string, st blob.Storage, password s
 		lc.Username = getDefaultUserName(ctx)
 	}
 
-	if err = setupCaching(ctx, configFile, &lc, opt.CachingOptions, f.UniqueID); err != nil {
+	if err = setupCaching(ctx, configFile, &lc, &opt.CachingOptions, f.UniqueID); err != nil {
 		return errors.Wrap(err, "unable to set up caching")
 	}
 
@@ -107,7 +107,9 @@ func verifyConnect(ctx context.Context, configFile, password string, persist boo
 	return r.Close(ctx)
 }
 
-func setupCaching(ctx context.Context, configPath string, lc *LocalConfig, opt content.CachingOptions, uniqueID []byte) error {
+func setupCaching(ctx context.Context, configPath string, lc *LocalConfig, opt *content.CachingOptions, uniqueID []byte) error {
+	opt = opt.CloneOrDefault()
+
 	if opt.MaxCacheSizeBytes == 0 {
 		lc.Caching = &content.CachingOptions{}
 		return nil
@@ -148,10 +150,6 @@ func setupCaching(ctx context.Context, configPath string, lc *LocalConfig, opt c
 	lc.Caching.MaxListCacheDurationSec = opt.MaxListCacheDurationSec
 
 	log(ctx).Debugf("Creating cache directory '%v' with max size %v", lc.Caching.CacheDirectory, lc.Caching.MaxCacheSizeBytes)
-
-	if err := os.MkdirAll(lc.Caching.CacheDirectory, 0700); err != nil {
-		log(ctx).Warningf("unablet to create cache directory: %v", err)
-	}
 
 	return nil
 }

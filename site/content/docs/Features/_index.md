@@ -1,7 +1,7 @@
 ---
 title: "Features"
 linkTitle: "Features"
-weight: 3
+weight: 30
 ---
 
 ### Snapshots
@@ -10,7 +10,7 @@ Kopia uploads directories and files to remote storage called [Repository](../arc
 
 Kopia uses [content-addressable storage](https://en.wikipedia.org/wiki/Content-addressable storage) for snapshots, which has many benefits:
 
-* Each snapshot is always incremental, no data included in previous snapshots is ever re-uploaded to the repository based on file content. 
+* Each snapshot is always incremental, no data included in previous snapshots is ever re-uploaded to the repository based on file content.
 
 * Multiple copies of the same file will be stored once. This is known as de-duplication.
 
@@ -31,6 +31,29 @@ To restore data, Kopia can mount contents of a Repository as a local disk and yo
 All data is encrypted before it leaves your machine. Kopia uses state-of-the-art encryption algorithms, such as [AES-256](https://en.wikipedia.org/wiki/AES256) or [ChaCha20](https://en.wikipedia.org/wiki/ChaCha20).
 
 All data is encrypted using per-content keys derived from the 256-bit master key stored in repository. Master key is encrypted with user-provided passphrase, which is never sent to any server.
+
+### Compression
+
+Kopia can compress your data to save extra storage and bandwidth. There are actually 3 compression methods available :
+
+* [pgzip](https://github.com/klauspost/pgzip) : gzip is a very common compression algorithm. It was originally created as a replacement for the compress program used in early Unix systems.
+Compression and decompression can be parallelized to speed up the process.
+
+* [s2](https://github.com/klauspost/compress/tree/master/s2) : S2 is an extension of [Snappy](https://github.com/google/snappy). It's aimed for high throughput, which is why it features concurrent compression for bigger payloads.
+
+* [zstd](https://github.com/klauspost/compress/tree/master/zstd) : [Zstandard](https://facebook.github.io/zstd/) is a real-time compression algorithm, providing high compression ratios. It offers a very wide range of compression / speed trade-off, while being backed by a very fast decoder. A high performance compression algorithm is implemented. For now focused on speed.
+
+You can activate compression on a per directory basis
+
+```shell
+kopia policy set <path> --compression=<pgzip|s2|zstd>
+```
+
+or globally
+
+```shell
+kopia policy set --global --compression=<pgzip|s2|zstd>
+```
 
 ### Policies
 
@@ -53,7 +76,7 @@ Kopia maintains a local cache of recently accessed objects making it possible to
 
 ### Storage
 
-Kopia performs all its operations client-side, without having to maintain dedicated server and supports a variety of storage providers, including cloud storage ([Google Cloud Storage](https://cloud.google.com/storage), [Amazon S3](https://aws.amazon.com/s3), [Wasabi](https://wasabi.com) or similar), [WebDAV](https://en.wikipedia.org/wiki/WebDAV)-compatible storage or any other remote storage mounted locally.
+Kopia performs all its operations client-side, without having to maintain dedicated server and supports a variety of storage providers, including cloud storage ([Google Cloud Storage](https://cloud.google.com/storage), [Amazon S3](https://aws.amazon.com/s3), [Wasabi](https://wasabi.com), [B2](https://www.backblaze.com/b2/cloud-storage.html), [Azure](https://azure.microsoft.com/fr-fr/services/storage/), or similar), [WebDAV](https://en.wikipedia.org/wiki/WebDAV)-compatible storage, sftp, http/s or any other remote storage mounted locally.
 
 With Kopia you're in full control of your storage. You must provision, pay for and maintain storage with enough capacity to store your backup and enough availability to be able to recover data when needed. To avoid administrative overhead it's recommended to use one of the available cloud storage solutions, which provide excellent features for very reasonable price.
 
