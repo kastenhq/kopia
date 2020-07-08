@@ -68,12 +68,12 @@ func (b *committedContentIndex) addContent(ctx context.Context, indexBlobID blob
 	return nil
 }
 
-func (b *committedContentIndex) listContents(prefix ID, cb func(i Info) error) error {
+func (b *committedContentIndex) listContents(r IDRange, cb func(i Info) error) error {
 	b.mu.Lock()
 	m := append(mergedIndex(nil), b.merged...)
 	b.mu.Unlock()
 
-	return m.Iterate(prefix, cb)
+	return m.Iterate(r, cb)
 }
 
 func (b *committedContentIndex) packFilesChanged(packFiles []blob.ID) bool {
@@ -133,7 +133,20 @@ func (b *committedContentIndex) use(ctx context.Context, packFiles []blob.ID) (b
 	return true, nil
 }
 
-func newCommittedContentIndex(caching CachingOptions) *committedContentIndex {
+func (b *committedContentIndex) close() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for _, pi := range b.inUse {
+		if err := pi.Close(); err != nil {
+			return errors.Wrap(err, "unable to close index")
+		}
+	}
+
+	return nil
+}
+
+func newCommittedContentIndex(caching *CachingOptions) *committedContentIndex {
 	var cache committedContentIndexCache
 
 	if caching.CacheDirectory != "" {

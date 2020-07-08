@@ -15,11 +15,15 @@ import (
 	"github.com/kopia/kopia/internal/serverapi"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/logging"
+	"github.com/kopia/kopia/repo/maintenance"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
+	"github.com/kopia/kopia/snapshot/snapshotmaintenance"
 )
 
 var log = logging.GetContextLoggerFunc("kopia/server")
+
+const maintenanceAttemptFrequency = 10 * time.Minute
 
 // Server exposes simple HTTP API for programmatically accessing Kopia features.
 type Server struct {
@@ -41,32 +45,42 @@ func (s *Server) APIHandlers() http.Handler {
 	m := mux.NewRouter()
 
 	// sources
-	m.HandleFunc("/api/v1/sources", s.handleAPI(s.handleSourcesList)).Methods("GET")
-	m.HandleFunc("/api/v1/sources", s.handleAPI(s.handleSourcesCreate)).Methods("POST")
-	m.HandleFunc("/api/v1/sources/upload", s.handleAPI(s.handleUpload)).Methods("POST")
-	m.HandleFunc("/api/v1/sources/cancel", s.handleAPI(s.handleCancel)).Methods("POST")
+	m.HandleFunc("/api/v1/sources", s.handleAPI(s.handleSourcesList)).Methods(http.MethodGet)
+	m.HandleFunc("/api/v1/sources", s.handleAPI(s.handleSourcesCreate)).Methods(http.MethodPost)
+	m.HandleFunc("/api/v1/sources/upload", s.handleAPI(s.handleUpload)).Methods(http.MethodPost)
+	m.HandleFunc("/api/v1/sources/cancel", s.handleAPI(s.handleCancel)).Methods(http.MethodPost)
 
 	// snapshots
-	m.HandleFunc("/api/v1/snapshots", s.handleAPI(s.handleSnapshotList)).Methods("GET")
+	m.HandleFunc("/api/v1/snapshots", s.handleAPI(s.handleSnapshotList)).Methods(http.MethodGet)
 
-	m.HandleFunc("/api/v1/policy", s.handleAPI(s.handlePolicyGet)).Methods("GET")
-	m.HandleFunc("/api/v1/policy", s.handleAPI(s.handlePolicyPut)).Methods("PUT")
-	m.HandleFunc("/api/v1/policy", s.handleAPI(s.handlePolicyDelete)).Methods("DELETE")
+	m.HandleFunc("/api/v1/policy", s.handleAPI(s.handlePolicyGet)).Methods(http.MethodGet)
+	m.HandleFunc("/api/v1/policy", s.handleAPI(s.handlePolicyPut)).Methods(http.MethodPut)
+	m.HandleFunc("/api/v1/policy", s.handleAPI(s.handlePolicyDelete)).Methods(http.MethodDelete)
 
-	m.HandleFunc("/api/v1/policies", s.handleAPI(s.handlePolicyList)).Methods("GET")
+	m.HandleFunc("/api/v1/policies", s.handleAPI(s.handlePolicyList)).Methods(http.MethodGet)
 
-	m.HandleFunc("/api/v1/refresh", s.handleAPI(s.handleRefresh)).Methods("POST")
-	m.HandleFunc("/api/v1/flush", s.handleAPI(s.handleFlush)).Methods("POST")
-	m.HandleFunc("/api/v1/shutdown", s.handleAPIPossiblyNotConnected(s.handleShutdown)).Methods("POST")
+	m.HandleFunc("/api/v1/refresh", s.handleAPI(s.handleRefresh)).Methods(http.MethodPost)
+	m.HandleFunc("/api/v1/flush", s.handleAPI(s.handleFlush)).Methods(http.MethodPost)
+	m.HandleFunc("/api/v1/shutdown", s.handleAPIPossiblyNotConnected(s.handleShutdown)).Methods(http.MethodPost)
 
-	m.PathPrefix("/api/v1/objects/").HandlerFunc(s.handleObjectGet).Methods("GET")
+	m.HandleFunc("/api/v1/objects/{objectID}", s.handleObjectGet).Methods(http.MethodGet)
 
-	m.HandleFunc("/api/v1/repo/status", s.handleAPIPossiblyNotConnected(s.handleRepoStatus)).Methods("GET")
-	m.HandleFunc("/api/v1/repo/connect", s.handleAPIPossiblyNotConnected(s.handleRepoConnect)).Methods("POST")
-	m.HandleFunc("/api/v1/repo/create", s.handleAPIPossiblyNotConnected(s.handleRepoCreate)).Methods("POST")
-	m.HandleFunc("/api/v1/repo/disconnect", s.handleAPI(s.handleRepoDisconnect)).Methods("POST")
-	m.HandleFunc("/api/v1/repo/algorithms", s.handleAPIPossiblyNotConnected(s.handleRepoSupportedAlgorithms)).Methods("GET")
-	m.HandleFunc("/api/v1/repo/sync", s.handleAPI(s.handleRepoSync)).Methods("POST")
+	m.HandleFunc("/api/v1/repo/status", s.handleAPIPossiblyNotConnected(s.handleRepoStatus)).Methods(http.MethodGet)
+	m.HandleFunc("/api/v1/repo/connect", s.handleAPIPossiblyNotConnected(s.handleRepoConnect)).Methods(http.MethodPost)
+	m.HandleFunc("/api/v1/repo/create", s.handleAPIPossiblyNotConnected(s.handleRepoCreate)).Methods(http.MethodPost)
+	m.HandleFunc("/api/v1/repo/disconnect", s.handleAPI(s.handleRepoDisconnect)).Methods(http.MethodPost)
+	m.HandleFunc("/api/v1/repo/algorithms", s.handleAPIPossiblyNotConnected(s.handleRepoSupportedAlgorithms)).Methods(http.MethodGet)
+	m.HandleFunc("/api/v1/repo/sync", s.handleAPI(s.handleRepoSync)).Methods(http.MethodPost)
+	m.HandleFunc("/api/v1/repo/parameters", s.handleAPI(s.handleRepoParameters)).Methods(http.MethodGet)
+
+	m.HandleFunc("/api/v1/contents/{contentID}", s.handleAPI(s.handleContentInfo)).Methods(http.MethodGet).Queries("info", "1")
+	m.HandleFunc("/api/v1/contents/{contentID}", s.handleAPI(s.handleContentGet)).Methods(http.MethodGet)
+	m.HandleFunc("/api/v1/contents/{contentID}", s.handleAPI(s.handleContentPut)).Methods(http.MethodPut)
+
+	m.HandleFunc("/api/v1/manifests/{manifestID}", s.handleAPI(s.handleManifestGet)).Methods(http.MethodGet)
+	m.HandleFunc("/api/v1/manifests/{manifestID}", s.handleAPI(s.handleManifestDelete)).Methods(http.MethodDelete)
+	m.HandleFunc("/api/v1/manifests", s.handleAPI(s.handleManifestCreate)).Methods(http.MethodPost)
+	m.HandleFunc("/api/v1/manifests", s.handleAPI(s.handleManifestList)).Methods(http.MethodGet)
 
 	return m
 }
@@ -97,7 +111,11 @@ func (s *Server) handleAPIPossiblyNotConnected(f func(ctx context.Context, r *ht
 		v, err := f(ctx, r)
 
 		if err == nil {
-			if err := e.Encode(v); err != nil {
+			if b, ok := v.([]byte); ok {
+				if _, err := w.Write(b); err != nil {
+					log(ctx).Warningf("error writing response: %v", err)
+				}
+			} else if err := e.Encode(v); err != nil {
 				log(ctx).Warningf("error encoding response: %v", err)
 			}
 
@@ -117,12 +135,18 @@ func (s *Server) handleAPIPossiblyNotConnected(f func(ctx context.Context, r *ht
 }
 
 func (s *Server) handleRefresh(ctx context.Context, r *http.Request) (interface{}, *apiError) {
-	log(ctx).Infof("refreshing")
+	if err := s.rep.Refresh(ctx); err != nil {
+		return nil, internalServerError(err)
+	}
+
 	return &serverapi.Empty{}, nil
 }
 
 func (s *Server) handleFlush(ctx context.Context, r *http.Request) (interface{}, *apiError) {
-	log(ctx).Infof("flushing")
+	if err := s.rep.Flush(ctx); err != nil {
+		return nil, internalServerError(err)
+	}
+
 	return &serverapi.Empty{}, nil
 }
 
@@ -219,6 +243,7 @@ func (s *Server) SetRepository(ctx context.Context, rep repo.Repository) error {
 
 	ctx, s.cancelRep = context.WithCancel(ctx)
 	go s.refreshPeriodically(ctx, rep)
+	go s.periodicMaintenance(ctx, rep)
 
 	return nil
 }
@@ -236,6 +261,20 @@ func (s *Server) refreshPeriodically(ctx context.Context, r repo.Repository) {
 
 			if err := s.SyncSources(ctx); err != nil {
 				log(ctx).Warningf("unable to sync sources: %v", err)
+			}
+		}
+	}
+}
+
+func (s *Server) periodicMaintenance(ctx context.Context, r repo.Repository) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-time.After(maintenanceAttemptFrequency):
+			if err := snapshotmaintenance.Run(ctx, r, maintenance.ModeAuto, false); err != nil {
+				log(ctx).Warningf("unable to run maintenance: %v", err)
 			}
 		}
 	}

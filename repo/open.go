@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -32,7 +33,7 @@ type Options struct {
 var ErrInvalidPassword = errors.Errorf("invalid repository password")
 
 // Open opens a Repository specified in the configuration file.
-func Open(ctx context.Context, configFile, password string, options *Options) (rep *DirectRepository, err error) {
+func Open(ctx context.Context, configFile, password string, options *Options) (rep Repository, err error) {
 	defer func() {
 		if err != nil {
 			log(ctx).Errorf("failed to open repository: %v", err)
@@ -53,11 +54,24 @@ func Open(ctx context.Context, configFile, password string, options *Options) (r
 		return nil, err
 	}
 
+	if lc.APIServer != nil {
+		return openAPIServer(ctx, lc.APIServer, lc.Username, lc.Hostname, password)
+	}
+
+	return openDirect(ctx, configFile, lc, password, options)
+}
+
+// openDirect opens the repository that directly manipulates blob storage..
+func openDirect(ctx context.Context, configFile string, lc *LocalConfig, password string, options *Options) (rep *DirectRepository, err error) {
 	if lc.Caching.CacheDirectory != "" && !filepath.IsAbs(lc.Caching.CacheDirectory) {
 		lc.Caching.CacheDirectory = filepath.Join(filepath.Dir(configFile), lc.Caching.CacheDirectory)
 	}
 
-	st, err := blob.NewStorage(ctx, lc.Storage)
+	if lc.Storage == nil {
+		return nil, errors.Errorf("storage not set in the configuration file")
+	}
+
+	st, err := blob.NewStorage(ctx, *lc.Storage)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot open storage")
 	}
@@ -89,7 +103,9 @@ func Open(ctx context.Context, configFile, password string, options *Options) (r
 }
 
 // OpenWithConfig opens the repository with a given configuration, avoiding the need for a config file.
-func OpenWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, password string, options *Options, caching content.CachingOptions) (*DirectRepository, error) {
+func OpenWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, password string, options *Options, caching *content.CachingOptions) (*DirectRepository, error) {
+	caching = caching.CloneOrDefault()
+
 	// Read format blob, potentially from cache.
 	fb, err := readAndCacheFormatBlobBytes(ctx, st, caching.CacheDirectory)
 	if err != nil {
@@ -159,7 +175,7 @@ func OpenWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 }
 
 // SetCachingConfig changes caching configuration for a given repository.
-func (r *DirectRepository) SetCachingConfig(ctx context.Context, opt content.CachingOptions) error {
+func (r *DirectRepository) SetCachingConfig(ctx context.Context, opt *content.CachingOptions) error {
 	lc, err := loadConfigFromFile(r.ConfigFile)
 	if err != nil {
 		return err
@@ -185,6 +201,10 @@ func readAndCacheFormatBlobBytes(ctx context.Context, st blob.Storage, cacheDire
 	cachedFile := filepath.Join(cacheDirectory, "kopia.repository")
 
 	if cacheDirectory != "" {
+		if err := os.MkdirAll(cacheDirectory, 0700); err != nil && !os.IsExist(err) {
+			log(ctx).Warningf("unable to create cache directory: %v", err)
+		}
+
 		b, err := ioutil.ReadFile(cachedFile) //nolint:gosec
 		if err == nil {
 			// read from cache.
