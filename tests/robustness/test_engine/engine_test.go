@@ -1,8 +1,11 @@
+// +build darwin linux
+
 // Package engine provides the framework for a snapshot repository testing engine
 package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -24,7 +27,7 @@ var (
 
 func TestEngineWritefilesBasicFS(t *testing.T) {
 	eng, err := NewEngine()
-	if err == kopiarunner.ErrExeVariableNotSet {
+	if err == kopiarunner.ErrExeVariableNotSet || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
 
@@ -63,7 +66,7 @@ func TestEngineWritefilesBasicFS(t *testing.T) {
 
 func TestWriteFilesBasicS3(t *testing.T) {
 	eng, err := NewEngine()
-	if err == kopiarunner.ErrExeVariableNotSet {
+	if err == kopiarunner.ErrExeVariableNotSet || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
 
@@ -102,7 +105,7 @@ func TestWriteFilesBasicS3(t *testing.T) {
 
 func TestDeleteSnapshotS3(t *testing.T) {
 	eng, err := NewEngine()
-	if err == kopiarunner.ErrExeVariableNotSet {
+	if err == kopiarunner.ErrExeVariableNotSet || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
 
@@ -142,7 +145,7 @@ func TestDeleteSnapshotS3(t *testing.T) {
 
 func TestSnapshotVerificationFail(t *testing.T) {
 	eng, err := NewEngine()
-	if err == kopiarunner.ErrExeVariableNotSet {
+	if err == kopiarunner.ErrExeVariableNotSet || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
 
@@ -208,7 +211,7 @@ func TestDataPersistency(t *testing.T) {
 	defer os.RemoveAll(tempDir) //nolint:errcheck
 
 	eng, err := NewEngine()
-	if err == kopiarunner.ErrExeVariableNotSet {
+	if err == kopiarunner.ErrExeVariableNotSet || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
 
