@@ -2,11 +2,13 @@ package robustness
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"log"
 	"os"
 	"testing"
 
 	engine "github.com/kopia/kopia/tests/robustness/test_engine"
+	"github.com/kopia/kopia/tests/tools/fio"
 	"github.com/kopia/kopia/tests/tools/kopiarunner"
 )
 
@@ -23,9 +25,14 @@ func TestMain(m *testing.M) {
 	var err error
 
 	eng, err = engine.NewEngine()
-	if err == kopiarunner.ErrExeVariableNotSet {
-		fmt.Println("Skipping robustness tests if KOPIA_EXE is not set")
-		os.Exit(0)
+	if err != nil {
+		log.Println("skipping robustness tests:", err)
+
+		if err == kopiarunner.ErrExeVariableNotSet || errors.Is(err, fio.ErrEnvNotSet) {
+			os.Exit(0)
+		}
+
+		os.Exit(1)
 	}
 
 	switch {
