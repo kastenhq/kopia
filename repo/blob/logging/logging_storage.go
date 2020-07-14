@@ -22,14 +22,23 @@ func (s *loggingStorage) GetBlob(ctx context.Context, id blob.ID, offset, length
 	dt := time.Since(t0)
 
 	if len(result) < maxLoggedBlobLength {
-		s.printf(s.prefix+"GetBlob(%q,%v,%v)=(%#v, %#v) took %v", id, offset, length, result, err, dt)
+		s.printf(s.prefix+"GetBlob(%q,%v,%v)=(%v, %#v) took %v", id, offset, length, result, err, dt)
 	} else {
-		s.printf(s.prefix+"GetBlob(%q,%v,%v)=({%#v bytes}, %#v) took %v", id, offset, length, len(result), err, dt)
+		s.printf(s.prefix+"GetBlob(%q,%v,%v)=({%v bytes}, %#v) took %v", id, offset, length, len(result), err, dt)
 	}
 
 	return result, err
 }
 
+func (s *loggingStorage) GetMetadata(ctx context.Context, id blob.ID) (blob.Metadata, error) {
+	t0 := time.Now()
+	result, err := s.base.GetMetadata(ctx, id)
+	dt := time.Since(t0)
+
+	s.printf(s.prefix+"GetMetadata(%q)=(%v, %#v) took %v", id, result, err, dt)
+
+	return result, err
+}
 func (s *loggingStorage) PutBlob(ctx context.Context, id blob.ID, data blob.Bytes) error {
 	t0 := time.Now()
 	err := s.base.PutBlob(ctx, id, data)
@@ -72,9 +81,6 @@ func (s *loggingStorage) Close(ctx context.Context) error {
 func (s *loggingStorage) ConnectionInfo() blob.ConnectionInfo {
 	return s.base.ConnectionInfo()
 }
-
-// Option modifies the behavior of logging storage wrapper.
-type Option func(s *loggingStorage)
 
 // NewWrapper returns a Storage wrapper that logs all storage commands.
 func NewWrapper(wrapped blob.Storage, printf func(msg string, args ...interface{}), prefix string) blob.Storage {

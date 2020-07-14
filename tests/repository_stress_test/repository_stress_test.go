@@ -35,7 +35,7 @@ func TestStressRepository(t *testing.T) {
 		t.Skip("skipping stress test during short tests")
 	}
 
-	ctx := content.UsingListCache(testlogging.Context(t), false)
+	ctx := testlogging.Context(t)
 
 	tmpPath, err := ioutil.TempDir("", "kopia")
 	if err != nil {
@@ -148,7 +148,7 @@ func longLivedRepositoryTest(ctx context.Context, t *testing.T, cancel chan stru
 		go func() {
 			defer wg2.Done()
 
-			repositoryTest(ctx, t, cancel, rep)
+			repositoryTest(ctx, t, cancel, rep.(*repo.DirectRepository))
 		}()
 	}
 

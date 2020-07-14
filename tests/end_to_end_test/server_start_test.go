@@ -1,14 +1,18 @@
 package endtoend_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io/ioutil"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/apiclient"
 	"github.com/kopia/kopia/internal/retry"
 	"github.com/kopia/kopia/internal/serverapi"
 	"github.com/kopia/kopia/internal/testlogging"
@@ -63,6 +67,7 @@ func TestServerStart(t *testing.T) {
 
 	var sp serverParameters
 
+	e.Environment = append(e.Environment, `KOPIA_UI_TITLE_PREFIX=Blah: <script>bleh</script> `)
 	e.RunAndProcessStderr(t, sp.ProcessOutput,
 		"server", "start",
 		"--ui",
@@ -75,19 +80,21 @@ func TestServerStart(t *testing.T) {
 	)
 	t.Logf("detected server parameters %#v", sp)
 
-	cli, err := serverapi.NewClient(serverapi.ClientOptions{
+	cli, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             sp.baseURL,
+		Username:                            "kopia",
 		Password:                            sp.password,
 		TrustedServerCertificateFingerprint: sp.sha256Fingerprint,
 		LogRequests:                         true,
 	})
 	if err != nil {
-		t.Fatalf("unable to create API client")
+		t.Fatalf("unable to create API apiclient")
 	}
 
-	defer cli.Shutdown(ctx) // nolint:errcheck
+	defer serverapi.Shutdown(ctx, cli) // nolint:errcheck
 
 	waitUntilServerStarted(ctx, t, cli)
+	verifyUIServedWithCorrectTitle(t, cli, sp)
 
 	st := verifyServerConnected(t, cli, true)
 	if got, want := st.Storage, "filesystem"; got != want {
@@ -99,7 +106,7 @@ func TestServerStart(t *testing.T) {
 		t.Errorf("unexpected source path: %v, want %v", got, want)
 	}
 
-	createResp, err := cli.CreateSnapshotSource(ctx, &serverapi.CreateSnapshotSourceRequest{
+	createResp, err := serverapi.CreateSnapshotSource(ctx, cli, &serverapi.CreateSnapshotSourceRequest{
 		Path: sharedTestDataDir2,
 	})
 
@@ -127,13 +134,13 @@ func TestServerStart(t *testing.T) {
 	uploadMatchingSnapshots(t, cli, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir2})
 	waitForSnapshotCount(ctx, t, cli, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir2}, 1)
 
-	if _, err = cli.CancelUpload(ctx, nil); err != nil {
+	if _, err = serverapi.CancelUpload(ctx, cli, nil); err != nil {
 		t.Fatalf("cancel failed: %v", err)
 	}
 
 	snaps := verifySnapshotCount(t, cli, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir2}, 1)
 
-	rootPayload, err := cli.GetObject(ctx, snaps[0].RootEntry)
+	rootPayload, err := serverapi.GetObject(ctx, cli, snaps[0].RootEntry)
 	if err != nil {
 		t.Fatalf("getObject %v", err)
 	}
@@ -146,7 +153,7 @@ func TestServerStart(t *testing.T) {
 
 	keepDaily := 77
 
-	createResp, err = cli.CreateSnapshotSource(ctx, &serverapi.CreateSnapshotSourceRequest{
+	createResp, err = serverapi.CreateSnapshotSource(ctx, cli, &serverapi.CreateSnapshotSourceRequest{
 		Path:           sharedTestDataDir3,
 		CreateSnapshot: true,
 		InitialPolicy: policy.Policy{
@@ -164,7 +171,7 @@ func TestServerStart(t *testing.T) {
 		t.Errorf("unexpected value of 'snapshotStarted': %v", createResp.SnapshotStarted)
 	}
 
-	policies, err := cli.ListPolicies(ctx, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir3})
+	policies, err := serverapi.ListPolicies(ctx, cli, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir3})
 	if err != nil {
 		t.Errorf("aaa")
 	}
@@ -201,21 +208,22 @@ func TestServerStartWithoutInitialRepository(t *testing.T) {
 	e.RunAndProcessStderr(t, sp.ProcessOutput, "server", "start", "--ui", "--address=localhost:0", "--random-password", "--tls-generate-cert", "--auto-shutdown=60s")
 	t.Logf("detected server parameters %#v", sp)
 
-	cli, err := serverapi.NewClient(serverapi.ClientOptions{
+	cli, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             sp.baseURL,
+		Username:                            "kopia",
 		Password:                            sp.password,
 		TrustedServerCertificateFingerprint: sp.sha256Fingerprint,
 	})
 	if err != nil {
-		t.Fatalf("unable to create API client")
+		t.Fatalf("unable to create API apiclient")
 	}
 
-	defer cli.Shutdown(ctx) // nolint:errcheck
+	defer serverapi.Shutdown(ctx, cli) // nolint:errcheck
 
 	waitUntilServerStarted(ctx, t, cli)
 	verifyServerConnected(t, cli, false)
 
-	if err = cli.CreateRepository(ctx, &serverapi.CreateRepositoryRequest{
+	if err = serverapi.CreateRepository(ctx, cli, &serverapi.CreateRepositoryRequest{
 		ConnectRepositoryRequest: serverapi.ConnectRepositoryRequest{
 			Password: "foofoo",
 			Storage:  connInfo,
@@ -226,13 +234,13 @@ func TestServerStartWithoutInitialRepository(t *testing.T) {
 
 	verifyServerConnected(t, cli, true)
 
-	if err = cli.DisconnectFromRepository(ctx); err != nil {
+	if err = serverapi.DisconnectFromRepository(ctx, cli); err != nil {
 		t.Fatalf("disconnect error: %v", err)
 	}
 
 	verifyServerConnected(t, cli, false)
 
-	if err = cli.ConnectToRepository(ctx, &serverapi.ConnectRepositoryRequest{
+	if err = serverapi.ConnectToRepository(ctx, cli, &serverapi.ConnectRepositoryRequest{
 		Password: "foofoo",
 		Storage:  connInfo,
 	}); err != nil {
@@ -242,10 +250,10 @@ func TestServerStartWithoutInitialRepository(t *testing.T) {
 	verifyServerConnected(t, cli, true)
 }
 
-func verifyServerConnected(t *testing.T, cli *serverapi.Client, want bool) *serverapi.StatusResponse {
+func verifyServerConnected(t *testing.T, cli *apiclient.KopiaAPIClient, want bool) *serverapi.StatusResponse {
 	t.Helper()
 
-	st, err := cli.Status(testlogging.Context(t))
+	st, err := serverapi.Status(testlogging.Context(t), cli)
 	if err != nil {
 		t.Fatalf("status error: %v", err)
 	}
@@ -257,11 +265,11 @@ func verifyServerConnected(t *testing.T, cli *serverapi.Client, want bool) *serv
 	return st
 }
 
-func waitForSnapshotCount(ctx context.Context, t *testing.T, cli *serverapi.Client, match *snapshot.SourceInfo, want int) {
+func waitForSnapshotCount(ctx context.Context, t *testing.T, cli *apiclient.KopiaAPIClient, match *snapshot.SourceInfo, want int) {
 	t.Helper()
 
 	err := retry.PeriodicallyNoValue(ctx, 1*time.Second, 60, "wait for snapshots", func() error {
-		snapshots, err := cli.ListSnapshots(testlogging.Context(t), match)
+		snapshots, err := serverapi.ListSnapshots(testlogging.Context(t), cli, match)
 		if err != nil {
 			return errors.Wrap(err, "error listing sources")
 		}
@@ -277,18 +285,18 @@ func waitForSnapshotCount(ctx context.Context, t *testing.T, cli *serverapi.Clie
 	}
 }
 
-func uploadMatchingSnapshots(t *testing.T, cli *serverapi.Client, match *snapshot.SourceInfo) {
+func uploadMatchingSnapshots(t *testing.T, cli *apiclient.KopiaAPIClient, match *snapshot.SourceInfo) {
 	t.Helper()
 
-	if _, err := cli.UploadSnapshots(testlogging.Context(t), match); err != nil {
+	if _, err := serverapi.UploadSnapshots(testlogging.Context(t), cli, match); err != nil {
 		t.Fatalf("upload failed: %v", err)
 	}
 }
 
-func verifySnapshotCount(t *testing.T, cli *serverapi.Client, match *snapshot.SourceInfo, want int) []*serverapi.Snapshot {
+func verifySnapshotCount(t *testing.T, cli *apiclient.KopiaAPIClient, match *snapshot.SourceInfo, want int) []*serverapi.Snapshot {
 	t.Helper()
 
-	snapshots, err := cli.ListSnapshots(testlogging.Context(t), match)
+	snapshots, err := serverapi.ListSnapshots(testlogging.Context(t), cli, match)
 	if err != nil {
 		t.Fatalf("error listing sources: %v", err)
 	}
@@ -300,10 +308,10 @@ func verifySnapshotCount(t *testing.T, cli *serverapi.Client, match *snapshot.So
 	return snapshots.Snapshots
 }
 
-func verifySourceCount(t *testing.T, cli *serverapi.Client, match *snapshot.SourceInfo, want int) []*serverapi.SourceStatus {
+func verifySourceCount(t *testing.T, cli *apiclient.KopiaAPIClient, match *snapshot.SourceInfo, want int) []*serverapi.SourceStatus {
 	t.Helper()
 
-	sources, err := cli.ListSources(testlogging.Context(t), match)
+	sources, err := serverapi.ListSources(testlogging.Context(t), cli, match)
 	if err != nil {
 		t.Fatalf("error listing sources: %v", err)
 	}
@@ -323,9 +331,36 @@ func verifySourceCount(t *testing.T, cli *serverapi.Client, match *snapshot.Sour
 	return sources.Sources
 }
 
-func waitUntilServerStarted(ctx context.Context, t *testing.T, cli *serverapi.Client) {
+func verifyUIServedWithCorrectTitle(t *testing.T, cli *apiclient.KopiaAPIClient, sp serverParameters) {
+	req, err := http.NewRequest("GET", sp.baseURL, nil)
+	if err != nil {
+		t.Fatalf("unable to create HTTP request: %v", err)
+	}
+
+	req.SetBasicAuth("kopia", sp.password)
+
+	resp, err := cli.HTTPClient.Do(req)
+	if err != nil {
+		t.Fatalf("unable to get HTML root: %v", err)
+	}
+
+	defer resp.Body.Close()
+
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("error reading response body: %v", err)
+	}
+
+	// make sure the UI correctly inserts prefix from KOPIA_UI_TITLE_PREFIX
+	// and it's correctly HTML-escaped.
+	if !bytes.Contains(b, []byte(`<title>Blah: &lt;script&gt;bleh&lt;/script&gt; Kopia UI`)) {
+		t.Errorf("invalid title served by the UI: %v.", string(b))
+	}
+}
+
+func waitUntilServerStarted(ctx context.Context, t *testing.T, cli *apiclient.KopiaAPIClient) {
 	if err := retry.PeriodicallyNoValue(ctx, 1*time.Second, 60, "wait for server start", func() error {
-		_, err := cli.Status(testlogging.Context(t))
+		_, err := serverapi.Status(testlogging.Context(t), cli)
 		return err
 	}, retry.Always); err != nil {
 		t.Fatalf("server failed to start")

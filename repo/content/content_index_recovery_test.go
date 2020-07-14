@@ -24,7 +24,7 @@ func TestContentIndexRecovery(t *testing.T) {
 	}
 
 	// delete all index blobs
-	assertNoError(t, bm.st.ListBlobs(ctx, newIndexBlobPrefix, func(bi blob.Metadata) error {
+	assertNoError(t, bm.st.ListBlobs(ctx, indexBlobPrefix, func(bi blob.Metadata) error {
 		log(ctx).Debugf("deleting %v", bi.BlobID)
 		return bm.st.DeleteBlob(ctx, bi.BlobID)
 	}))
@@ -61,7 +61,7 @@ func TestContentIndexRecovery(t *testing.T) {
 		t.Errorf("invalid # of contents recovered: %v, want %v", got, want)
 	}
 
-	// contents are stil not found
+	// contents are still not found
 	verifyContentNotFound(ctx, t, bm, content1)
 	verifyContentNotFound(ctx, t, bm, content2)
 	verifyContentNotFound(ctx, t, bm, content3)

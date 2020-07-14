@@ -117,12 +117,21 @@ func TestPackIndex(t *testing.T) {
 	data2 := buf2.Bytes()
 	data3 := buf3.Bytes()
 
-	if !bytes.Equal(data1, data2) {
-		t.Errorf("builder output not stable: %x vs %x", hex.Dump(data1), hex.Dump(data2))
+	// each build produces exactly idendical prefix except for the trailing random bytes.
+	data1Prefix := data1[0 : len(data1)-randomSuffixSize]
+	data2Prefix := data2[0 : len(data2)-randomSuffixSize]
+	data3Prefix := data3[0 : len(data3)-randomSuffixSize]
+
+	if !bytes.Equal(data1Prefix, data2Prefix) {
+		t.Errorf("builder output not stable: %x vs %x", hex.Dump(data1Prefix), hex.Dump(data2Prefix))
 	}
 
-	if !bytes.Equal(data2, data3) {
-		t.Errorf("builder output not stable: %x vs %x", hex.Dump(data2), hex.Dump(data3))
+	if !bytes.Equal(data2Prefix, data3Prefix) {
+		t.Errorf("builder output not stable: %x vs %x", hex.Dump(data2Prefix), hex.Dump(data3Prefix))
+	}
+
+	if bytes.Equal(data1, data2) {
+		t.Errorf("builder output expected to be different, but was the same")
 	}
 
 	t.Run("FuzzTest", func(t *testing.T) {
@@ -149,7 +158,7 @@ func TestPackIndex(t *testing.T) {
 
 	cnt := 0
 
-	assertNoError(t, ndx.Iterate("", func(info2 Info) error {
+	assertNoError(t, ndx.Iterate(AllIDs, func(info2 Info) error {
 		info := infoMap[info2.ID]
 		if !reflect.DeepEqual(info, info2) {
 			t.Errorf("invalid value retrieved: %+v, wanted %+v", info2, info)
@@ -180,7 +189,7 @@ func TestPackIndex(t *testing.T) {
 	for _, prefix := range prefixes {
 		cnt2 := 0
 		prefix := prefix
-		assertNoError(t, ndx.Iterate(prefix, func(info2 Info) error {
+		assertNoError(t, ndx.Iterate(PrefixRange(prefix), func(info2 Info) error {
 			cnt2++
 			if !strings.HasPrefix(string(info2.ID), string(prefix)) {
 				t.Errorf("unexpected item %v when iterating prefix %v", info2.ID, prefix)
@@ -202,7 +211,7 @@ func fuzzTestIndexOpen(originalData []byte) {
 		}
 		defer ndx.Close()
 		cnt := 0
-		_ = ndx.Iterate("", func(cb Info) error {
+		_ = ndx.Iterate(AllIDs, func(cb Info) error {
 			if cnt < 10 {
 				_, _ = ndx.GetInfo(cb.ID)
 			}

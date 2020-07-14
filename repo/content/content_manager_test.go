@@ -22,6 +22,7 @@ import (
 	"github.com/kopia/kopia/internal/faketime"
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/repo/blob/logging"
 )
 
 const (
@@ -202,7 +203,7 @@ func TestContentManagerEmpty(t *testing.T) {
 func verifyActiveIndexBlobCount(ctx context.Context, t *testing.T, bm *Manager, expected int) {
 	t.Helper()
 
-	blks, err := bm.IndexBlobs(ctx)
+	blks, err := bm.IndexBlobs(ctx, false)
 	if err != nil {
 		t.Errorf("error listing active index blobs: %v", err)
 		return
@@ -319,7 +320,7 @@ func TestContentManagerFailedToWritePack(t *testing.T) {
 		MaxPackSize: maxPackSize,
 		HMACSecret:  []byte("foo"),
 		MasterKey:   []byte("0123456789abcdef0123456789abcdef"),
-	}, CachingOptions{}, faketime.Frozen(fakeTime), nil)
+	}, nil, faketime.Frozen(fakeTime), nil)
 	if err != nil {
 		t.Fatalf("can't create bm: %v", err)
 	}
@@ -410,17 +411,13 @@ func TestContentManagerConcurrency(t *testing.T) {
 	verifyContent(ctx, t, bm4, bm2content, seededRandomData(32, 100))
 	verifyContent(ctx, t, bm4, bm3content, seededRandomData(33, 100))
 
-	if got, want := getIndexCount(data), 4; got != want {
-		t.Errorf("unexpected index count before compaction: %v, wanted %v", got, want)
-	}
+	validateIndexCount(t, data, 4, 0)
 
 	if err := bm4.CompactIndexes(ctx, CompactOptions{MaxSmallBlobs: 1}); err != nil {
 		t.Errorf("compaction error: %v", err)
 	}
 
-	if got, want := getIndexCount(data), 1; got != want {
-		t.Errorf("unexpected index count after compaction: %v, wanted %v", got, want)
-	}
+	validateIndexCount(t, data, 5, 1)
 
 	// new content manager at this point can see all data.
 	bm5 := newTestContentManager(t, data, keyTime, nil)
@@ -434,6 +431,30 @@ func TestContentManagerConcurrency(t *testing.T) {
 
 	if err := bm5.CompactIndexes(ctx, CompactOptions{MaxSmallBlobs: 1}); err != nil {
 		t.Errorf("compaction error: %v", err)
+	}
+}
+
+func validateIndexCount(t *testing.T, data map[blob.ID][]byte, wantIndexCount, wantCompactionLogCount int) {
+	t.Helper()
+
+	var indexCnt, compactionLogCnt int
+
+	for blobID := range data {
+		if strings.HasPrefix(string(blobID), indexBlobPrefix) {
+			indexCnt++
+		}
+
+		if strings.HasPrefix(string(blobID), compactionLogBlobPrefix) {
+			compactionLogCnt++
+		}
+	}
+
+	if got, want := indexCnt, wantIndexCount; got != want {
+		t.Fatalf("unexpected index blob count %v, want %v", got, want)
+	}
+
+	if got, want := compactionLogCnt, wantCompactionLogCount; got != want {
+		t.Fatalf("unexpected compaction log blob count %v, want %v", got, want)
 	}
 }
 
@@ -478,6 +499,368 @@ func TestDeleteContent(t *testing.T) {
 	defer bm.Close(ctx)
 	verifyContentNotFound(ctx, t, bm, content1)
 	verifyContentNotFound(ctx, t, bm, content2)
+}
+
+// nolint:gocyclo
+func TestUndeleteContentSimple(t *testing.T) {
+	ctx := testlogging.Context(t)
+	data := blobtesting.DataMap{}
+	keyTime := map[blob.ID]time.Time{}
+	bm := newTestContentManager(t, data, keyTime, nil)
+
+	content1 := writeContentAndVerify(ctx, t, bm, seededRandomData(40, 16))
+	content2 := writeContentAndVerify(ctx, t, bm, seededRandomData(41, 16))
+	content3 := writeContentAndVerify(ctx, t, bm, seededRandomData(42, 16))
+
+	if err := bm.Flush(ctx); err != nil {
+		t.Fatal("error while flushing:", err)
+	}
+
+	dumpContents(ctx, t, bm, "after first flush")
+
+	c1Info := getContentInfo(t, bm, content1)
+	c2Info := getContentInfo(t, bm, content2)
+	c3Info := getContentInfo(t, bm, content3)
+
+	t.Log("deleting content 2: ", content2)
+	deleteContent(ctx, t, bm, content2)
+
+	if err := bm.Flush(ctx); err != nil {
+		t.Fatal("error while flushing:", err)
+	}
+
+	t.Log("deleting content 3: ", content3)
+	deleteContent(ctx, t, bm, content3)
+
+	content4 := writeContentAndVerify(ctx, t, bm, seededRandomData(43, 16))
+
+	t.Log("deleting content 4: ", content4)
+	deleteContent(ctx, t, bm, content4)
+
+	tcs := []struct {
+		name    string
+		cid     ID
+		wantErr bool
+		info    Info
+	}{
+		{
+			name:    "existing content",
+			cid:     content1,
+			wantErr: false,
+			info:    c1Info,
+		},
+		{
+			name:    "flush after delete",
+			cid:     content2,
+			wantErr: false,
+			info:    c2Info,
+		},
+		{
+			name:    "no flush after delete",
+			cid:     content3,
+			wantErr: false,
+			info:    c3Info,
+		},
+		{
+			name:    "no flush after create and delete",
+			cid:     content4,
+			wantErr: true,
+		},
+		{
+			name:    "non-existing content",
+			cid:     ID(makeRandomHexString(t, len(content3))), // non-existing
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Log("case name:", tc.name)
+
+		err := bm.UndeleteContent(ctx, tc.cid)
+		if got := err != nil; got != tc.wantErr {
+			t.Errorf("did not get the expected error return valuem, want: %v, got: %v", tc.wantErr, err)
+			continue
+		}
+
+		if tc.wantErr {
+			continue
+		}
+
+		got, want := getContentInfo(t, bm, tc.cid), tc.info
+
+		if got.Deleted {
+			t.Error("Content marked as deleted:", got)
+		}
+
+		if got.PackBlobID == "" {
+			t.Error("Empty pack id for undeleted content:", tc.cid)
+		}
+
+		if got.PackOffset == 0 {
+			t.Error("0 offset for undeleted content:", tc.cid)
+		}
+
+		// ignore different timestamps, pack id and pack offset
+		got.TimestampSeconds = want.TimestampSeconds
+		got.PackBlobID = want.PackBlobID
+		got.PackOffset = want.PackOffset
+
+		if got != want {
+			t.Errorf("content info does not match.\nwant: %#v\ngot:  %#v", want, got)
+		}
+	}
+
+	// ensure content is still there after flushing
+	if err := bm.Flush(ctx); err != nil {
+		t.Fatal("error while flushing:", err)
+	}
+
+	tcs2 := []struct {
+		name string
+		cid  ID
+		want Info
+	}{
+		{
+			name: "content1",
+			cid:  content1,
+			want: c1Info,
+		},
+		{
+			name: "content2",
+			cid:  content2,
+			want: c2Info,
+		},
+		{
+			name: "content3",
+			cid:  content3,
+			want: c3Info,
+		},
+	}
+
+	for _, tc := range tcs2 {
+		t.Log("case name:", tc.name)
+		got := getContentInfo(t, bm, tc.cid)
+
+		if got.Deleted {
+			t.Error("Content marked as deleted:", got)
+		}
+
+		if got.PackBlobID == "" {
+			t.Error("Empty pack id for undeleted content:", tc.cid)
+		}
+
+		if got.PackOffset == 0 {
+			t.Error("0 offset for undeleted content:", tc.cid)
+		}
+
+		// ignore different timestamps, pack id and pack offset
+		got.TimestampSeconds = tc.want.TimestampSeconds
+		got.PackBlobID = tc.want.PackBlobID
+		got.PackOffset = tc.want.PackOffset
+
+		if got != tc.want {
+			t.Errorf("content info does not match.\nwant: %#v\ngot:  %#v", tc.want, got)
+		}
+	}
+}
+
+// nolint:gocyclo
+func TestUndeleteContent(t *testing.T) {
+	ctx := testlogging.Context(t)
+	data := blobtesting.DataMap{}
+	keyTime := map[blob.ID]time.Time{}
+	bm := newTestContentManager(t, data, keyTime, nil)
+
+	content1 := writeContentAndVerify(ctx, t, bm, seededRandomData(20, 10))
+	content2 := writeContentAndVerify(ctx, t, bm, seededRandomData(21, 10))
+	content3 := writeContentAndVerify(ctx, t, bm, seededRandomData(31, 10))
+
+	if err := bm.Flush(ctx); err != nil {
+		t.Fatalf("error flushing: %v", err)
+	}
+
+	dumpContents(ctx, t, bm, "after first flush")
+
+	log(ctx).Infof("deleting content 1: %s", content1)
+
+	if err := bm.DeleteContent(ctx, content1); err != nil {
+		t.Fatalf("unable to delete content %v: %v", content1, err)
+	}
+
+	if err := bm.Flush(ctx); err != nil {
+		t.Fatalf("error flushing: %v", err)
+	}
+
+	log(ctx).Infof("deleting content 2: %s", content2)
+
+	if err := bm.DeleteContent(ctx, content2); err != nil {
+		t.Fatalf("unable to delete content %v: %v", content2, err)
+	}
+
+	content4 := writeContentAndVerify(ctx, t, bm, seededRandomData(41, 10))
+	content5 := writeContentAndVerify(ctx, t, bm, seededRandomData(51, 10))
+
+	log(ctx).Infof("deleting content 4: %s", content4)
+
+	if err := bm.DeleteContent(ctx, content4); err != nil {
+		t.Fatalf("unable to delete content %v: %v", content4, err)
+	}
+
+	verifyContentNotFound(ctx, t, bm, content1)
+	verifyContentNotFound(ctx, t, bm, content2)
+	verifyContentNotFound(ctx, t, bm, content4)
+
+	// At this point:
+	// - content 1 is flushed, deleted index entry has been flushed
+	// - content 2 is flushed, deleted index entry has not been flushed
+	// - content 3 is flushed, not deleted
+	// - content 4 is not flushed and deleted, it cannot be undeleted
+	// - content 5 is not flushed and not deleted
+
+	if err := bm.UndeleteContent(ctx, content1); err != nil {
+		t.Fatal("unable to undelete content 1: ", content1, err)
+	}
+
+	if err := bm.UndeleteContent(ctx, content2); err != nil {
+		t.Fatal("unable to undelete content 2: ", content2, err)
+	}
+
+	if err := bm.UndeleteContent(ctx, content3); err != nil {
+		t.Fatal("unable to undelete content 3: ", content3, err)
+	}
+
+	if err := bm.UndeleteContent(ctx, content4); err == nil {
+		t.Fatal("was able to undelete content 4: ", content4)
+	}
+
+	if err := bm.UndeleteContent(ctx, content5); err != nil {
+		t.Fatal("unable to undelete content 5: ", content5, err)
+	}
+
+	// verify content is not marked as deleted
+	for _, id := range []ID{} {
+		ci, err := bm.ContentInfo(ctx, id)
+		if err != nil {
+			t.Fatalf("unable to get content info for %v: %v", id, err)
+		}
+
+		if got, want := ci.Deleted, false; got != want {
+			t.Fatalf("content %v was not undeleted: %v", id, ci)
+		}
+	}
+
+	log(ctx).Infof("flushing ...")
+	bm.Flush(ctx)
+	log(ctx).Infof("... flushed")
+
+	// verify content is not marked as deleted
+	for _, id := range []ID{} {
+		ci, err := bm.ContentInfo(ctx, id)
+		if err != nil {
+			t.Fatalf("unable to get content info for %v: %v", id, err)
+		}
+
+		if got, want := ci.Deleted, false; got != want {
+			t.Fatalf("content %v was not undeleted: %v", id, ci)
+		}
+	}
+
+	bm = newTestContentManager(t, data, keyTime, nil)
+	verifyContentNotFound(ctx, t, bm, content4)
+
+	// verify content is not marked as deleted
+	for _, id := range []ID{} {
+		ci, err := bm.ContentInfo(ctx, id)
+		if err != nil {
+			t.Fatalf("unable to get content info for %v: %v", id, err)
+		}
+
+		if got, want := ci.Deleted, false; got != want {
+			t.Fatalf("content %v was not undeleted: %v", id, ci)
+		}
+	}
+}
+
+func TestDeleteAfterUndelete(t *testing.T) {
+	ctx := testlogging.Context(t)
+	data := blobtesting.DataMap{}
+	keyTime := map[blob.ID]time.Time{}
+	bm := newTestContentManager(t, data, keyTime, nil)
+
+	content1 := writeContentAndVerify(ctx, t, bm, seededRandomData(40, 16))
+	content2 := writeContentAndVerify(ctx, t, bm, seededRandomData(41, 16))
+
+	if err := bm.Flush(ctx); err != nil {
+		t.Fatal("error while flushing:", err)
+	}
+
+	dumpContents(ctx, t, bm, "after first flush")
+
+	deleteContent(ctx, t, bm, content1)
+	deleteContent(ctx, t, bm, content2)
+
+	if err := bm.Flush(ctx); err != nil {
+		t.Fatal("error while flushing:", err)
+	}
+
+	c1Want := getContentInfo(t, bm, content1)
+
+	// undelete, delete, check, flush, check
+	if err := bm.UndeleteContent(ctx, content1); err != nil {
+		t.Fatal("unable to undelete content 1: ", content1, err)
+	}
+
+	// undelete, flush, delete, check, flush, check
+	if err := bm.UndeleteContent(ctx, content2); err != nil {
+		t.Fatal("unable to undelete content 2: ", content2, err)
+	}
+
+	c2Want := getContentInfo(t, bm, content2)
+	c2Want.Deleted = true
+
+	// delete content1 before flushing
+	deleteContentAfterUndeleteAndCheck(ctx, t, bm, content1, c1Want)
+
+	// now delete c2 after having flushed
+	if err := bm.Flush(ctx); err != nil {
+		t.Fatal("error while flushing:", err)
+	}
+
+	deleteContentAfterUndeleteAndCheck(ctx, t, bm, content2, c2Want)
+}
+
+func deleteContentAfterUndeleteAndCheck(ctx context.Context, t *testing.T, bm *Manager, id ID, want Info) { // nolint:gocritic
+	t.Helper()
+	deleteContent(ctx, t, bm, id)
+
+	got := getContentInfo(t, bm, id)
+	if !got.Deleted {
+		t.Errorf("Expected content %q to be deleted, got: %#v", id, got)
+	}
+
+	// ignore timestamp
+	got.TimestampSeconds = want.TimestampSeconds
+
+	if want != got {
+		t.Errorf("Content %q info does not match\nwant: %#v\ngot:  %#v", id, want, got)
+	}
+
+	if err := bm.Flush(ctx); err != nil {
+		t.Fatal("error while flushing:", err)
+	}
+
+	// check c1 again
+	got = getContentInfo(t, bm, id)
+	if !got.Deleted {
+		t.Error("Expected content to be deleted, got: ", got)
+	}
+
+	// ignore timestamp
+	got.TimestampSeconds = want.TimestampSeconds
+
+	if !reflect.DeepEqual(want, got) {
+		t.Errorf("Content info does not match\nwant: %#v\ngot:  %#v", want, got)
+	}
 }
 
 func TestParallelWrites(t *testing.T) {
@@ -1035,14 +1418,14 @@ func TestIterateContents(t *testing.T) {
 		{
 			desc: "prefix match",
 			options: IterateOptions{
-				Prefix: contentID1,
+				Range: PrefixRange(contentID1),
 			},
 			want: map[ID]bool{contentID1: true},
 		},
 		{
 			desc: "prefix, include deleted",
 			options: IterateOptions{
-				Prefix:         contentID2,
+				Range:          PrefixRange(contentID2),
 				IncludeDeleted: true,
 			},
 			want: map[ID]bool{
@@ -1189,7 +1572,7 @@ func verifyUnreferencedBlobsCount(ctx context.Context, t *testing.T, bm *Manager
 
 	var unrefCount int32
 
-	err := bm.IterateUnreferencedBlobs(ctx, 1, func(_ blob.Metadata) error {
+	err := bm.IterateUnreferencedBlobs(ctx, nil, 1, func(_ blob.Metadata) error {
 		atomic.AddInt32(&unrefCount, 1)
 		return nil
 	})
@@ -1332,6 +1715,82 @@ func verifyVersionCompat(t *testing.T, writeVersion int) {
 	verifyContentManagerDataSet(ctx, t, mgr, dataSet)
 }
 
+func TestReadsOwnWritesWithEventualConsistencyPersistentOwnWritesCache(t *testing.T) {
+	data := blobtesting.DataMap{}
+	timeNow := faketime.AutoAdvance(fakeTime, 1*time.Second)
+	st := blobtesting.NewMapStorage(data, nil, timeNow)
+	cacheData := blobtesting.DataMap{}
+	cacheKeyTime := map[blob.ID]time.Time{}
+	cacheSt := blobtesting.NewMapStorage(cacheData, cacheKeyTime, timeNow)
+	ecst := blobtesting.NewEventuallyConsistentStorage(
+		logging.NewWrapper(st, t.Logf, "[STORAGE] "),
+		3*time.Second,
+		timeNow)
+
+	// disable own writes cache, will still be ok if store is strongly consistent
+	verifyReadsOwnWrites(t, ecst, timeNow, &persistentOwnWritesCache{
+		st:      cacheSt,
+		timeNow: timeNow,
+	})
+}
+
+func TestReadsOwnWritesWithStrongConsistencyAndNoCaching(t *testing.T) {
+	data := blobtesting.DataMap{}
+	timeNow := faketime.AutoAdvance(fakeTime, 1*time.Second)
+	st := blobtesting.NewMapStorage(data, nil, timeNow)
+
+	// if we used nullOwnWritesCache and eventual consistency, the test would fail
+	// st = blobtesting.NewEventuallyConsistentStorage(logging.NewWrapper(st, t.Logf, "[STORAGE] "), 0.1)
+
+	// disable own writes cache, will still be ok if store is strongly consistent
+	verifyReadsOwnWrites(t, st, timeNow, &nullOwnWritesCache{})
+}
+
+func TestReadsOwnWritesWithEventualConsistencyInMemoryOwnWritesCache(t *testing.T) {
+	data := blobtesting.DataMap{}
+	timeNow := faketime.AutoAdvance(fakeTime, 1*time.Second)
+	st := blobtesting.NewMapStorage(data, nil, timeNow)
+	ecst := blobtesting.NewEventuallyConsistentStorage(
+		logging.NewWrapper(st, t.Logf, "[STORAGE] "),
+		3*time.Second,
+		timeNow)
+
+	verifyReadsOwnWrites(t, ecst, timeNow, &memoryOwnWritesCache{timeNow: timeNow})
+}
+
+func verifyReadsOwnWrites(t *testing.T, st blob.Storage, timeNow func() time.Time, sharedOwnWritesCache ownWritesCache) {
+	ctx := testlogging.Context(t)
+	cachingOptions := &CachingOptions{
+		ownWritesCache: sharedOwnWritesCache,
+	}
+
+	bm := newTestContentManagerWithStorageAndCaching(t, st, cachingOptions, timeNow)
+
+	ids := make([]ID, 100)
+	for i := 0; i < len(ids); i++ {
+		ids[i] = writeContentAndVerify(ctx, t, bm, seededRandomData(i, maxPackCapacity/2))
+
+		for j := 0; j < i; j++ {
+			// verify all contents written so far
+			verifyContent(ctx, t, bm, ids[j], seededRandomData(j, maxPackCapacity/2))
+		}
+
+		// every 10 contents, create new content manager
+		if i%10 == 0 {
+			t.Logf("------- reopening -----")
+			must(t, bm.Close(ctx))
+			bm = newTestContentManagerWithStorageAndCaching(t, st, cachingOptions, timeNow)
+		}
+	}
+
+	must(t, bm.Close(ctx))
+	bm = newTestContentManagerWithStorageAndCaching(t, st, cachingOptions, timeNow)
+
+	for i := 0; i < len(ids); i++ {
+		verifyContent(ctx, t, bm, ids[i], seededRandomData(i, maxPackCapacity/2))
+	}
+}
+
 func verifyContentManagerDataSet(ctx context.Context, t *testing.T, mgr *Manager, dataSet map[ID][]byte) {
 	for contentID, originalPayload := range dataSet {
 		v, err := mgr.GetContent(ctx, contentID)
@@ -1352,6 +1811,10 @@ func newTestContentManager(t *testing.T, data blobtesting.DataMap, keyTime map[b
 }
 
 func newTestContentManagerWithStorage(t *testing.T, st blob.Storage, timeFunc func() time.Time) *Manager {
+	return newTestContentManagerWithStorageAndCaching(t, st, nil, timeFunc)
+}
+
+func newTestContentManagerWithStorageAndCaching(t *testing.T, st blob.Storage, co *CachingOptions, timeFunc func() time.Time) *Manager {
 	if timeFunc == nil {
 		timeFunc = faketime.AutoAdvance(fakeTime, 1*time.Second)
 	}
@@ -1362,7 +1825,7 @@ func newTestContentManagerWithStorage(t *testing.T, st blob.Storage, timeFunc fu
 		HMACSecret:  hmacSecret,
 		MaxPackSize: maxPackSize,
 		Version:     1,
-	}, CachingOptions{}, timeFunc, nil)
+	}, co, timeFunc, nil)
 	if err != nil {
 		panic("can't create content manager: " + err.Error())
 	}
@@ -1370,18 +1833,6 @@ func newTestContentManagerWithStorage(t *testing.T, st blob.Storage, timeFunc fu
 	bm.checkInvariantsOnUnlock = true
 
 	return bm
-}
-
-func getIndexCount(d blobtesting.DataMap) int {
-	var cnt int
-
-	for blobID := range d {
-		if strings.HasPrefix(string(blobID), newIndexBlobPrefix) {
-			cnt++
-		}
-	}
-
-	return cnt
 }
 
 func verifyContentNotFound(ctx context.Context, t *testing.T, bm *Manager, contentID ID) {
@@ -1398,7 +1849,7 @@ func verifyContent(ctx context.Context, t *testing.T, bm *Manager, contentID ID,
 
 	b2, err := bm.GetContent(ctx, contentID)
 	if err != nil {
-		t.Errorf("unable to read content %q: %v", contentID, err)
+		t.Fatalf("unable to read content %q: %v", contentID, err)
 		return
 	}
 
@@ -1500,4 +1951,42 @@ func dumpContentManagerData(ctx context.Context, t *testing.T, data blobtesting.
 	}
 
 	log(ctx).Infof("*** end of data")
+}
+
+func makeRandomHexString(t *testing.T, length int) string {
+	t.Helper()
+
+	b := make([]byte, (length-1)/2+1)
+	if _, err := rand.Read(b); err != nil { // nolint:gosec
+		t.Fatal("Could not read random bytes", err)
+	}
+
+	return hex.EncodeToString(b)
+}
+
+func deleteContent(ctx context.Context, t *testing.T, bm *Manager, c ID) {
+	t.Helper()
+
+	if err := bm.DeleteContent(ctx, c); err != nil {
+		t.Fatalf("Unable to delete content %v: %v", c, err)
+	}
+}
+
+func getContentInfo(t *testing.T, bm *Manager, c ID) Info {
+	t.Helper()
+
+	_, i, err := bm.getContentInfo(c)
+	if err != nil {
+		t.Fatalf("Unable to get content info for %q: %v", c, err)
+	}
+
+	return i
+}
+
+func must(t *testing.T, err error) {
+	t.Helper()
+
+	if err != nil {
+		t.Fatal(err)
+	}
 }
