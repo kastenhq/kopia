@@ -18,3 +18,9 @@ func platformSpecificOwnerInfo(fi os.FileInfo) fs.OwnerInfo {
 
 	return oi
 }
+
+// PlatformSpecificChown will issue os.Chown on all operating systems
+// except Windows.
+func PlatformSpecificChown(targetPath string, oi fs.OwnerInfo) error {
+	return os.Chown(targetPath, int(oi.UserID), int(oi.GroupID))
+}
