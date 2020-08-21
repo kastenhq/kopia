@@ -193,7 +193,7 @@ func pickRandSubdirPath(dirPath string) (subdirPath string) {
 		return ""
 	}
 
-	// Find all enties that are directories, record each of their fileInfoList indexes
+	// Find all entries that are directories, record each of their fileInfoList indexes
 	dirIdxs := make([]int, 0, len(fileInfoList))
 	for idx, fi := range fileInfoList {
 		if fi.IsDir() {
