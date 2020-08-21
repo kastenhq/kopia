@@ -156,7 +156,7 @@ func (fr *Runner) operateAtDepth(path string, depth int, f func(string) error) e
 
 // writeFilesAtDepth traverses the file system tree until it reaches a given "depth", at which
 // point it uses fio to write one or more files controlled by the provided Options.
-// The "branchDepth" argument gives control over whether the flies will be written into
+// The "branchDepth" argument gives control over whether the files will be written into
 // existing directories or a new path entirely. The function will traverse existing directories
 // (if any) until it reaches "branchDepth", after which it will begin creating new directories
 // for the remainder of the path until "depth" is reached.
