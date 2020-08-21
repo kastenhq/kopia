@@ -293,6 +293,7 @@ func testDeleteContentsAtDepth(t *testing.T, prob float32, checker func(t *testi
 
 	delDepth := 3
 	err = r.DeleteContentsAtDepth(testSubdir, delDepth, prob)
+	testenv.AssertNoError(t, err)
 
 	fileCount := 0
 
@@ -307,6 +308,8 @@ func testDeleteContentsAtDepth(t *testing.T, prob float32, checker func(t *testi
 
 		return nil
 	})
+
+	testenv.AssertNoError(t, err)
 
 	checker(t, fileCount)
 }

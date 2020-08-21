@@ -195,6 +195,7 @@ func pickRandSubdirPath(dirPath string) (subdirPath string) {
 
 	// Find all entries that are directories, record each of their fileInfoList indexes
 	dirIdxs := make([]int, 0, len(fileInfoList))
+
 	for idx, fi := range fileInfoList {
 		if fi.IsDir() {
 			dirIdxs = append(dirIdxs, idx)
@@ -206,7 +207,7 @@ func pickRandSubdirPath(dirPath string) (subdirPath string) {
 	}
 
 	// Pick a random index from the list of indexes of fileInfo entries known to be directories.
-	randDirIdx := dirIdxs[rand.Intn(len(dirIdxs))]
+	randDirIdx := dirIdxs[rand.Intn(len(dirIdxs))] //nolint:gosec
 	randDirInfo := fileInfoList[randDirIdx]
 
 	return filepath.Join(dirPath, randDirInfo.Name())
