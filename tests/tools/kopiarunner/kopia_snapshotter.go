@@ -1,14 +1,17 @@
 package kopiarunner
 
 import (
+	"context"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/retry"
 	"github.com/kopia/kopia/tests/robustness/snap"
-	"github.com/pkg/errors"
 )
 
 var _ snap.Snapshotter = &KopiaSnapshotter{}
@@ -96,6 +99,29 @@ func (ks *KopiaSnapshotter) ConnectOrCreateS3(bucketName, pathPrefix string) err
 	return ks.ConnectOrCreateRepo(args...)
 }
 
+// ConnectOrCreateS3WithServer attempts to connect or create S3 bucket, but with Client/Server Model
+func (ks *KopiaSnapshotter) ConnectOrCreateS3WithServer(serverAddr, bucketName, pathPrefix string) error {
+	args := []string{"s3", "--bucket", bucketName, "--prefix", pathPrefix}
+
+	if err := ks.ConnectOrCreateRepo(args...); err != nil {
+		return err
+	}
+
+	if err := ks.CreateServer(serverAddr); err != nil {
+		fmt.Printf("Error in Creating Server: %v\n", err)
+		return err
+	}
+
+	if err := ks.ConnectServer(serverAddr); err != nil {
+		fmt.Printf("Error in Connecting Server: %v\n", err)
+
+		return err
+	}
+
+	return nil
+
+}
+
 // ConnectOrCreateFilesystem attempts to connect to a kopia repo in the local
 // filesystem at the path provided. It will attempt to create one there if
 // connection was unsuccessful.
@@ -103,6 +129,29 @@ func (ks *KopiaSnapshotter) ConnectOrCreateFilesystem(repoPath string) error {
 	args := []string{"filesystem", "--path", repoPath}
 
 	return ks.ConnectOrCreateRepo(args...)
+}
+
+// ConnectOrCreateFilesystemWithServer attempts to connect or create repo in locak filesystem,
+// but with Client/Server Model
+func (ks *KopiaSnapshotter) ConnectOrCreateFilesystemWithServer(repoPath, serverAddr string) error {
+	args := []string{"filesystem", "--path", repoPath}
+
+	if err := ks.ConnectOrCreateRepo(args...); err != nil {
+		return err
+	}
+
+	if err := ks.CreateServer(serverAddr); err != nil {
+		fmt.Printf("Error in Creating Server: %v\n", err)
+		return err
+	}
+
+	if err := ks.ConnectServer(serverAddr); err != nil {
+		fmt.Printf("Error in Connecting Server: %v\n", err)
+
+		return err
+	}
+
+	return nil
 }
 
 // CreateSnapshot implements the Snapshotter interface, issues a kopia snapshot
@@ -182,6 +231,30 @@ func (ks *KopiaSnapshotter) Run(args ...string) (stdout, stderr string, err erro
 	return ks.Runner.Run(args...)
 }
 
+func (ks *KopiaSnapshotter) CreateServer(addr string, args ...string) error {
+	args = append([]string{"server", "start", fmt.Sprintf("--address=%s", addr)}, args...)
+	fmt.Printf("Command for Creating to server: %v\n", args)
+
+	_, _, err := ks.Runner.RunServer(args...)
+	if err != nil {
+		return err
+	}
+	statusArgs := append([]string{"server", "status", fmt.Sprintf("--address=http://%s", addr)})
+	err = waitUntilServerStarted(ks, context.TODO(), statusArgs...)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (ks *KopiaSnapshotter) ConnectServer(addr string, args ...string) error {
+	args = append([]string{"repo", "connect", "server", fmt.Sprintf("--url=http://%s", addr)}, args...)
+	fmt.Printf("Command for Connecting to server: %v\n", args)
+	_, _, err := ks.Runner.Run(args...)
+
+	return err
+}
+
 func parseSnapID(lines []string) (string, error) {
 	pattern := regexp.MustCompile(`Created snapshot with root [\S]+ and ID ([\S]+)`)
 
@@ -229,4 +302,18 @@ func parseManifestListForSnapshotIDs(output string) []string {
 	}
 
 	return ret
+}
+
+// waitForServerReady returns error if the Kopia API server fails to start before timeout
+func waitUntilServerStarted(ks *KopiaSnapshotter, ctx context.Context, args ...string) error {
+	if err := retry.PeriodicallyNoValue(ctx, 1*time.Second, 180, "wait for server start", func() error {
+		stdout, stderr, err := ks.Runner.Run(args...)
+		if err != nil && stderr == "" {
+			return errors.New(fmt.Sprintf("Server status: %s-%s", stdout, stderr))
+		}
+		return err
+	}, retry.Always); err != nil {
+		return errors.New("server failed to start")
+	}
+	return nil
 }

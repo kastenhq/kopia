@@ -20,4 +20,6 @@ type Snapshotter interface {
 type RepoManager interface {
 	ConnectOrCreateS3(bucketName, pathPrefix string) error
 	ConnectOrCreateFilesystem(path string) error
+	ConnectOrCreateS3WithServer(bucketName, pathPrefix string, addr string) error
+	ConnectOrCreateFilesystemWithServer(path, addr string) error
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -197,9 +198,21 @@ func (e *Engine) Init(ctx context.Context, testRepoPath, metaRepoPath string) er
 	switch {
 	case os.Getenv(S3BucketNameEnvKey) != "":
 		bucketName := os.Getenv(S3BucketNameEnvKey)
+		fmt.Printf("Printing the S3 Bucket Name: %v\n", bucketName)
 		return e.InitS3(ctx, bucketName, testRepoPath, metaRepoPath)
 	default:
 		return e.InitFilesystem(ctx, testRepoPath, metaRepoPath)
+	}
+}
+
+func (e *Engine) InitWithServerClientModel(ctx context.Context, testRepoPath, metaRepoPath string) error {
+	switch {
+	case os.Getenv(S3BucketNameEnvKey) != "":
+		bucketName := os.Getenv(S3BucketNameEnvKey)
+		fmt.Printf("Printing the S3 Bucket Name: %v\n", bucketName)
+		return e.InitS3WithServer(ctx, bucketName, testRepoPath, metaRepoPath, "localhost:51515")
+	default:
+		return e.InitFilesystemWithServer(ctx, testRepoPath, metaRepoPath, "localhost:51515")
 	}
 }
 
@@ -263,4 +276,61 @@ func (e *Engine) init(ctx context.Context) error {
 	}
 
 	return e.Checker.VerifySnapshotMetadata()
+}
+
+func (e *Engine) InitS3WithServer(ctx context.Context, bucketName, testRepoPath, metaRepoPath, addr string) error {
+
+	fmt.Printf("Going Inside Create Server func\n")
+	err := e.MetaStore.ConnectOrCreateS3WithServer(addr, bucketName, metaRepoPath)
+	if err != nil {
+		fmt.Printf("Got error from Create Server func: %v\n", err)
+		return err
+	}
+	fmt.Printf("Got Outside Create Server func\n")
+
+	err = e.MetaStore.LoadMetadata()
+	if err != nil {
+		return err
+	}
+
+	err = e.TestRepo.ConnectOrCreateS3WithServer(addr, bucketName, testRepoPath)
+	if err != nil {
+		return err
+	}
+
+	_, _, err = e.TestRepo.Run("policy", "set", "--global", "--keep-latest", strconv.Itoa(1<<31-1))
+	if err != nil {
+		return err
+	}
+
+	err = e.Checker.VerifySnapshotMetadata()
+	if err != nil {
+		return err
+	}
+
+	snapIDs := e.Checker.GetLiveSnapIDs()
+	if len(snapIDs) > 0 {
+		randSnapID := snapIDs[rand.Intn(len(snapIDs))] //nolint:gosec
+
+		err = e.Checker.RestoreSnapshotToPath(ctx, randSnapID, e.FileWriter.LocalDataDir, os.Stdout)
+		if err != nil {
+			return err
+		}
+	}
+
+	return e.init(ctx)
+}
+
+func (e *Engine) InitFilesystemWithServer(ctx context.Context, testRepoPath, metaRepoPath, addr string) error {
+	err := e.MetaStore.ConnectOrCreateFilesystemWithServer(addr, metaRepoPath)
+	if err != nil {
+		return err
+	}
+
+	err = e.TestRepo.ConnectOrCreateFilesystemWithServer(addr, testRepoPath)
+	if err != nil {
+		return err
+	}
+
+	return e.init(ctx)
 }
