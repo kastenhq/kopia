@@ -26,6 +26,8 @@ import (
 const (
 	// S3BucketNameEnvKey is the environment variable required to connect to a repo on S3
 	S3BucketNameEnvKey = "S3_BUCKET_NAME"
+	// EngineModeEnvKey is the environment variable required to switch between basic and server/client model
+	EngineModeEnvKey = "ENGINE_MODE"
 )
 
 var (
@@ -195,24 +197,20 @@ func (e *Engine) CleanComponents() {
 // - If S3_BUCKET_NAME is set, initialize S3
 // - Else initialize filesystem
 func (e *Engine) Init(ctx context.Context, testRepoPath, metaRepoPath string) error {
+	bucketName := os.Getenv(S3BucketNameEnvKey)
+	engineMode := os.Getenv(EngineModeEnvKey)
 	switch {
-	case os.Getenv(S3BucketNameEnvKey) != "":
-		bucketName := os.Getenv(S3BucketNameEnvKey)
-		fmt.Printf("Printing the S3 Bucket Name: %v\n", bucketName)
+	case bucketName != "" && engineMode == "BASIC":
 		return e.InitS3(ctx, bucketName, testRepoPath, metaRepoPath)
+
+	case bucketName != "" && engineMode == "SERVER":
+		return e.InitS3WithServer(ctx, bucketName, testRepoPath, metaRepoPath, "localhost:51515")
+
+	case bucketName == "" && engineMode == "SERVER":
+		return e.InitFilesystemWithServer(ctx, testRepoPath, metaRepoPath, "localhost:51515")
+
 	default:
 		return e.InitFilesystem(ctx, testRepoPath, metaRepoPath)
-	}
-}
-
-func (e *Engine) InitWithServerClientModel(ctx context.Context, testRepoPath, metaRepoPath string) error {
-	switch {
-	case os.Getenv(S3BucketNameEnvKey) != "":
-		bucketName := os.Getenv(S3BucketNameEnvKey)
-		fmt.Printf("Printing the S3 Bucket Name: %v\n", bucketName)
-		return e.InitS3WithServer(ctx, bucketName, testRepoPath, metaRepoPath, "localhost:51515")
-	default:
-		return e.InitFilesystemWithServer(ctx, testRepoPath, metaRepoPath, "localhost:51515")
 	}
 }
 
@@ -278,15 +276,13 @@ func (e *Engine) init(ctx context.Context) error {
 	return e.Checker.VerifySnapshotMetadata()
 }
 
+// InitS3WithServer intializes the Engine with InitS3 and with addition to that it uses server/client model
 func (e *Engine) InitS3WithServer(ctx context.Context, bucketName, testRepoPath, metaRepoPath, addr string) error {
 
-	fmt.Printf("Going Inside Create Server func\n")
 	err := e.MetaStore.ConnectOrCreateS3WithServer(addr, bucketName, metaRepoPath)
 	if err != nil {
-		fmt.Printf("Got error from Create Server func: %v\n", err)
 		return err
 	}
-	fmt.Printf("Got Outside Create Server func\n")
 
 	err = e.MetaStore.LoadMetadata()
 	if err != nil {
@@ -321,6 +317,7 @@ func (e *Engine) InitS3WithServer(ctx context.Context, bucketName, testRepoPath,
 	return e.init(ctx)
 }
 
+// InitS3WithServer intializes the Engine with InitFilesystem and with addition to that it uses server/client model
 func (e *Engine) InitFilesystemWithServer(ctx context.Context, testRepoPath, metaRepoPath, addr string) error {
 	err := e.MetaStore.ConnectOrCreateFilesystemWithServer(addr, metaRepoPath)
 	if err != nil {

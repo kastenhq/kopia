@@ -108,12 +108,10 @@ func (ks *KopiaSnapshotter) ConnectOrCreateS3WithServer(serverAddr, bucketName, 
 	}
 
 	if err := ks.CreateServer(serverAddr); err != nil {
-		fmt.Printf("Error in Creating Server: %v\n", err)
 		return err
 	}
 
 	if err := ks.ConnectServer(serverAddr); err != nil {
-		fmt.Printf("Error in Connecting Server: %v\n", err)
 
 		return err
 	}
@@ -141,13 +139,10 @@ func (ks *KopiaSnapshotter) ConnectOrCreateFilesystemWithServer(repoPath, server
 	}
 
 	if err := ks.CreateServer(serverAddr); err != nil {
-		fmt.Printf("Error in Creating Server: %v\n", err)
 		return err
 	}
 
 	if err := ks.ConnectServer(serverAddr); err != nil {
-		fmt.Printf("Error in Connecting Server: %v\n", err)
-
 		return err
 	}
 
@@ -233,7 +228,6 @@ func (ks *KopiaSnapshotter) Run(args ...string) (stdout, stderr string, err erro
 
 func (ks *KopiaSnapshotter) CreateServer(addr string, args ...string) error {
 	args = append([]string{"server", "start", fmt.Sprintf("--address=%s", addr)}, args...)
-	fmt.Printf("Command for Creating to server: %v\n", args)
 
 	_, _, err := ks.Runner.RunServer(args...)
 	if err != nil {
@@ -249,7 +243,6 @@ func (ks *KopiaSnapshotter) CreateServer(addr string, args ...string) error {
 
 func (ks *KopiaSnapshotter) ConnectServer(addr string, args ...string) error {
 	args = append([]string{"repo", "connect", "server", fmt.Sprintf("--url=http://%s", addr)}, args...)
-	fmt.Printf("Command for Connecting to server: %v\n", args)
 	_, _, err := ks.Runner.Run(args...)
 
 	return err
