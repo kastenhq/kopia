@@ -32,6 +32,16 @@ func TestManySmallFiles(t *testing.T) {
 
 	_, err = eng.ExecAction(engine.RestoreSnapshotActionKey, snapOut)
 	testenv.AssertNoError(t, err)
+
+	_, err = engServerClient.ExecAction(engine.WriteRandomFilesActionKey, fileWriteOpts)
+	testenv.AssertNoError(t, err)
+
+	snapOut, err = engServerClient.ExecAction(engine.SnapshotRootDirActionKey, nil)
+	testenv.AssertNoError(t, err)
+
+	_, err = engServerClient.ExecAction(engine.RestoreSnapshotActionKey, snapOut)
+	testenv.AssertNoError(t, err)
+
 }
 
 func TestOneLargeFile(t *testing.T) {
@@ -54,6 +64,16 @@ func TestOneLargeFile(t *testing.T) {
 
 	_, err = eng.ExecAction(engine.RestoreSnapshotActionKey, snapOut)
 	testenv.AssertNoError(t, err)
+
+	_, err = engServerClient.ExecAction(engine.WriteRandomFilesActionKey, fileWriteOpts)
+	testenv.AssertNoError(t, err)
+
+	snapOut, err = engServerClient.ExecAction(engine.SnapshotRootDirActionKey, nil)
+	testenv.AssertNoError(t, err)
+
+	_, err = engServerClient.ExecAction(engine.RestoreSnapshotActionKey, snapOut)
+	testenv.AssertNoError(t, err)
+
 }
 
 func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
@@ -79,6 +99,15 @@ func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	_, err = eng.ExecAction(engine.RestoreSnapshotActionKey, snapOut)
+	testenv.AssertNoError(t, err)
+
+	_, err = engServerClient.ExecAction(engine.WriteRandomFilesActionKey, fileWriteOpts)
+	testenv.AssertNoError(t, err)
+
+	snapOut, err = engServerClient.ExecAction(engine.SnapshotRootDirActionKey, nil)
+	testenv.AssertNoError(t, err)
+
+	_, err = engServerClient.ExecAction(engine.RestoreSnapshotActionKey, snapOut)
 	testenv.AssertNoError(t, err)
 }
 
@@ -133,4 +162,15 @@ func TestRandomizedSmall(t *testing.T) {
 		}
 		testenv.AssertNoError(t, err)
 	}
+
+	st = time.Now()
+	for time.Since(st) <= *randomizedTestDur {
+		err := engServerClient.RandomAction(opts)
+		if err == engine.ErrNoOp {
+			t.Log("Random action resulted in no-op")
+			err = nil
+		}
+		testenv.AssertNoError(t, err)
+	}
+
 }
