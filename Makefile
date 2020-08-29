@@ -205,34 +205,34 @@ ifeq ($(KOPIA_EXE),)
 robustness-tests: dist-binary
 	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
 	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) \
-	$(GO_TEST) -v -count=1 github.com/kopia/kopia/tests/robustness/robustness_test $(TEST_FLAGS)
+	$(GO_TEST) -count=1 github.com/kopia/kopia/tests/robustness/robustness_test $(TEST_FLAGS)
 
 robustness-status: dist-binary
 	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
 	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) \
-	$(GO_TEST) -v -tags=utils -run=RobustnessStatus github.com/kopia/kopia/tests/robustness/utils_test
+	$(GO_TEST) -tags=utils -run=RobustnessStatus github.com/kopia/kopia/tests/robustness/utils_test
 
 else 
 
 # If KOPIA_EXE was provided, run the robustness tests and utils against that binary
 robustness-tests:
 	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
-	$(GO_TEST) -v -count=1 github.com/kopia/kopia/tests/robustness/robustness_test $(TEST_FLAGS)
+	$(GO_TEST) -count=1 github.com/kopia/kopia/tests/robustness/robustness_test $(TEST_FLAGS)
 
 robustness-status:
 	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
-	$(GO_TEST) -v -tags=utils -run=RobustnessStatus github.com/kopia/kopia/tests/robustness/utils_test
+	$(GO_TEST) -tags=utils -run=RobustnessStatus github.com/kopia/kopia/tests/robustness/utils_test
 
 endif
 
 robustness-tool-tests: dist-binary
 	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) \
 	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
-	$(GO_TEST) -v -count=1 github.com/kopia/kopia/tests/tools/... github.com/kopia/kopia/tests/robustness/engine/... $(TEST_FLAGS)
+	$(GO_TEST) -count=1 github.com/kopia/kopia/tests/tools/... github.com/kopia/kopia/tests/robustness/engine/... $(TEST_FLAGS)
 
 stress-test:
 	KOPIA_LONG_STRESS_TEST=1 $(GO_TEST) -count=1 -timeout 200s github.com/kopia/kopia/tests/stress_test
-	$(GO_TEST) -v -count=1 -timeout 200s github.com/kopia/kopia/tests/repository_stress_test
+	$(GO_TEST) -count=1 -timeout 200s github.com/kopia/kopia/tests/repository_stress_test
 
 layering-test:
 ifneq ($(uname),Windows)

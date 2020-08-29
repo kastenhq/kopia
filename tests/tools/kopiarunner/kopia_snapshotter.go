@@ -112,12 +112,10 @@ func (ks *KopiaSnapshotter) ConnectOrCreateS3WithServer(serverAddr, bucketName, 
 	}
 
 	if err := ks.ConnectServer(serverAddr); err != nil {
-
 		return err
 	}
 
 	return nil
-
 }
 
 // ConnectOrCreateFilesystem attempts to connect to a kopia repo in the local

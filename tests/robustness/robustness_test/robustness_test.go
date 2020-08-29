@@ -32,7 +32,6 @@ func TestManySmallFiles(t *testing.T) {
 
 	_, err = eng.ExecAction(engine.RestoreSnapshotActionKey, snapOut)
 	testenv.AssertNoError(t, err)
-
 }
 
 func TestOneLargeFile(t *testing.T) {
@@ -55,7 +54,6 @@ func TestOneLargeFile(t *testing.T) {
 
 	_, err = eng.ExecAction(engine.RestoreSnapshotActionKey, snapOut)
 	testenv.AssertNoError(t, err)
-
 }
 
 func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
@@ -82,7 +80,6 @@ func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
 
 	_, err = eng.ExecAction(engine.RestoreSnapshotActionKey, snapOut)
 	testenv.AssertNoError(t, err)
-
 }
 
 // func TestRandomized(t *testing.T) {

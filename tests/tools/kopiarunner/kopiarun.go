@@ -93,7 +93,6 @@ func (kr *Runner) RunServer(args ...string) (stdout, stderr string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	//time.Sleep(10 * time.Second)
 	o, errOutput := c.Output()
 	log.Printf("finished '%s %v' with err=%v and output:\nSTDOUT:\n%v\nSTDERR:\n%v", kr.Exe, argsStr, errOutput, string(o), errOut.String())
 
