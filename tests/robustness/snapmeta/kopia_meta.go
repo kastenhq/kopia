@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/kopia/kopia/tests/tools/kopiarunner"
@@ -70,12 +71,16 @@ func (store *kopiaMetadata) ConnectOrCreateFilesystem(path string) error {
 
 const metadataStoreFileName = "metadata-store-latest"
 
-func (store *kopiaMetadata) ConnectOrCreateS3WithServer(bucketName, pathPrefix, addr string) error {
-	return store.snap.ConnectOrCreateS3WithServer(bucketName, pathPrefix, addr)
+// ConnectOrCreateS3WithServer implements the RepoManager interface, creates a server
+// connects it a repo in an S3 bucket and creates a client to perform operations.
+func (store *kopiaMetadata) ConnectOrCreateS3WithServer(serverAddr, bucketName, pathPrefix string) (*exec.Cmd, error) {
+	return store.snap.ConnectOrCreateS3WithServer(serverAddr, bucketName, pathPrefix)
 }
 
-func (store *kopiaMetadata) ConnectOrCreateFilesystemWithServer(path, addr string) error {
-	return store.snap.ConnectOrCreateFilesystemWithServer(path, addr)
+// ConnectOrCreateFilesystemWithServer implements the RepoManager interface, creates a server
+// connects it a repo in the filesystem and creates a client to perform operations.
+func (store *kopiaMetadata) ConnectOrCreateFilesystemWithServer(repoPath, serverAddr string) (*exec.Cmd, error) {
+	return store.snap.ConnectOrCreateFilesystemWithServer(repoPath, serverAddr)
 }
 
 // LoadMetadata implements the DataPersister interface, restores the latest
@@ -116,7 +121,7 @@ func (store *kopiaMetadata) LoadMetadata() error {
 }
 
 // GetPersistDir returns the path to the directory that will be persisted
-// as a snapshot to the kopia repository
+// as a snapshot to the kopia repository.
 func (store *kopiaMetadata) GetPersistDir() string {
 	return store.persistenceDir
 }

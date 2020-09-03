@@ -131,6 +131,7 @@ func TestRandomizedSmall(t *testing.T) {
 			t.Log("Random action resulted in no-op")
 			err = nil
 		}
+
 		testenv.AssertNoError(t, err)
 	}
 }

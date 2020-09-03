@@ -103,7 +103,6 @@ func makeTempS3Bucket(t *testing.T) (bucketName string, cleanupCB func()) {
 	testenv.AssertNoError(t, err)
 
 	return bucketName, func() {
-
 		objNameCh := make(chan string)
 		errCh := cli.RemoveObjects(bucketName, objNameCh)
 		go func() {

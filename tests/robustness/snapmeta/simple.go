@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// ErrKeyNotFound is returned when the store can't find the key provided
+// ErrKeyNotFound is returned when the store can't find the key provided.
 var ErrKeyNotFound = errors.New("key not found")
 
 var _ Store = &Simple{}
@@ -64,7 +64,7 @@ func (s *Simple) Delete(key string) {
 	delete(s.Data, key)
 }
 
-// AddToIndex implements the Storer interface AddToIndex method
+// AddToIndex implements the Storer interface AddToIndex method.
 func (s *Simple) AddToIndex(key, indexName string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

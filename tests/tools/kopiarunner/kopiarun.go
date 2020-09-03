@@ -77,8 +77,8 @@ func (kr *Runner) Run(args ...string) (stdout, stderr string, err error) {
 	return string(o), errOut.String(), err
 }
 
-// RunServer will execute the kopia command with the given args in background
-func (kr *Runner) RunServer(args ...string) (stdout, stderr string, err error) {
+// RunAsync will execute the kopia command with the given args in background
+func (kr *Runner) RunAsync(args ...string) (*exec.Cmd, error) {
 	argsStr := strings.Join(args, " ")
 	log.Printf("running '%s %v'", kr.Exe, argsStr)
 	// nolint:gosec
@@ -89,12 +89,14 @@ func (kr *Runner) RunServer(args ...string) (stdout, stderr string, err error) {
 
 	errOut := &bytes.Buffer{}
 	c.Stderr = errOut
-	err = c.Start()
-	if err != nil {
-		return "", "", err
-	}
-	o, errOutput := c.Output()
-	log.Printf("finished '%s %v' with err=%v and output:\nSTDOUT:\n%v\nSTDERR:\n%v", kr.Exe, argsStr, errOutput, string(o), errOut.String())
+	err := c.Start()
 
-	return string(o), errOut.String(), err
+	if err != nil {
+		return nil, err
+	}
+	if _, errOutput := c.Output(); errOutput != nil {
+		return nil, err
+	}
+
+	return nil, nil
 }

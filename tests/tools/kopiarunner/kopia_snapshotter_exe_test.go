@@ -25,6 +25,7 @@ func TestParseSnapListAllExeTest(t *testing.T) {
 	if err == ErrExeVariableNotSet {
 		t.Skip("KOPIA_EXE not set, skipping test")
 	}
+
 	testenv.AssertNoError(t, err)
 
 	err = ks.ConnectOrCreateFilesystem(repoDir)

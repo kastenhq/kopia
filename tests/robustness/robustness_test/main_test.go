@@ -36,6 +36,7 @@ func TestMain(m *testing.M) {
 	var err error
 
 	eng, err = engine.NewEngine("")
+
 	switch {
 	case err == kopiarunner.ErrExeVariableNotSet || errors.Is(err, fio.ErrEnvNotSet):
 		fmt.Println("Skipping robustness tests if KOPIA_EXE is not set")
