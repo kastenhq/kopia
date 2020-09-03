@@ -317,7 +317,7 @@ func (e *Engine) InitFilesystemWithServer(ctx context.Context, testRepoPath, met
 	return e.init(ctx)
 }
 
-// CleanUpServer cleans up the server process
+// cleanUpServer cleans up the server process
 func (e *Engine) cleanUpServer() {
 	if e.serverCmd != nil {
 		e.serverCmd.SysProcAttr = &syscall.SysProcAttr{

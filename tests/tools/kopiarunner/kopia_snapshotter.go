@@ -103,22 +103,7 @@ func (ks *KopiaSnapshotter) ConnectOrCreateS3(bucketName, pathPrefix string) err
 // ConnectOrCreateS3WithServer attempts to connect or create S3 bucket, but with Client/Server Model
 func (ks *KopiaSnapshotter) ConnectOrCreateS3WithServer(serverAddr, bucketName, pathPrefix string) (*exec.Cmd, error) {
 	args := []string{"s3", "--bucket", bucketName, "--prefix", pathPrefix}
-	var cmd *exec.Cmd
-	var err error
-
-	if err = ks.ConnectOrCreateRepo(args...); err != nil {
-		return nil, err
-	}
-
-	if cmd, err = ks.CreateServer(serverAddr); err != nil {
-		return nil, err
-	}
-
-	if err = ks.ConnectServer(serverAddr); err != nil {
-		return nil, err
-	}
-
-	return cmd, err
+	return ks.CreateAndConnectServer(serverAddr, args...)
 }
 
 // ConnectOrCreateFilesystem attempts to connect to a kopia repo in the local
@@ -134,22 +119,7 @@ func (ks *KopiaSnapshotter) ConnectOrCreateFilesystem(repoPath string) error {
 // but with Client/Server Model
 func (ks *KopiaSnapshotter) ConnectOrCreateFilesystemWithServer(repoPath, serverAddr string) (*exec.Cmd, error) {
 	args := []string{"filesystem", "--path", repoPath}
-	var cmd *exec.Cmd
-	var err error
-
-	if err = ks.ConnectOrCreateRepo(args...); err != nil {
-		return nil, err
-	}
-
-	if cmd, err = ks.CreateServer(serverAddr); err != nil {
-		return nil, err
-	}
-
-	if err := ks.ConnectServer(serverAddr); err != nil {
-		return nil, err
-	}
-
-	return cmd, nil
+	return ks.CreateAndConnectServer(serverAddr, args...)
 }
 
 // CreateSnapshot implements the Snapshotter interface, issues a kopia snapshot
@@ -310,4 +280,24 @@ func (ks *KopiaSnapshotter) waitUntilServerStarted(ctx context.Context, addr str
 	}
 
 	return nil
+}
+
+// CreateAndConnectServer creates Repository and a server/client model for interaction
+func (ks *KopiaSnapshotter) CreateAndConnectServer(serverAddr string, args ...string) (*exec.Cmd, error) {
+	var cmd *exec.Cmd
+	var err error
+
+	if err = ks.ConnectOrCreateRepo(args...); err != nil {
+		return nil, err
+	}
+
+	if cmd, err = ks.CreateServer(serverAddr); err != nil {
+		return nil, err
+	}
+
+	if err = ks.ConnectServer(serverAddr); err != nil {
+		return nil, err
+	}
+
+	return cmd, err
 }

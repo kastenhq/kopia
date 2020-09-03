@@ -90,13 +90,9 @@ func (kr *Runner) RunAsync(args ...string) (*exec.Cmd, error) {
 	errOut := &bytes.Buffer{}
 	c.Stderr = errOut
 	err := c.Start()
-
 	if err != nil {
 		return nil, err
 	}
-	if _, errOutput := c.Output(); errOutput != nil {
-		return nil, err
-	}
 
-	return nil, nil
+	return c, nil
 }
