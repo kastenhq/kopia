@@ -4,6 +4,8 @@ TEST_FLAGS?=
 KOPIA_INTEGRATION_EXE=$(CURDIR)/dist/integration/kopia.exe
 FIO_DOCKER_TAG=ljishen/fio
 
+export BOTO_PATH=$(CURDIR)/tools/.boto
+
 all: test lint vet integration-tests
 
 retry=
@@ -107,6 +109,7 @@ travis-release:
 	$(retry) $(MAKE) layering-test
 	$(retry) $(MAKE) integration-tests
 ifeq ($(TRAVIS_OS_NAME),linux)
+	$(MAKE) apt-publish
 	$(MAKE) robustness-tool-tests
 	$(MAKE) website
 	$(MAKE) stress-test
@@ -279,6 +282,7 @@ ifneq ($(TRAVIS_OS_NAME),windows)
 	openssl aes-256-cbc -K "$(encrypted_fa1db4b894bb_key)" -iv "$(encrypted_fa1db4b894bb_iv)" -in tests/credentials/gcs/test_service_account.json.enc -out repo/blob/gcs/test_service_account.json -d
 	openssl aes-256-cbc -K "$(encrypted_fa1db4b894bb_key)" -iv "$(encrypted_fa1db4b894bb_iv)" -in tests/credentials/sftp/id_kopia.enc -out repo/blob/sftp/id_kopia -d
 	openssl aes-256-cbc -K "$(encrypted_fa1db4b894bb_key)" -iv "$(encrypted_fa1db4b894bb_iv)" -in tests/credentials/sftp/known_hosts.enc -out repo/blob/sftp/known_hosts -d
+	openssl aes-256-cbc -K "$(encrypted_fa1db4b894bb_key)" -iv "$(encrypted_fa1db4b894bb_iv)" -in tools/boto.enc -out tools/.boto -d
 endif
 
 travis-install-cloud-sdk: travis-install-test-credentials
@@ -309,4 +313,12 @@ else
 travis-create-long-term-repository:
 	echo Not creating long-term repository.
 
+endif
+
+ifeq ($(TRAVIS_PULL_REQUEST),false)
+apt-publish:
+	$(CURDIR)/tools/apt-publish.sh $(CURDIR)/dist
+else
+apt-publish:
+	@echo Not pushing to APT repository on pull request builds.
 endif

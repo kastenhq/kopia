@@ -343,7 +343,7 @@ var actions = map[ActionKey]Action{
 				"percent":  strconv.Itoa(pcnt),
 			})
 
-			err = e.FileWriter.DeleteContentsAtDepth("", dirDepth, pcnt)
+			err = e.FileWriter.DeleteContentsAtDepth("", dirDepth, float32(pcnt)/100)
 			if err == fio.ErrNoDirFound {
 				log.Print(err)
 				return nil, ErrNoOp

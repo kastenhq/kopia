@@ -37,6 +37,10 @@ type apiServerRepository struct {
 	hostname string
 }
 
+func (r *apiServerRepository) APIServerURL() string {
+	return r.cli.BaseURL
+}
+
 func (r *apiServerRepository) OpenObject(ctx context.Context, id object.ID) (object.Reader, error) {
 	return r.omgr.Open(ctx, id)
 }
@@ -47,6 +51,10 @@ func (r *apiServerRepository) NewObjectWriter(ctx context.Context, opt object.Wr
 
 func (r *apiServerRepository) VerifyObject(ctx context.Context, id object.ID) ([]content.ID, error) {
 	return r.omgr.VerifyObject(ctx, id)
+}
+
+func (r *apiServerRepository) IsReadOnly() bool {
+	return false
 }
 
 func (r *apiServerRepository) GetManifest(ctx context.Context, id manifest.ID, data interface{}) (*manifest.EntryMetadata, error) {
