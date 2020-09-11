@@ -30,18 +30,18 @@ type Writer interface {
 
 type contentIDTracker struct {
 	mu       sync.Mutex
-	contents map[content.ID]bool
+	contents map[content.ID]content.Info
 }
 
-func (t *contentIDTracker) addContentID(contentID content.ID) {
+func (t *contentIDTracker) addContentID(ci content.Info) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.contents == nil {
-		t.contents = make(map[content.ID]bool)
+		t.contents = make(map[content.ID]content.Info)
 	}
 
-	t.contents[contentID] = true
+	t.contents[ci.ID] = ci
 }
 
 func (t *contentIDTracker) contentIDs() []content.ID {
@@ -51,6 +51,18 @@ func (t *contentIDTracker) contentIDs() []content.ID {
 	result := make([]content.ID, 0, len(t.contents))
 	for k := range t.contents {
 		result = append(result, k)
+	}
+
+	return result
+}
+
+func (t *contentIDTracker) contentInfos() []content.Info {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	result := make([]content.Info, 0, len(t.contents))
+	for _, v := range t.contents {
+		result = append(result, v)
 	}
 
 	return result

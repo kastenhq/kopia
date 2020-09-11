@@ -139,11 +139,12 @@ func (om *Manager) verifyObjectInternal(ctx context.Context, oid ID, tracker *co
 	}
 
 	if contentID, _, ok := oid.ContentID(); ok {
-		if _, err := om.contentMgr.ContentInfo(ctx, contentID); err != nil {
+		ci, err := om.contentMgr.ContentInfo(ctx, contentID)
+		if err != nil {
 			return err
 		}
 
-		tracker.addContentID(contentID)
+		tracker.addContentID(ci)
 
 		return nil
 	}
