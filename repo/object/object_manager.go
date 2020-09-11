@@ -77,13 +77,13 @@ func (om *Manager) NewWriter(ctx context.Context, opt WriterOptions) Writer {
 
 // Open creates new ObjectReader for reading given object from a repository.
 func (om *Manager) Open(ctx context.Context, objectID ID) (Reader, error) {
-	return om.openAndAssertLength(ctx, objectID, -1)
+	return om.openAndAssertLength(ctx, objectID, -1, false)
 }
 
-func (om *Manager) openAndAssertLength(ctx context.Context, objectID ID, assertLength int64) (Reader, error) {
+func (om *Manager) openAndAssertLength(ctx context.Context, objectID ID, assertLength int64, readDeleted bool) (Reader, error) {
 	if indexObjectID, ok := objectID.IndexObjectID(); ok {
 		// recursively calls openAndAssertLength
-		seekTable, err := om.loadSeekTable(ctx, indexObjectID)
+		seekTable, err := om.loadSeekTable(ctx, indexObjectID, readDeleted)
 		if err != nil {
 			return nil, err
 		}
@@ -98,7 +98,7 @@ func (om *Manager) openAndAssertLength(ctx context.Context, objectID ID, assertL
 		}, nil
 	}
 
-	return om.newRawReader(ctx, objectID, assertLength)
+	return om.newRawReader(ctx, objectID, assertLength, readDeleted)
 }
 
 // VerifyObject ensures that all objects backing ObjectID are present in the repository
@@ -118,7 +118,7 @@ func (om *Manager) verifyIndirectObjectInternal(ctx context.Context, indexObject
 		return errors.Wrap(err, "unable to read index")
 	}
 
-	seekTable, err := om.loadSeekTable(ctx, indexObjectID)
+	seekTable, err := om.loadSeekTable(ctx, indexObjectID, true)
 	if err != nil {
 		return err
 	}
@@ -213,8 +213,8 @@ type indirectObject struct {
 	Entries  []indirectObjectEntry `json:"entries"`
 }
 
-func (om *Manager) loadSeekTable(ctx context.Context, indexObjectID ID) ([]indirectObjectEntry, error) {
-	r, err := om.openAndAssertLength(ctx, indexObjectID, -1)
+func (om *Manager) loadSeekTable(ctx context.Context, indexObjectID ID, readDeleted bool) ([]indirectObjectEntry, error) {
+	r, err := om.openAndAssertLength(ctx, indexObjectID, -1, readDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +229,7 @@ func (om *Manager) loadSeekTable(ctx context.Context, indexObjectID ID) ([]indir
 	return ind.Entries, nil
 }
 
-func (om *Manager) newRawReader(ctx context.Context, objectID ID, assertLength int64) (Reader, error) {
+func (om *Manager) newRawReader(ctx context.Context, objectID ID, assertLength int64, readDeleted bool) (Reader, error) {
 	contentID, compressed, ok := objectID.ContentID()
 	if !ok {
 		return nil, errors.Errorf("unsupported object ID: %v", objectID)
@@ -241,7 +241,10 @@ func (om *Manager) newRawReader(ctx context.Context, objectID ID, assertLength i
 	}
 
 	if err != nil {
-		return nil, errors.Wrap(err, "unexpected content error")
+		// ignore ErrContentDeleted when readDeleted is true
+		if !(readDeleted && errors.Is(err, content.ErrContentDeleted)) {
+			return nil, errors.Wrap(err, "unexpected content error")
+		}
 	}
 
 	if compressed {

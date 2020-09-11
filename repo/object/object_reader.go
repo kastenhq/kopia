@@ -17,6 +17,8 @@ type objectReader struct {
 
 	seekTable []indirectObjectEntry
 
+	readDeleted bool
+
 	currentPosition int64 // Overall position in the objectReader
 	totalLength     int64 // Overall length
 
@@ -79,7 +81,7 @@ func (r *objectReader) Read(buffer []byte) (int, error) {
 func (r *objectReader) openCurrentChunk() error {
 	st := r.seekTable[r.currentChunkIndex]
 
-	rd, err := r.repo.openAndAssertLength(r.ctx, st.Object, st.Length)
+	rd, err := r.repo.openAndAssertLength(r.ctx, st.Object, st.Length, r.readDeleted)
 	if err != nil {
 		return err
 	}

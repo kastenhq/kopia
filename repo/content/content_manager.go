@@ -61,8 +61,11 @@ const (
 	indexLoadAttempts = 10
 )
 
-// ErrContentNotFound is returned when content is not found.
-var ErrContentNotFound = errors.New("content not found")
+// Content errors.
+var (
+	ErrContentNotFound = errors.New("content not found")
+	ErrContentDeleted  = errors.New("content deleted")
+)
 
 // IndexBlobInfo is an information about a single index blob managed by Manager.
 type IndexBlobInfo struct {
@@ -560,7 +563,7 @@ func (bm *Manager) GetContent(ctx context.Context, contentID ID) (v []byte, err 
 			stats.Record(ctx,
 				metricContentGetCount.M(1),
 				metricContentGetBytes.M(int64(len(v))))
-		case ErrContentNotFound:
+		case ErrContentNotFound, ErrContentDeleted:
 			stats.Record(ctx, metricContentGetNotFoundCount.M(1))
 		default:
 			stats.Record(ctx, metricContentGetErrorCount.M(1))
@@ -573,7 +576,7 @@ func (bm *Manager) GetContent(ctx context.Context, contentID ID) (v []byte, err 
 	}
 
 	if bi.Deleted {
-		return nil, ErrContentNotFound
+		return nil, ErrContentDeleted
 	}
 
 	return bm.getContentDataUnlocked(ctx, pp, &bi)
