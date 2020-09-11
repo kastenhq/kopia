@@ -26,7 +26,7 @@ func oidOf(entry fs.Entry) object.ID {
 	return entry.(object.HasObjectID).ObjectID()
 }
 
-func findInUseContentIDs(ctx context.Context, rep repo.Repository, used *sync.Map) error {
+func findInUseContentIDs(ctx context.Context, rep *repo.DirectRepository, used *sync.Map) error {
 	ids, err := snapshot.ListSnapshotManifests(ctx, rep, nil)
 	if err != nil {
 		return errors.Wrap(err, "unable to list snapshot manifest IDs")
@@ -52,7 +52,7 @@ func findInUseContentIDs(ctx context.Context, rep repo.Repository, used *sync.Ma
 	w.ObjectCallback = func(entry fs.Entry) error {
 		oid := oidOf(entry)
 
-		contentIDs, err := rep.VerifyObject(ctx, oid)
+		contentIDs, err := rep.Objects.RepairObject(ctx, oid)
 		if err != nil {
 			return errors.Wrapf(err, "error verifying %v", oid)
 		}
