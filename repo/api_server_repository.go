@@ -174,6 +174,10 @@ func (r *apiServerRepository) WriteContent(ctx context.Context, data []byte, pre
 	return contentID, nil
 }
 
+func (r *apiServerRepository) UndeleteContent(ctx context.Context, contentID content.ID) error {
+	return errors.New("Not implemented")
+}
+
 // UpdateDescription updates the description of a connected repository.
 func (r *apiServerRepository) UpdateDescription(d string) {
 	r.cliOpts.Description = d

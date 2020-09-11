@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/pkg/errors"
+
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/compression"
@@ -65,6 +67,10 @@ func (f *fakeContentManager) ContentInfo(ctx context.Context, contentID content.
 
 func (f *fakeContentManager) Flush(ctx context.Context) error {
 	return nil
+}
+
+func (f *fakeContentManager) UndeleteContent(ctx context.Context, contentID content.ID) error {
+	return errors.New("Not implemented")
 }
 
 func setupTest(t *testing.T) (map[content.ID][]byte, *Manager) {

@@ -33,6 +33,7 @@ type contentManager interface {
 	ContentInfo(ctx context.Context, contentID content.ID) (content.Info, error)
 	GetContent(ctx context.Context, contentID content.ID) ([]byte, error)
 	WriteContent(ctx context.Context, data []byte, prefix content.ID) (content.ID, error)
+	UndeleteContent(ctx context.Context, contentID content.ID) error
 }
 
 // Format describes the format of objects in a repository.
@@ -108,6 +109,27 @@ func (om *Manager) VerifyObject(ctx context.Context, oid ID) ([]content.ID, erro
 
 	if err := om.verifyObjectInternal(ctx, oid, tracker); err != nil {
 		return nil, err
+	}
+
+	return tracker.contentIDs(), nil
+}
+
+// RepairObject ensures that all contents backing ObjectID are present in the
+// repository. If there are contents marked for deletion it recovers those by
+// undeleting them.
+func (om *Manager) RepairObject(ctx context.Context, oid ID) ([]content.ID, error) {
+	tracker := &contentIDTracker{}
+
+	if err := om.verifyObjectInternal(ctx, oid, tracker); err != nil {
+		return nil, err
+	}
+
+	for _, ci := range tracker.contentInfos() {
+		if ci.Deleted {
+			if err := om.contentMgr.UndeleteContent(ctx, ci.ID); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return tracker.contentIDs(), nil
