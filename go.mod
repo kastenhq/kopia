@@ -6,9 +6,10 @@ require (
 	bazil.org/fuse v0.0.0-20200117225306-7b5117fecadc
 	cloud.google.com/go/storage v1.12.0
 	contrib.go.opencensus.io/exporter/prometheus v0.2.0
-	github.com/Azure/azure-amqp-common-go/v2 v2.1.0 // indirect
-	github.com/Azure/azure-pipeline-go v0.2.2 // indirect
-	github.com/Azure/azure-storage-blob-go v0.9.0
+	github.com/Azure/azure-amqp-common-go/v2 v2.1.1 // indirect
+	github.com/Azure/azure-pipeline-go v0.2.3 // indirect
+	github.com/Azure/azure-storage-blob-go v0.10.0
+	github.com/Azure/go-autorest v14.2.0+incompatible // indirect
 	github.com/alecthomas/units v0.0.0-20190924025748-f65c72e2690d // indirect
 	github.com/alexhunt7/ssher v0.0.0-20190216204854-d36569cf7047
 	github.com/aws/aws-sdk-go v1.34.29
