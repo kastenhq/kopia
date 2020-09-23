@@ -26,7 +26,7 @@ require (
 	github.com/google/uuid v1.1.2
 	github.com/google/wire v0.4.0 // indirect
 	github.com/gorilla/mux v1.8.0
-	github.com/grpc-ecosystem/grpc-gateway v1.9.2 // indirect
+	github.com/grpc-ecosystem/grpc-gateway v1.15.0 // indirect
 	github.com/kevinburke/ssh_config v0.0.0-20190725054713-01f96b0aa0cd // indirect
 	github.com/klauspost/compress v1.11.0
 	github.com/klauspost/pgzip v1.2.5
