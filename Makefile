@@ -199,6 +199,10 @@ integration-tests: export KOPIA_EXE ?= $(KOPIA_INTEGRATION_EXE)
 integration-tests: dist-binary
 	 $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 3600s github.com/kopia/kopia/tests/end_to_end_test
 
+endurance-tests: export KOPIA_EXE ?= $(KOPIA_INTEGRATION_EXE)
+endurance-tests: dist-binary
+	 $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 3600s github.com/kopia/kopia/tests/endurance_test
+
 ifeq ($(KOPIA_EXE),)
 
 # If KOPIA_EXE was NOT provided, build kopia from this repo and run robustness
@@ -208,11 +212,6 @@ robustness-tests: dist-binary
 	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) \
 	$(GO_TEST) -count=1 github.com/kopia/kopia/tests/robustness/robustness_test $(TEST_FLAGS)
 
-robustness-status: dist-binary
-	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
-	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) \
-	$(GO_TEST) -v -tags=utils -run=RobustnessStatus github.com/kopia/kopia/tests/robustness/utils_test
-
 else 
 
 # If KOPIA_EXE was provided, run the robustness tests and utils against that binary
@@ -220,15 +219,7 @@ robustness-tests:
 	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
 	$(GO_TEST) -count=1 github.com/kopia/kopia/tests/robustness/robustness_test $(TEST_FLAGS)
 
-robustness-status:
-	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
-	$(GO_TEST) -v -tags=utils -run=RobustnessStatus github.com/kopia/kopia/tests/robustness/utils_test
-
 endif
-
-endurance-tests: export KOPIA_EXE ?= $(KOPIA_INTEGRATION_EXE)
-endurance-tests: dist-binary
-	 $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 3600s github.com/kopia/kopia/tests/endurance_test
 
 robustness-tool-tests: dist-binary
 	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) \
