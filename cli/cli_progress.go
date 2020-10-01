@@ -10,6 +10,7 @@ import (
 
 	"github.com/fatih/color"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/units"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
 )
@@ -46,8 +47,8 @@ type cliProgress struct {
 	spinPhase       int
 	uploadStartTime time.Time
 
-	previousFileCount int
-	previousTotalSize int64
+	estimatedFileCount  int
+	estimatedTotalBytes int64
 
 	// indicates shared instance that does not reset counters at the beginning of upload.
 	shared bool
@@ -88,24 +89,6 @@ func (p *cliProgress) CachedFile(fname string, numBytes int64) {
 	p.maybeOutput()
 }
 
-func (p *cliProgress) Checkpoint() {
-	p.output(noticeColor, "Saving a checkpoint...\n")
-
-	if p.shared {
-		// do not reset counters
-		return
-	}
-
-	*p = cliProgress{
-		uploading:         1,
-		uploadStartTime:   time.Now(),
-		previousFileCount: p.previousFileCount,
-		previousTotalSize: p.previousTotalSize,
-		uploadedBytes:     p.uploadedBytes,
-		uploadedFiles:     p.uploadedFiles,
-	}
-}
-
 func (p *cliProgress) maybeOutput() {
 	if atomic.LoadInt32(&p.uploading) == 0 {
 		return
@@ -114,7 +97,7 @@ func (p *cliProgress) maybeOutput() {
 	var shouldOutput bool
 
 	nextOutputTimeUnixNano := atomic.LoadInt64(&p.nextOutputTimeUnixNano)
-	if nowNano := time.Now().UnixNano(); nowNano > nextOutputTimeUnixNano {
+	if nowNano := clock.Now().UnixNano(); nowNano > nextOutputTimeUnixNano {
 		if atomic.CompareAndSwapInt64(&p.nextOutputTimeUnixNano, nextOutputTimeUnixNano, nowNano+progressUpdateInterval.Nanoseconds()) {
 			shouldOutput = true
 		}
@@ -169,13 +152,29 @@ func (p *cliProgress) output(col *color.Color, msg string) {
 		return
 	}
 
-	if p.previousTotalSize > 0 {
-		percent := (float64(hashedBytes+cachedBytes) * hundredPercent / float64(p.previousTotalSize))
-		if percent > hundredPercent {
-			percent = hundredPercent
+	if p.estimatedTotalBytes > 0 {
+		line += fmt.Sprintf(", estimated %v", units.BytesStringBase10(p.estimatedTotalBytes))
+
+		ratio := float64(hashedBytes+cachedBytes) / float64(p.estimatedTotalBytes)
+		if ratio > 1 {
+			ratio = 1
 		}
 
-		line += fmt.Sprintf(" %.1f%%", percent)
+		timeSoFarSeconds := clock.Since(p.uploadStartTime).Seconds()
+		estimatedTotalTime := time.Second * time.Duration(timeSoFarSeconds/ratio)
+		estimatedEndTime := p.uploadStartTime.Add(estimatedTotalTime)
+
+		remaining := clock.Until(estimatedEndTime)
+		if remaining < 0 {
+			remaining = 0
+		}
+
+		remaining = remaining.Round(time.Second)
+
+		line += fmt.Sprintf(" (%.1f%%)", ratio*hundredPercent)
+		line += fmt.Sprintf(" %v left", remaining)
+	} else {
+		line += ", estimating..."
 	}
 
 	var extraSpaces string
@@ -204,7 +203,7 @@ func (p *cliProgress) spinnerCharacter() string {
 func (p *cliProgress) StartShared() {
 	*p = cliProgress{
 		uploading:       1,
-		uploadStartTime: time.Now(),
+		uploadStartTime: clock.Now(),
 		shared:          true,
 	}
 }
@@ -214,18 +213,29 @@ func (p *cliProgress) FinishShared() {
 	p.output(defaultColor, "")
 }
 
-func (p *cliProgress) UploadStarted(previousFileCount int, previousTotalSize int64) {
+func (p *cliProgress) UploadStarted() {
 	if p.shared {
 		// do nothing
 		return
 	}
 
 	*p = cliProgress{
-		uploading:         1,
-		uploadStartTime:   time.Now(),
-		previousFileCount: previousFileCount,
-		previousTotalSize: previousTotalSize,
+		uploading:       1,
+		uploadStartTime: clock.Now(),
 	}
+}
+
+func (p *cliProgress) EstimatedDataSize(fileCount int, totalBytes int64) {
+	if p.shared {
+		// do nothing
+		return
+	}
+
+	p.outputMutex.Lock()
+	defer p.outputMutex.Unlock()
+
+	p.estimatedFileCount = fileCount
+	p.estimatedTotalBytes = totalBytes
 }
 
 func (p *cliProgress) UploadFinished() {

@@ -57,7 +57,6 @@ func TestServerStart(t *testing.T) {
 	ctx := testlogging.Context(t)
 
 	e := testenv.NewCLITest(t)
-	defer e.Cleanup(t)
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir, "--override-hostname=fake-hostname", "--override-username=fake-username")
@@ -74,7 +73,7 @@ func TestServerStart(t *testing.T) {
 		"--address=localhost:0",
 		"--random-password",
 		"--tls-generate-cert",
-		"--auto-shutdown=60s",
+		"--auto-shutdown=180s",
 		"--override-hostname=fake-hostname",
 		"--override-username=fake-username",
 	)
@@ -186,13 +185,13 @@ func TestServerStart(t *testing.T) {
 	waitForSnapshotCount(ctx, t, cli, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir3}, 1)
 }
 
-func TestServerStartWithoutInitialRepository(t *testing.T) {
+func TestServerCreateAndConnectViaAPI(t *testing.T) {
 	t.Parallel()
 
 	ctx := testlogging.Context(t)
 
 	e := testenv.NewCLITest(t)
-	defer e.Cleanup(t)
+
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	var sp serverParameters
@@ -204,7 +203,7 @@ func TestServerStartWithoutInitialRepository(t *testing.T) {
 		},
 	}
 
-	e.RunAndProcessStderr(t, sp.ProcessOutput, "server", "start", "--ui", "--address=localhost:0", "--random-password", "--tls-generate-cert", "--auto-shutdown=60s")
+	e.RunAndProcessStderr(t, sp.ProcessOutput, "server", "start", "--ui", "--address=localhost:0", "--random-password", "--tls-generate-cert", "--auto-shutdown=180s")
 	t.Logf("detected server parameters %#v", sp)
 
 	cli, err := apiclient.NewKopiaAPIClient(apiclient.Options{
@@ -249,6 +248,81 @@ func TestServerStartWithoutInitialRepository(t *testing.T) {
 	verifyServerConnected(t, cli, true)
 }
 
+func TestConnectToExistingRepositoryViaAPI(t *testing.T) {
+	t.Parallel()
+
+	ctx := testlogging.Context(t)
+
+	e := testenv.NewCLITest(t)
+	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir, "--override-hostname=fake-hostname", "--override-username=fake-username")
+	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
+	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
+	e.RunAndExpectSuccess(t, "repo", "disconnect")
+
+	var sp serverParameters
+
+	connInfo := blob.ConnectionInfo{
+		Type: "filesystem",
+		Config: filesystem.Options{
+			Path: e.RepoDir,
+		},
+	}
+
+	// at this point repository is not connected, start the server
+	e.RunAndProcessStderr(t, sp.ProcessOutput, "server", "start", "--ui", "--address=localhost:0", "--random-password", "--tls-generate-cert", "--auto-shutdown=180s", "--override-hostname=fake-hostname", "--override-username=fake-username")
+	t.Logf("detected server parameters %#v", sp)
+
+	cli, err := apiclient.NewKopiaAPIClient(apiclient.Options{
+		BaseURL:                             sp.baseURL,
+		Username:                            "kopia",
+		Password:                            sp.password,
+		TrustedServerCertificateFingerprint: sp.sha256Fingerprint,
+	})
+	if err != nil {
+		t.Fatalf("unable to create API apiclient")
+	}
+
+	defer serverapi.Shutdown(ctx, cli)
+
+	waitUntilServerStarted(ctx, t, cli)
+	verifyServerConnected(t, cli, false)
+
+	if err = serverapi.ConnectToRepository(ctx, cli, &serverapi.ConnectRepositoryRequest{
+		Password: testenv.TestRepoPassword,
+		Storage:  connInfo,
+	}); err != nil {
+		t.Fatalf("connect error: %v", err)
+	}
+
+	verifyServerConnected(t, cli, true)
+
+	si := snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir1}
+
+	uploadMatchingSnapshots(t, cli, &si)
+
+	snaps := waitForSnapshotCount(ctx, t, cli, &si, 3)
+
+	// we're reproducing the bug described in, after connecting to repo via API, next snapshot size becomes zero.
+	// https://kopia.discourse.group/t/kopia-0-7-0-not-backing-up-any-files-repro-needed/136/6?u=jkowalski
+	minSize := snaps[0].Summary.TotalFileSize
+	maxSize := snaps[0].Summary.TotalFileSize
+
+	for _, sn := range snaps {
+		v := sn.Summary.TotalFileSize
+		if v < minSize {
+			minSize = v
+		}
+
+		if v > maxSize {
+			maxSize = v
+		}
+	}
+
+	if minSize != maxSize {
+		t.Errorf("snapshots don't have consistent size: min %v max %v", minSize, maxSize)
+	}
+}
+
 func verifyServerConnected(t *testing.T, cli *apiclient.KopiaAPIClient, want bool) *serverapi.StatusResponse {
 	t.Helper()
 
@@ -264,8 +338,10 @@ func verifyServerConnected(t *testing.T, cli *apiclient.KopiaAPIClient, want boo
 	return st
 }
 
-func waitForSnapshotCount(ctx context.Context, t *testing.T, cli *apiclient.KopiaAPIClient, match *snapshot.SourceInfo, want int) {
+func waitForSnapshotCount(ctx context.Context, t *testing.T, cli *apiclient.KopiaAPIClient, match *snapshot.SourceInfo, want int) []*serverapi.Snapshot {
 	t.Helper()
+
+	var result []*serverapi.Snapshot
 
 	err := retry.PeriodicallyNoValue(ctx, 1*time.Second, 180, "wait for snapshots", func() error {
 		snapshots, err := serverapi.ListSnapshots(testlogging.Context(t), cli, match)
@@ -277,11 +353,15 @@ func waitForSnapshotCount(ctx context.Context, t *testing.T, cli *apiclient.Kopi
 			return errors.Errorf("unexpected number of snapshots %v, want %v", got, want)
 		}
 
+		result = snapshots.Snapshots
+
 		return nil
 	}, retry.Always)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	return result
 }
 
 func uploadMatchingSnapshots(t *testing.T, cli *apiclient.KopiaAPIClient, match *snapshot.SourceInfo) {
@@ -358,6 +438,8 @@ func verifyUIServedWithCorrectTitle(t *testing.T, cli *apiclient.KopiaAPIClient,
 }
 
 func waitUntilServerStarted(ctx context.Context, t *testing.T, cli *apiclient.KopiaAPIClient) {
+	t.Helper()
+
 	if err := retry.PeriodicallyNoValue(ctx, 1*time.Second, 180, "wait for server start", func() error {
 		_, err := serverapi.Status(testlogging.Context(t), cli)
 		return err

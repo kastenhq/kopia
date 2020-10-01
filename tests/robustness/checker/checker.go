@@ -15,6 +15,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/tests/robustness/snap"
 	"github.com/kopia/kopia/tests/robustness/snapmeta"
 )
@@ -181,14 +182,14 @@ func (chk *Checker) TakeSnapshot(ctx context.Context, sourceDir string) (snapID 
 		return "", err
 	}
 
-	ssStart := time.Now()
+	ssStart := clock.Now()
 
 	snapID, err = chk.snapshotIssuer.CreateSnapshot(sourceDir)
 	if err != nil {
 		return snapID, err
 	}
 
-	ssEnd := time.Now()
+	ssEnd := clock.Now()
 
 	ssMeta := &SnapshotMetadata{
 		SnapID:         snapID,

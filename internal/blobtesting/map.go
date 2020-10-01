@@ -10,6 +10,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo/blob"
 )
 
@@ -134,6 +135,15 @@ func (s *mapStorage) Close(ctx context.Context) error {
 	return nil
 }
 
+func (s *mapStorage) SetTime(ctx context.Context, blobID blob.ID, t time.Time) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.keyTime[blobID] = t
+
+	return nil
+}
+
 func (s *mapStorage) TouchBlob(ctx context.Context, blobID blob.ID, threshold time.Duration) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -165,7 +175,7 @@ func NewMapStorage(data DataMap, keyTime map[blob.ID]time.Time, timeNow func() t
 	}
 
 	if timeNow == nil {
-		timeNow = time.Now
+		timeNow = clock.Now
 	}
 
 	return &mapStorage{data: data, keyTime: keyTime, timeNow: timeNow}

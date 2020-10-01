@@ -13,7 +13,7 @@ func TestParseSnapListAllExeTest(t *testing.T) {
 	baseDir, err := ioutil.TempDir("", t.Name())
 	testenv.AssertNoError(t, err)
 
-	defer os.RemoveAll(baseDir) //nolint:errcheck
+	defer os.RemoveAll(baseDir)
 
 	repoDir, err := ioutil.TempDir(baseDir, "repo")
 	testenv.AssertNoError(t, err)

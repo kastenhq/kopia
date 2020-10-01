@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/url"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/apiclient"
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/remoterepoapi"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/hashing"
@@ -32,13 +34,24 @@ type apiServerRepository struct {
 	cli *apiclient.KopiaAPIClient
 	h   hashing.HashFunc
 
-	omgr     *object.Manager
-	username string
-	hostname string
+	omgr    *object.Manager
+	cliOpts ClientOptions
 }
 
 func (r *apiServerRepository) APIServerURL() string {
 	return r.cli.BaseURL
+}
+
+func (r *apiServerRepository) Description() string {
+	if r.cliOpts.Description != "" {
+		return r.cliOpts.Description
+	}
+
+	return fmt.Sprintf("Repository Server: %v", r.cli.BaseURL)
+}
+
+func (r *apiServerRepository) ClientOptions() ClientOptions {
+	return r.cliOpts
 }
 
 func (r *apiServerRepository) OpenObject(ctx context.Context, id object.ID) (object.Reader, error) {
@@ -51,10 +64,6 @@ func (r *apiServerRepository) NewObjectWriter(ctx context.Context, opt object.Wr
 
 func (r *apiServerRepository) VerifyObject(ctx context.Context, id object.ID) ([]content.ID, error) {
 	return r.omgr.VerifyObject(ctx, id)
-}
-
-func (r *apiServerRepository) IsReadOnly() bool {
-	return false
 }
 
 func (r *apiServerRepository) GetManifest(ctx context.Context, id manifest.ID, data interface{}) (*manifest.EntryMetadata, error) {
@@ -109,16 +118,8 @@ func (r *apiServerRepository) DeleteManifest(ctx context.Context, id manifest.ID
 	return r.cli.Delete(ctx, "manifests/"+string(id), nil, nil)
 }
 
-func (r *apiServerRepository) Hostname() string {
-	return r.hostname
-}
-
-func (r *apiServerRepository) Username() string {
-	return r.username
-}
-
 func (r *apiServerRepository) Time() time.Time {
-	return time.Now() // allow:no-inject-time
+	return clock.Now()
 }
 
 func (r *apiServerRepository) Refresh(ctx context.Context) error {
@@ -173,14 +174,19 @@ func (r *apiServerRepository) WriteContent(ctx context.Context, data []byte, pre
 	return contentID, nil
 }
 
+// UpdateDescription updates the description of a connected repository.
+func (r *apiServerRepository) UpdateDescription(d string) {
+	r.cliOpts.Description = d
+}
+
 var _ Repository = (*apiServerRepository)(nil)
 
 // openAPIServer connects remote repository over Kopia API.
-func openAPIServer(ctx context.Context, si *APIServerInfo, username, hostname, password string) (Repository, error) {
+func openAPIServer(ctx context.Context, si *APIServerInfo, cliOpts ClientOptions, password string) (Repository, error) {
 	cli, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             si.BaseURL,
 		TrustedServerCertificateFingerprint: si.TrustedServerCertificateFingerprint,
-		Username:                            username + "@" + hostname,
+		Username:                            cliOpts.Username + "@" + cliOpts.Hostname,
 		Password:                            password,
 		LogRequests:                         true,
 	})
@@ -189,9 +195,8 @@ func openAPIServer(ctx context.Context, si *APIServerInfo, username, hostname, p
 	}
 
 	rr := &apiServerRepository{
-		cli:      cli,
-		username: username,
-		hostname: hostname,
+		cli:     cli,
+		cliOpts: cliOpts,
 	}
 
 	var p remoterepoapi.Parameters
@@ -221,17 +226,8 @@ func openAPIServer(ctx context.Context, si *APIServerInfo, username, hostname, p
 // ConnectAPIServer sets up repository connection to a particular API server.
 func ConnectAPIServer(ctx context.Context, configFile string, si *APIServerInfo, password string, opt *ConnectOptions) error {
 	lc := LocalConfig{
-		APIServer: si,
-		Hostname:  opt.HostnameOverride,
-		Username:  opt.UsernameOverride,
-	}
-
-	if lc.Hostname == "" {
-		lc.Hostname = getDefaultHostName(ctx)
-	}
-
-	if lc.Username == "" {
-		lc.Username = getDefaultUserName(ctx)
+		APIServer:     si,
+		ClientOptions: opt.ClientOptions.ApplyDefaults(ctx, "API Server: "+si.BaseURL),
 	}
 
 	d, err := json.MarshalIndent(&lc, "", "  ")

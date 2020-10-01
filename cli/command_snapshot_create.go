@@ -9,6 +9,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
@@ -77,8 +78,8 @@ func runSnapshotCommand(ctx context.Context, rep repo.Repository) error {
 
 		sourceInfo := snapshot.SourceInfo{
 			Path:     filepath.Clean(dir),
-			Host:     rep.Hostname(),
-			UserName: rep.Username(),
+			Host:     rep.ClientOptions().Hostname,
+			UserName: rep.ClientOptions().Username,
 		}
 
 		if err := snapshotSingleSource(ctx, rep, u, sourceInfo); err != nil {
@@ -145,7 +146,7 @@ func startTimeAfterEndTime(startTime, endTime time.Time) bool {
 func snapshotSingleSource(ctx context.Context, rep repo.Repository, u *snapshotfs.Uploader, sourceInfo snapshot.SourceInfo) error {
 	printStderr("Snapshotting %v ...\n", sourceInfo)
 
-	t0 := time.Now()
+	t0 := clock.Now()
 
 	localEntry, err := getLocalFSEntry(ctx, sourceInfo.Path)
 	if err != nil {
@@ -218,7 +219,7 @@ func snapshotSingleSource(ctx context.Context, rep repo.Repository, u *snapshotf
 		}
 	}
 
-	printStderr("\nCreated%v snapshot with root %v and ID %v in %v\n", maybePartial, manifest.RootObjectID(), snapID, time.Since(t0).Truncate(time.Second))
+	printStderr("\nCreated%v snapshot with root %v and ID %v in %v\n", maybePartial, manifest.RootObjectID(), snapID, clock.Since(t0).Truncate(time.Second))
 
 	return err
 }
@@ -268,7 +269,7 @@ func findPreviousSnapshotManifest(ctx context.Context, rep repo.Repository, sour
 }
 
 func getLocalBackupPaths(ctx context.Context, rep repo.Repository) ([]string, error) {
-	log(ctx).Debugf("Looking for previous backups of '%v@%v'...", rep.Hostname(), rep.Username())
+	log(ctx).Debugf("Looking for previous backups of '%v@%v'...", rep.ClientOptions().Hostname, rep.ClientOptions().Username)
 
 	sources, err := snapshot.ListSources(ctx, rep)
 	if err != nil {
@@ -278,7 +279,7 @@ func getLocalBackupPaths(ctx context.Context, rep repo.Repository) ([]string, er
 	var result []string
 
 	for _, src := range sources {
-		if src.Host == rep.Hostname() && src.UserName == rep.Username() {
+		if src.Host == rep.ClientOptions().Hostname && src.UserName == rep.ClientOptions().Username {
 			result = append(result, src.Path)
 		}
 	}

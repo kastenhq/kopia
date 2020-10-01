@@ -14,6 +14,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/retry"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/sharded"
@@ -227,6 +228,13 @@ func (fs *fsImpl) ReadDir(ctx context.Context, dirname string) ([]os.FileInfo, e
 	return v.([]os.FileInfo), nil
 }
 
+// SetTime updates file modification time to the provided time.
+func (fs *fsImpl) SetTimeInPath(ctx context.Context, dirPath, filePath string, n time.Time) error {
+	log(ctx).Debugf("updating timestamp on %v to %v", filePath, n)
+
+	return os.Chtimes(filePath, n, n)
+}
+
 // TouchBlob updates file modification time to current time if it's sufficiently old.
 func (fs *fsStorage) TouchBlob(ctx context.Context, blobID blob.ID, threshold time.Duration) error {
 	_, path := fs.Storage.GetShardedPathAndFilePath(blobID)
@@ -236,7 +244,7 @@ func (fs *fsStorage) TouchBlob(ctx context.Context, blobID blob.ID, threshold ti
 		return err
 	}
 
-	n := time.Now() // allow:no-inject-time
+	n := clock.Now()
 
 	age := n.Sub(st.ModTime())
 	if age < threshold {

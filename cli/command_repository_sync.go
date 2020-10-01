@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/stats"
 	"github.com/kopia/kopia/internal/units"
@@ -26,6 +27,7 @@ var (
 	repositorySyncDryRun               = repositorySyncCommand.Flag("dry-run", "Do not perform copying.").Short('n').Bool()
 	repositorySyncParallelism          = repositorySyncCommand.Flag("parallel", "Copy parallelism.").Default("1").Int()
 	repositorySyncDestinationMustExist = repositorySyncCommand.Flag("must-exist", "Fail if destination does not have repository format blob.").Bool()
+	repositorySyncTimes                = repositorySyncCommand.Flag("times", "Synchronize blob times if supported.").Bool()
 )
 
 const syncProgressInterval = 300 * time.Millisecond
@@ -151,7 +153,7 @@ var (
 
 func beginSyncProgress() {
 	lastSyncProgress = ""
-	nextSyncOutputTime = time.Now()
+	nextSyncOutputTime = clock.Now()
 }
 
 func outputSyncProgress(s string) {
@@ -162,10 +164,10 @@ func outputSyncProgress(s string) {
 		s += strings.Repeat(" ", len(lastSyncProgress)-len(s))
 	}
 
-	if time.Now().After(nextSyncOutputTime) {
+	if clock.Now().After(nextSyncOutputTime) {
 		printStderr("\r%v", s)
 
-		nextSyncOutputTime = time.Now().Add(syncProgressInterval)
+		nextSyncOutputTime = clock.Now().Add(syncProgressInterval)
 	}
 
 	lastSyncProgress = s
@@ -184,7 +186,7 @@ func runSyncBlobs(ctx context.Context, src, dst blob.Storage, blobsToCopy, blobs
 
 	var totalCopied stats.CountSum
 
-	startTime := time.Now()
+	startTime := clock.Now()
 
 	for i := 0; i < *repositorySyncParallelism; i++ {
 		workerID := i
@@ -201,13 +203,13 @@ func runSyncBlobs(ctx context.Context, src, dst blob.Storage, blobsToCopy, blobs
 				percentage := float64(0)
 				eta := "unknown"
 				speed := "-"
-				elapsedTime := time.Since(startTime)
+				elapsedTime := clock.Since(startTime)
 				if totalBytes > 0 {
 					percentage = hundredPercent * float64(bytesCopied) / float64(totalBytes)
 					if percentage > 0 {
 						totalTimeSeconds := elapsedTime.Seconds() * (hundredPercent / percentage)
 						etaTime := startTime.Add(time.Duration(totalTimeSeconds) * time.Second)
-						eta = fmt.Sprintf("%v (%v)", time.Until(etaTime).Round(time.Second), formatTimestamp(etaTime))
+						eta = fmt.Sprintf("%v (%v)", clock.Until(etaTime).Round(time.Second), formatTimestamp(etaTime))
 						bps := float64(bytesCopied) * 8 / elapsedTime.Seconds() //nolint:gomnd
 						speed = units.BitsPerSecondsString(bps)
 					}
@@ -254,6 +256,8 @@ func sliceToChannel(ctx context.Context, md []blob.Metadata) chan blob.Metadata 
 	return ch
 }
 
+var setTimeUnsupportedOnce sync.Once
+
 func syncCopyBlob(ctx context.Context, m blob.Metadata, src, dst blob.Storage) error {
 	data, err := src.GetBlob(ctx, m.BlobID, 0, -1)
 	if err != nil {
@@ -267,6 +271,18 @@ func syncCopyBlob(ctx context.Context, m blob.Metadata, src, dst blob.Storage) e
 
 	if err := dst.PutBlob(ctx, m.BlobID, gather.FromSlice(data)); err != nil {
 		return errors.Wrapf(err, "error writing blob '%v' to destination", m.BlobID)
+	}
+
+	if *repositorySyncTimes {
+		if err := dst.SetTime(ctx, m.BlobID, m.Timestamp); err != nil {
+			if errors.Is(err, blob.ErrSetTimeUnsupported) {
+				setTimeUnsupportedOnce.Do(func() {
+					log(ctx).Warningf("destination repository does not support setting time")
+				})
+			}
+
+			return errors.Wrapf(err, "error setting time on destination '%v'", m.BlobID)
+		}
 	}
 
 	return nil

@@ -53,6 +53,5 @@ func TestSnapListParse(t *testing.T) {
 				t.Errorf("Expected snapshot ID %s but got %s for index %d", want, got, i)
 			}
 		}
-
 	}
 }

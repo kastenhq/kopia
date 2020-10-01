@@ -22,7 +22,22 @@ import (
 )
 
 // CacheDirMarkerFile is the name of the marker file indicating a directory contains Kopia caches.
-const CacheDirMarkerFile = ".kopia-cache"
+// See https://bford.info/cachedir/
+const CacheDirMarkerFile = "CACHEDIR.TAG"
+
+// CacheDirMarkerHeader is the header signature for cache dir marker files.
+const CacheDirMarkerHeader = "Signature: 8a477f597d28d172789f06886806bc55"
+
+const cacheDirMarkerContents = CacheDirMarkerHeader + `
+#
+# This file is a cache directory tag created by Kopia - Fast And Secure Open-Source Backup.
+#
+# For information about Kopia, see:
+#   https://kopia.io
+#
+# For information about cache directory tags, see:
+#   http://www.brynosaurus.com/cachedir/
+`
 
 var log = logging.GetContextLoggerFunc("kopia/repo")
 
@@ -59,7 +74,7 @@ func Open(ctx context.Context, configFile, password string, options *Options) (r
 	}
 
 	if lc.APIServer != nil {
-		return openAPIServer(ctx, lc.APIServer, lc.Username, lc.Hostname, password)
+		return openAPIServer(ctx, lc.APIServer, lc.ClientOptions, password)
 	}
 
 	return openDirect(ctx, configFile, lc, password, options)
@@ -94,18 +109,7 @@ func openDirect(ctx context.Context, configFile string, lc *LocalConfig, passwor
 		return nil, err
 	}
 
-	r.hostname = lc.Hostname
-	r.username = lc.Username
-	r.isReadOnly = lc.ReadOnly
-
-	if r.hostname == "" {
-		r.hostname = getDefaultHostName(ctx)
-	}
-
-	if r.username == "" {
-		r.username = getDefaultUserName(ctx)
-	}
-
+	r.cliOpts = lc.ClientOptions.ApplyDefaults(ctx, "Repository in "+st.DisplayName())
 	r.ConfigFile = configFile
 
 	return r, nil
@@ -193,13 +197,24 @@ func writeCacheMarker(cacheDir string) error {
 	}
 
 	markerFile := filepath.Join(cacheDir, CacheDirMarkerFile)
-	if _, err := os.Stat(markerFile); !os.IsNotExist(err) {
+
+	st, err := os.Stat(markerFile)
+	if err == nil && st.Size() >= int64(len(cacheDirMarkerContents)) {
+		// ok
+		return nil
+	}
+
+	if !os.IsNotExist(err) {
 		return err
 	}
 
 	f, err := os.Create(markerFile)
 	if err != nil {
 		return err
+	}
+
+	if _, err := f.WriteString(cacheDirMarkerContents); err != nil {
+		return errors.Wrap(err, "unable to write cachedir marker contents")
 	}
 
 	return f.Close()

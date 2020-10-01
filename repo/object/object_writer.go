@@ -25,6 +25,12 @@ const indirectContentPrefix = "x"
 type Writer interface {
 	io.WriteCloser
 
+	// Checkpoint returns ID of an object consisting of all contents written to storage so far.
+	// This may not include some data buffered in the writer.
+	// In case nothing has been written yet, returns empty object ID.
+	Checkpoint() (ID, error)
+
+	// Result returns object ID representing all bytes written to the writer.
 	Result() (ID, error)
 }
 
@@ -77,6 +83,8 @@ type objectWriter struct {
 
 	splitter splitter.Splitter
 
+	writeMutex sync.Mutex
+
 	asyncWritesSemaphore chan struct{} // async writes semaphore or  nil
 	asyncWritesWG        sync.WaitGroup
 
@@ -103,19 +111,28 @@ func (w *objectWriter) Close() error {
 }
 
 func (w *objectWriter) Write(data []byte) (n int, err error) {
+	w.writeMutex.Lock()
+	defer w.writeMutex.Unlock()
+
 	dataLen := len(data)
 	w.totalLength += int64(dataLen)
 
-	for _, d := range data {
-		if err := w.buffer.WriteByte(d); err != nil {
+	for len(data) > 0 {
+		n := w.splitter.NextSplitPoint(data)
+		if n < 0 {
+			// no split points in the buffer
+			w.buffer.Write(data)
+			break
+		}
+
+		// found a split point after `n` bytes, write first n bytes then flush and repeat with the remainder.
+		w.buffer.Write(data[0:n])
+
+		if err := w.flushBuffer(); err != nil {
 			return 0, err
 		}
 
-		if w.splitter.ShouldSplit(d) {
-			if err := w.flushBuffer(); err != nil {
-				return 0, err
-			}
-		}
+		data = data[n:]
 	}
 
 	return dataLen, nil
@@ -223,6 +240,17 @@ func maybeCompressedContentBytes(comp compression.Compressor, output *bytes.Buff
 	return input, false, nil
 }
 
+func (w *objectWriter) drainWrites() {
+	w.writeMutex.Lock()
+
+	// wait for any in-flight asynchronous writes to finish
+	w.asyncWritesWG.Wait()
+}
+
+func (w *objectWriter) undrainWrites() {
+	w.writeMutex.Unlock()
+}
+
 func (w *objectWriter) Result() (ID, error) {
 	// no need to hold a lock on w.indirectIndexGrowMutex, since growing index only happens synchronously
 	// and never in parallel with calling Result()
@@ -232,11 +260,21 @@ func (w *objectWriter) Result() (ID, error) {
 		}
 	}
 
-	// wait for any asynchronous writes to complete.
-	w.asyncWritesWG.Wait()
+	return w.Checkpoint()
+}
+
+// Checkpoint returns object ID which represents portion of the object that has already been written.
+// The result may be an empty object ID if nothing has been flushed yet.
+func (w *objectWriter) Checkpoint() (ID, error) {
+	w.drainWrites()
+	defer w.undrainWrites()
 
 	if w.contentWriteError != nil {
 		return "", w.contentWriteError
+	}
+
+	if len(w.indirectIndex) == 0 {
+		return "", nil
 	}
 
 	if len(w.indirectIndex) == 1 {
@@ -261,13 +299,8 @@ func (w *objectWriter) Result() (ID, error) {
 
 	defer iw.Close() //nolint:errcheck
 
-	ind := indirectObject{
-		StreamID: "kopia:indirect",
-		Entries:  w.indirectIndex,
-	}
-
-	if err := json.NewEncoder(iw).Encode(ind); err != nil {
-		return "", errors.Wrap(err, "unable to write indirect object index")
+	if err := writeIndirectObject(iw, w.indirectIndex); err != nil {
+		return "", err
 	}
 
 	oid, err := iw.Result()
@@ -276,6 +309,19 @@ func (w *objectWriter) Result() (ID, error) {
 	}
 
 	return IndirectObjectID(oid), nil
+}
+
+func writeIndirectObject(w io.Writer, entries []indirectObjectEntry) error {
+	ind := indirectObject{
+		StreamID: "kopia:indirect",
+		Entries:  entries,
+	}
+
+	if err := json.NewEncoder(w).Encode(ind); err != nil {
+		return errors.Wrap(err, "unable to write indirect object index")
+	}
+
+	return nil
 }
 
 // WriterOptions can be passed to Repository.NewWriter().

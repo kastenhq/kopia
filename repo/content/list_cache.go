@@ -12,6 +12,7 @@ import (
 	"github.com/natefinch/atomic"
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/hmac"
 	"github.com/kopia/kopia/repo/blob"
 )
@@ -28,8 +29,8 @@ func (c *listCache) listBlobs(ctx context.Context, prefix blob.ID) ([]blob.Metad
 		ci, err := c.readBlobsFromCache(ctx, prefix)
 		if err == nil {
 			expirationTime := ci.Timestamp.Add(c.listCacheDuration)
-			if time.Now().Before(expirationTime) { // allow:no-inject-time
-				log(ctx).Debugf("retrieved list of %v '%v' index blobs from cache", len(ci.Blobs), prefix)
+			if clock.Now().Before(expirationTime) {
+				formatLog(ctx).Debugf("list-from-cache '%v' found %v", prefix, len(ci.Blobs))
 				return ci.Blobs, nil
 			}
 		} else if !errors.Is(err, blob.ErrBlobNotFound) {
@@ -41,7 +42,7 @@ func (c *listCache) listBlobs(ctx context.Context, prefix blob.ID) ([]blob.Metad
 	if err == nil {
 		c.saveListToCache(ctx, prefix, &cachedList{
 			Blobs:     blobs,
-			Timestamp: time.Now(), // allow:no-inject-time
+			Timestamp: clock.Now(),
 		})
 	}
 

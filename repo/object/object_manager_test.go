@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/pkg/errors"
+
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/compression"
@@ -146,6 +148,78 @@ func TestWriterCompleteChunkInTwoWrites(t *testing.T) {
 	}
 }
 
+func TestCheckpointing(t *testing.T) {
+	ctx := testlogging.Context(t)
+	_, om := setupTest(t)
+
+	writer := om.NewWriter(ctx, WriterOptions{})
+
+	// write all zeroes
+	allZeroes := make([]byte, 1<<20)
+
+	// empty file, nothing flushed
+	checkpoint1, err := writer.Checkpoint()
+	verifyNoError(t, err)
+
+	// write some bytes, but not enough to flush.
+	writer.Write(allZeroes[0:50])
+	checkpoint2, err := writer.Checkpoint()
+	verifyNoError(t, err)
+
+	// write enough to flush first content.
+	writer.Write(allZeroes)
+	checkpoint3, err := writer.Checkpoint()
+	verifyNoError(t, err)
+
+	// write enough to flush second content.
+	writer.Write(allZeroes)
+	checkpoint4, err := writer.Checkpoint()
+	verifyNoError(t, err)
+
+	result, err := writer.Result()
+	verifyNoError(t, err)
+
+	if !objectIDsEqual(checkpoint1, "") {
+		t.Errorf("unexpected checkpoint1: %v err: %v", checkpoint1, err)
+	}
+
+	if !objectIDsEqual(checkpoint2, "") {
+		t.Errorf("unexpected checkpoint2: %v err: %v", checkpoint2, err)
+	}
+
+	verifyFull(ctx, t, om, checkpoint3, allZeroes)
+	verifyFull(ctx, t, om, checkpoint4, make([]byte, 2<<20))
+	verifyFull(ctx, t, om, result, make([]byte, 2<<20+50))
+}
+
+func verifyFull(ctx context.Context, t *testing.T, om *Manager, oid ID, want []byte) {
+	t.Helper()
+
+	r, err := om.Open(ctx, oid)
+	if err != nil {
+		t.Fatalf("unable to open %v: %v", oid, err)
+	}
+
+	defer r.Close()
+
+	data, err := ioutil.ReadAll(r)
+	if err != nil {
+		t.Fatalf("unable to read all: %v", err)
+	}
+
+	if !bytes.Equal(data, want) {
+		t.Fatalf("unexpected data read for %v", oid)
+	}
+}
+
+func verifyNoError(t *testing.T, err error) {
+	t.Helper()
+
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func verifyIndirectBlock(ctx context.Context, t *testing.T, r *Manager, oid ID) {
 	for indexContentID, isIndirect := oid.IndexObjectID(); isIndirect; indexContentID, isIndirect = indexContentID.IndexObjectID() {
 		if c, _, ok := indexContentID.ContentID(); ok {
@@ -250,6 +324,142 @@ func TestHMAC(t *testing.T) {
 	if result.String() != "cad29ff89951a3c085c86cb7ed22b82b51f7bdfda24f932c7f9601f51d5975ba" {
 		t.Errorf("unexpected result: %v err: %v", result.String(), err)
 	}
+}
+
+// nolint:gocyclo
+func TestConcatenate(t *testing.T) {
+	ctx := testlogging.Context(t)
+	_, om := setupTest(t)
+
+	phrase := []byte("hello world\n")
+	phraseLength := len(phrase)
+	shortRepeatCount := 17
+	longRepeatCount := 999999
+
+	emptyObject := mustWriteObject(t, om, nil, "")
+
+	// short uncompressed object - <content>
+	shortUncompressedOID := mustWriteObject(t, om, bytes.Repeat(phrase, shortRepeatCount), "")
+
+	// long uncompressed object - Ix<content>
+	longUncompressedOID := mustWriteObject(t, om, bytes.Repeat(phrase, longRepeatCount), "")
+
+	// short compressed object - Z<content>
+	shortCompressedOID := mustWriteObject(t, om, bytes.Repeat(phrase, shortRepeatCount), "pgzip")
+
+	// long compressed object - Ix<content>
+	longCompressedOID := mustWriteObject(t, om, bytes.Repeat(phrase, longRepeatCount), "pgzip")
+
+	if _, compressed, ok := shortUncompressedOID.ContentID(); !ok || compressed {
+		t.Errorf("invalid test assumption - shortUncompressedOID %v", shortUncompressedOID)
+	}
+
+	if _, isIndex := longUncompressedOID.IndexObjectID(); !isIndex {
+		t.Errorf("invalid test assumption - longUncompressedOID %v", longUncompressedOID)
+	}
+
+	if _, compressed, ok := shortCompressedOID.ContentID(); !ok || !compressed {
+		t.Errorf("invalid test assumption - shortCompressedOID %v", shortCompressedOID)
+	}
+
+	if _, isIndex := longCompressedOID.IndexObjectID(); !isIndex {
+		t.Errorf("invalid test assumption - longCompressedOID %v", longCompressedOID)
+	}
+
+	shortLength := phraseLength * shortRepeatCount
+	longLength := phraseLength * longRepeatCount
+
+	cases := []struct {
+		inputs     []ID
+		wantLength int
+	}{
+		{[]ID{emptyObject}, 0},
+		{[]ID{shortUncompressedOID}, shortLength},
+		{[]ID{longUncompressedOID}, longLength},
+		{[]ID{shortCompressedOID}, shortLength},
+		{[]ID{longCompressedOID}, longLength},
+
+		{[]ID{shortUncompressedOID, shortUncompressedOID}, 2 * shortLength},
+		{[]ID{shortUncompressedOID, shortCompressedOID}, 2 * shortLength},
+		{[]ID{emptyObject, longCompressedOID, shortCompressedOID, emptyObject, longCompressedOID, shortUncompressedOID, shortUncompressedOID, emptyObject, emptyObject}, 2*longLength + 3*shortLength},
+	}
+
+	for _, tc := range cases {
+		concatenatedOID, err := om.Concatenate(ctx, tc.inputs)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r, err := om.Open(ctx, concatenatedOID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		gotLength := int(r.Length())
+		r.Close()
+
+		if gotLength != tc.wantLength {
+			t.Errorf("invalid length for %v: %v, want %v", tc.inputs, gotLength, tc.wantLength)
+		}
+
+		b := make([]byte, len(phrase))
+
+		// read the concatenated object in buffers the size of a single phrase, each buffer should be identical.
+		for n, readerr := r.Read(b); ; n, readerr = r.Read(b) {
+			if errors.Is(readerr, io.EOF) {
+				break
+			}
+
+			if n != len(b) {
+				t.Errorf("invalid length: %v", n)
+			}
+
+			if !bytes.Equal(b, phrase) {
+				t.Errorf("invalid buffer: %v", n)
+			}
+		}
+
+		if _, err = om.VerifyObject(ctx, concatenatedOID); err != nil {
+			t.Fatalf("verify error: %v", err)
+		}
+
+		// make sure results of concatenation can be further concatenated.
+		concatenated3OID, err := om.Concatenate(ctx, []ID{concatenatedOID, concatenatedOID, concatenatedOID})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r, err = om.Open(ctx, concatenated3OID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		gotLength = int(r.Length())
+		r.Close()
+
+		if gotLength != tc.wantLength*3 {
+			t.Errorf("invalid twice-concatenated object length: %v, want %v", gotLength, tc.wantLength*3)
+		}
+	}
+}
+
+func mustWriteObject(t *testing.T, om *Manager, data []byte, compressor compression.Name) ID {
+	t.Helper()
+
+	w := om.NewWriter(testlogging.Context(t), WriterOptions{Compressor: compressor})
+	defer w.Close()
+
+	_, err := w.Write(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oid, err := w.Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return oid
 }
 
 func TestReader(t *testing.T) {

@@ -72,8 +72,8 @@ func runSnapshotEstimateCommand(ctx context.Context, rep repo.Repository) error 
 
 	sourceInfo := snapshot.SourceInfo{
 		Path:     filepath.Clean(path),
-		Host:     rep.Hostname(),
-		UserName: rep.Username(),
+		Host:     rep.ClientOptions().Hostname,
+		UserName: rep.ClientOptions().Username,
 	}
 
 	var stats snapshot.Stats
@@ -82,12 +82,14 @@ func runSnapshotEstimateCommand(ctx context.Context, rep repo.Repository) error 
 	eb := makeBuckets()
 
 	onIgnoredFile := func(relativePath string, e fs.Entry) {
-		log(ctx).Infof("ignoring %v", relativePath)
 		eb.add(relativePath, e.Size())
 
 		if e.IsDir() {
 			stats.ExcludedDirCount++
+
+			log(ctx).Infof("excluded dir %v", relativePath)
 		} else {
+			log(ctx).Infof("excluded file %v (%v)", relativePath, units.BytesStringBase10(e.Size()))
 			stats.ExcludedFileCount++
 			stats.ExcludedTotalFileSize += e.Size()
 		}

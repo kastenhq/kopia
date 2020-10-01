@@ -8,6 +8,7 @@ import (
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/manifest"
+	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
@@ -23,9 +24,9 @@ type StatusResponse struct {
 	Splitter     string `json:"splitter,omitempty"`
 	MaxPackSize  int    `json:"maxPackSize,omitempty"`
 	Storage      string `json:"storage,omitempty"`
-	Username     string `json:"username,omitempty"`
-	Host         string `json:"host,omitempty"`
 	APIServerURL string `json:"apiServerURL,omitempty"`
+
+	repo.ClientOptions
 }
 
 // SourcesResponse is the response of 'sources' HTTP API command.
@@ -105,12 +106,18 @@ type CreateRepositoryRequest struct {
 	NewRepositoryOptions repo.NewRepositoryOptions `json:"options"`
 }
 
+// CheckRepositoryExistsRequest returns success if a repository exists in a given storage, ErrorNotInitialized if not.
+type CheckRepositoryExistsRequest struct {
+	Storage blob.ConnectionInfo `json:"storage"`
+}
+
 // ConnectRepositoryRequest contains request to connect to a repository.
 type ConnectRepositoryRequest struct {
-	Storage   blob.ConnectionInfo `json:"storage"`
-	Password  string              `json:"password"`
-	Token     string              `json:"token"` // when set, overrides Storage and Password
-	APIServer *repo.APIServerInfo `json:"apiServer"`
+	Storage       blob.ConnectionInfo `json:"storage"`
+	Password      string              `json:"password"`
+	Token         string              `json:"token"` // when set, overrides Storage and Password
+	APIServer     *repo.APIServerInfo `json:"apiServer"`
+	ClientOptions repo.ClientOptions  `json:"clientOptions"`
 }
 
 // SupportedAlgorithmsResponse returns the list of supported algorithms for repository creation.
@@ -153,4 +160,31 @@ type Snapshot struct {
 // SnapshotsResponse contains a list of snapshots.
 type SnapshotsResponse struct {
 	Snapshots []*Snapshot `json:"snapshots"`
+}
+
+// MountSnapshotRequest contains request to mount a snapshot.
+type MountSnapshotRequest struct {
+	Root string `json:"root"`
+}
+
+// UnmountSnapshotRequest contains request to unmount a snapshot.
+type UnmountSnapshotRequest struct {
+	Root string `json:"root"`
+}
+
+// MountedSnapshot describes single mounted snapshot.
+type MountedSnapshot struct {
+	Path string    `json:"path"`
+	Root object.ID `json:"root"`
+}
+
+// MountedSnapshots describes single mounted snapshot.
+type MountedSnapshots struct {
+	Items []*MountedSnapshot `json:"items"`
+}
+
+// CurrentUserResponse is the response of 'current-user' HTTP API command.
+type CurrentUserResponse struct {
+	Username string `json:"username"`
+	Hostname string `json:"hostname"`
 }

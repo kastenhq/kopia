@@ -46,22 +46,13 @@ func onCtrlC(f func()) {
 	}()
 }
 
-func waitForCtrlC() {
-	// Wait until ctrl-c pressed
-	done := make(chan bool)
-
-	onCtrlC(func() {
-		if done != nil {
-			close(done)
-			done = nil
-		}
-	})
-	<-done
-}
-
 func openRepository(ctx context.Context, opts *repo.Options, required bool) (repo.Repository, error) {
-	if _, err := os.Stat(repositoryConfigFileName()); os.IsNotExist(err) && !required {
-		return nil, nil
+	if _, err := os.Stat(repositoryConfigFileName()); os.IsNotExist(err) {
+		if !required {
+			return nil, nil
+		}
+
+		return nil, errors.Errorf("repository is not connected. See https://kopia.io/docs/repositories/")
 	}
 
 	maybePrintUpdateNotification(ctx)

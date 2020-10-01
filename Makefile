@@ -58,7 +58,7 @@ lint-and-log: $(linter)
 
 vet-time-inject:
 ifneq ($(TRAVIS_OS_NAME),windows)
-	! find repo snapshot -name '*.go' -not -path 'repo/blob/logging/*' -not -name '*_test.go' \
+	! find . -name '*.go' \
 	-exec grep -n -e time.Now -e time.Since -e time.Until {} + \
 	| grep -v -e allow:no-inject-time
 endif
@@ -109,7 +109,7 @@ travis-release:
 	$(retry) $(MAKE) layering-test
 	$(retry) $(MAKE) integration-tests
 ifeq ($(TRAVIS_OS_NAME),linux)
-	$(MAKE) apt-publish
+	$(MAKE) publish-packages
 	$(MAKE) robustness-tool-tests
 	$(MAKE) website
 	$(MAKE) stress-test
@@ -123,31 +123,29 @@ endif
 GORELEASER_OPTIONS=--rm-dist --parallelism=6
 
 sign_gpg=1
+publish_binaries=1
+
 ifneq ($(TRAVIS_PULL_REQUEST),false)
 	# not running on travis, or travis in PR mode, skip signing
 	sign_gpg=0
 endif
 
-ifeq ($(TRAVIS_OS_NAME),windows)
-	# signing does not work on Windows on Travis
+# publish and sign only from linux/amd64 to avoid duplicates
+ifneq ($(TRAVIS_OS_NAME)/$(kopia_arch_name),linux/amd64)
 	sign_gpg=0
+	publish_binaries=0
 endif
 
 ifeq ($(sign_gpg),0)
 GORELEASER_OPTIONS+=--skip-sign
 endif
 
-publish_binaries=1
-
+# publish only from tagged releases
 ifeq ($(TRAVIS_TAG),)
-	# not a tagged release
 	GORELEASER_OPTIONS+=--snapshot
 	publish_binaries=0
 endif
 
-ifneq ($(TRAVIS_OS_NAME),linux)
-	publish_binaries=0
-endif
 ifeq ($(publish_binaries),0)
 GORELEASER_OPTIONS+=--skip-publish
 endif
@@ -195,7 +193,7 @@ vtest:
 	$(GO_TEST) -count=1 -short -v -timeout $(UNIT_TESTS_TIMEOUT) ./...
 
 dist-binary:
-	go build -o $(KOPIA_INTEGRATION_EXE) github.com/kopia/kopia
+	go build -o $(KOPIA_INTEGRATION_EXE) -tags testing github.com/kopia/kopia
 
 integration-tests: export KOPIA_EXE ?= $(KOPIA_INTEGRATION_EXE)
 integration-tests: dist-binary
@@ -227,6 +225,10 @@ robustness-status:
 	$(GO_TEST) -v -tags=utils -run=RobustnessStatus github.com/kopia/kopia/tests/robustness/utils_test
 
 endif
+
+endurance-tests: export KOPIA_EXE ?= $(KOPIA_INTEGRATION_EXE)
+endurance-tests: dist-binary
+	 $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 3600s github.com/kopia/kopia/tests/endurance_test
 
 robustness-tool-tests: dist-binary
 	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) \
@@ -315,10 +317,42 @@ travis-create-long-term-repository:
 
 endif
 
-ifeq ($(TRAVIS_PULL_REQUEST),false)
-apt-publish:
+ifeq ($(TRAVIS_OS_NAME)/$(kopia_arch_name)/$(TRAVIS_PULL_REQUEST),linux/amd64/false)
+publish-packages:
 	$(CURDIR)/tools/apt-publish.sh $(CURDIR)/dist
+	$(CURDIR)/tools/rpm-publish.sh $(CURDIR)/dist
 else
-apt-publish:
-	@echo Not pushing to APT repository on pull request builds.
+publish-packages:
+	@echo Not pushing to Linux repositories on pull request builds.
 endif
+
+PERF_BENCHMARK_INSTANCE=kopia-perf
+PERF_BENCHMARK_INSTANCE_ZONE=us-west1-a
+PERF_BENCHMARK_CHANNEL=testing
+PERF_BENCHMARK_VERSION=0.6.4
+PERF_BENCHMARK_TOTAL_SIZE=20G
+
+perf-benchmark-setup:
+	gcloud compute instances create $(PERF_BENCHMARK_INSTANCE) --machine-type n1-standard-8 --zone=$(PERF_BENCHMARK_INSTANCE_ZONE) --local-ssd interface=nvme
+	# wait for instance to boot
+	sleep 20
+	gcloud compute scp tests/perf_benchmark/perf-benchmark-setup.sh $(PERF_BENCHMARK_INSTANCE):. --zone=$(PERF_BENCHMARK_INSTANCE_ZONE)
+	gcloud compute ssh $(PERF_BENCHMARK_INSTANCE) --zone=$(PERF_BENCHMARK_INSTANCE_ZONE) --command "./perf-benchmark-setup.sh"
+
+perf-benchmark-teardown:
+	gcloud compute instances delete $(PERF_BENCHMARK_INSTANCE) --zone=$(PERF_BENCHMARK_INSTANCE_ZONE)
+
+perf-benchmark-test:
+	gcloud compute scp tests/perf_benchmark/perf-benchmark.sh $(PERF_BENCHMARK_INSTANCE):. --zone=$(PERF_BENCHMARK_INSTANCE_ZONE)
+	gcloud compute ssh $(PERF_BENCHMARK_INSTANCE) --zone=$(PERF_BENCHMARK_INSTANCE_ZONE) --command "./perf-benchmark.sh $(PERF_BENCHMARK_VERSION) $(PERF_BENCHMARK_CHANNEL) $(PERF_BENCHMARK_TOTAL_SIZE)"
+
+perf-benchmark-test-all:
+	$(MAKE) perf-benchmark-test PERF_BENCHMARK_VERSION=0.4.0
+	$(MAKE) perf-benchmark-test PERF_BENCHMARK_VERSION=0.5.2
+	$(MAKE) perf-benchmark-test PERF_BENCHMARK_VERSION=0.6.4
+	$(MAKE) perf-benchmark-test PERF_BENCHMARK_VERSION=0.7.0~rc1
+
+perf-benchmark-results:
+	gcloud compute scp $(PERF_BENCHMARK_INSTANCE):psrecord-* tests/perf_benchmark --zone=$(PERF_BENCHMARK_INSTANCE_ZONE) 
+	gcloud compute scp $(PERF_BENCHMARK_INSTANCE):repo-size-* tests/perf_benchmark --zone=$(PERF_BENCHMARK_INSTANCE_ZONE)
+	(cd tests/perf_benchmark && go run process_results.go)

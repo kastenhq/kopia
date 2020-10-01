@@ -6,6 +6,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/manifest"
@@ -23,9 +24,8 @@ type Repository interface {
 	FindManifests(ctx context.Context, labels map[string]string) ([]*manifest.EntryMetadata, error)
 	DeleteManifest(ctx context.Context, id manifest.ID) error
 
-	Hostname() string
-	Username() string
-	IsReadOnly() bool
+	ClientOptions() ClientOptions
+	UpdateDescription(d string)
 
 	Time() time.Time
 
@@ -44,9 +44,7 @@ type DirectRepository struct {
 
 	ConfigFile string
 
-	hostname   string // connected (localhost) hostname
-	username   string // connected username
-	isReadOnly bool
+	cliOpts ClientOptions
 
 	timeNow    func() time.Time
 	formatBlob *formatBlob
@@ -60,14 +58,16 @@ func (r *DirectRepository) DeriveKey(purpose []byte, keyLength int) []byte {
 	return deriveKeyFromMasterKey(r.masterKey, r.UniqueID, purpose, keyLength)
 }
 
+// ClientOptions returns client options.
+func (r *DirectRepository) ClientOptions() ClientOptions {
+	return r.cliOpts
+}
+
 // Hostname returns the hostname that connected to the repository.
-func (r *DirectRepository) Hostname() string { return r.hostname }
+func (r *DirectRepository) Hostname() string { return r.cliOpts.Hostname }
 
 // Username returns the username that's connect to the repository.
-func (r *DirectRepository) Username() string { return r.username }
-
-// IsReadOnly returns true if repository is read-only.
-func (r *DirectRepository) IsReadOnly() bool { return r.isReadOnly }
+func (r *DirectRepository) Username() string { return r.cliOpts.Username }
 
 // BlobStorage returns the blob storage.
 func (r *DirectRepository) BlobStorage() blob.Storage {
@@ -117,6 +117,11 @@ func (r *DirectRepository) FindManifests(ctx context.Context, labels map[string]
 // DeleteManifest deletes the manifest with a given ID.
 func (r *DirectRepository) DeleteManifest(ctx context.Context, id manifest.ID) error {
 	return r.Manifests.Delete(ctx, id)
+}
+
+// UpdateDescription updates the description of a connected repository.
+func (r *DirectRepository) UpdateDescription(d string) {
+	r.cliOpts.Description = d
 }
 
 // Close closes the repository and releases all resources.
@@ -202,5 +207,5 @@ func defaultTime(f func() time.Time) func() time.Time {
 		return f
 	}
 
-	return time.Now // allow:no-inject-time
+	return clock.Now
 }

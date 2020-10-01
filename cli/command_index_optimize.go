@@ -2,8 +2,8 @@ package cli
 
 import (
 	"context"
-	"time"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/content"
 )
@@ -17,6 +17,8 @@ var (
 )
 
 func runOptimizeCommand(ctx context.Context, rep *repo.DirectRepository) error {
+	advancedCommand()
+
 	opt := content.CompactOptions{
 		MaxSmallBlobs: *optimizeMaxSmallBlobs,
 		AllIndexes:    *optimizeAllIndexes,
@@ -24,7 +26,7 @@ func runOptimizeCommand(ctx context.Context, rep *repo.DirectRepository) error {
 	}
 
 	if age := *optimizeDropDeletedOlderThan; age > 0 {
-		opt.DropDeletedBefore = time.Now().Add(-age)
+		opt.DropDeletedBefore = clock.Now().Add(-age)
 	}
 
 	return rep.Content.CompactIndexes(ctx, opt)

@@ -40,6 +40,7 @@ type Server struct {
 	// administrative actions run with an exclusive lock and block API calls.
 	mu              sync.RWMutex
 	sourceManagers  map[snapshot.SourceInfo]*sourceManager
+	mounts          sync.Map // object.ID -> mount.Controller
 	uploadSemaphore chan struct{}
 }
 
@@ -70,7 +71,10 @@ func (s *Server) APIHandlers() http.Handler {
 
 	m.HandleFunc("/api/v1/repo/status", s.handleAPIPossiblyNotConnected(s.handleRepoStatus)).Methods(http.MethodGet)
 	m.HandleFunc("/api/v1/repo/connect", s.handleAPIPossiblyNotConnected(s.handleRepoConnect)).Methods(http.MethodPost)
+	m.HandleFunc("/api/v1/repo/exists", s.handleAPIPossiblyNotConnected(s.handleRepoExists)).Methods(http.MethodPost)
 	m.HandleFunc("/api/v1/repo/create", s.handleAPIPossiblyNotConnected(s.handleRepoCreate)).Methods(http.MethodPost)
+	m.HandleFunc("/api/v1/repo/description", s.handleAPI(s.handleRepoSetDescription)).Methods(http.MethodPost)
+
 	m.HandleFunc("/api/v1/repo/disconnect", s.handleAPI(s.handleRepoDisconnect)).Methods(http.MethodPost)
 	m.HandleFunc("/api/v1/repo/algorithms", s.handleAPIPossiblyNotConnected(s.handleRepoSupportedAlgorithms)).Methods(http.MethodGet)
 	m.HandleFunc("/api/v1/repo/sync", s.handleAPI(s.handleRepoSync)).Methods(http.MethodPost)
@@ -84,6 +88,13 @@ func (s *Server) APIHandlers() http.Handler {
 	m.HandleFunc("/api/v1/manifests/{manifestID}", s.handleAPI(s.handleManifestDelete)).Methods(http.MethodDelete)
 	m.HandleFunc("/api/v1/manifests", s.handleAPI(s.handleManifestCreate)).Methods(http.MethodPost)
 	m.HandleFunc("/api/v1/manifests", s.handleAPI(s.handleManifestList)).Methods(http.MethodGet)
+
+	m.HandleFunc("/api/v1/mounts", s.handleAPI(s.handleMountCreate)).Methods(http.MethodPost)
+	m.HandleFunc("/api/v1/mounts/{rootObjectID}", s.handleAPI(s.handleMountDelete)).Methods(http.MethodDelete)
+	m.HandleFunc("/api/v1/mounts/{rootObjectID}", s.handleAPI(s.handleMountGet)).Methods(http.MethodGet)
+	m.HandleFunc("/api/v1/mounts", s.handleAPI(s.handleMountList)).Methods(http.MethodGet)
+
+	m.HandleFunc("/api/v1/current-user", s.handleAPIPossiblyNotConnected(s.handleCurrentUser)).Methods(http.MethodGet)
 
 	return m
 }
@@ -224,6 +235,8 @@ func (s *Server) SetRepository(ctx context.Context, rep repo.Repository) error {
 	}
 
 	if s.rep != nil {
+		s.unmountAll(ctx)
+
 		// close previous source managers
 		log(ctx).Infof("stopping all source managers")
 		s.stopAllSourceManagersLocked(ctx)

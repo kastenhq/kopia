@@ -15,6 +15,7 @@ import (
 	"gocloud.dev/blob/azureblob"
 	"gocloud.dev/gcerrors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/iocopy"
 	"github.com/kopia/kopia/internal/retry"
 	"github.com/kopia/kopia/repo/blob"
@@ -105,27 +106,25 @@ func isRetriableError(err error) bool {
 	}
 
 	// https://pkg.go.dev/gocloud.dev/gcerrors?tab=doc#ErrorCode
-	// nolint:exhaustive
 	switch gcerrors.Code(err) {
 	case gcerrors.Internal:
 		return true
 	case gcerrors.ResourceExhausted:
 		return true
+	default:
+		return false
 	}
-
-	return false
 }
 
 func translateError(err error) error {
-	// nolint:exhaustive
 	switch gcerrors.Code(err) {
 	case gcerrors.OK:
 		return nil
 	case gcerrors.NotFound:
 		return blob.ErrBlobNotFound
+	default:
+		return err
 	}
-
-	return err
 }
 
 func (az *azStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes) error {
@@ -155,6 +154,10 @@ func (az *azStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes) er
 
 	// calling close before cancel() causes it to commit the upload.
 	return translateError(writer.Close())
+}
+
+func (az *azStorage) SetTime(ctx context.Context, b blob.ID, t time.Time) error {
+	return blob.ErrSetTimeUnsupported
 }
 
 // DeleteBlob deletes azure blob from container with given ID.
@@ -266,7 +269,7 @@ func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 
 	// verify Azure connection is functional by listing blobs in a bucket, which will fail if the container
 	// does not exist. We list with a prefix that will not exist, to avoid iterating through any objects.
-	nonExistentPrefix := fmt.Sprintf("kopia-azure-storage-initializing-%v", time.Now().UnixNano()) // allow:no-inject-time
+	nonExistentPrefix := fmt.Sprintf("kopia-azure-storage-initializing-%v", clock.Now().UnixNano())
 	err = az.ListBlobs(ctx, blob.ID(nonExistentPrefix), func(md blob.Metadata) error {
 		return nil
 	})

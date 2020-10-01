@@ -1,3 +1,5 @@
+import { faStopCircle, faSync, faUserFriends } from '@fortawesome/free-solid-svg-icons';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import axios from 'axios';
 import moment from 'moment';
 import React, { Component } from 'react';
@@ -201,8 +203,10 @@ export class SourcesTable extends Component {
                     const totalBytes = u.hashedBytes + u.cachedBytes;
 
                     totals = sizeDisplayName(totalBytes);
-                    if (x.row.original.lastSnapshot) {
-                        const percent = Math.round(totalBytes * 1000.0 / x.row.original.lastSnapshot.stats.totalSize) / 10.0;
+                    if (u.estimatedBytes) {
+                        totals += "/" + sizeDisplayName(u.estimatedBytes);
+
+                        const percent = Math.round(totalBytes * 1000.0 / u.estimatedBytes) / 10.0;
                         if (percent <= 100) {
                             totals += " " + percent + "%";
                         }
@@ -210,11 +214,11 @@ export class SourcesTable extends Component {
                 }
 
                 return <>
-                    <Spinner animation="border" variant="primary" size="sm" title={title} />&nbsp;Snapshotting {totals}
+                    <Spinner animation="border" variant="primary" size="sm" title={title} />&nbsp;Uploading {totals}
                     &nbsp;
                     <Button variant="danger" size="sm" onClick={() => {
                         parent.cancelSnapshot(x.row.original.source);
-                    }}>stop</Button>
+                    }}><FontAwesomeIcon icon={faStopCircle} /></Button>
                 </>;
 
             default:
@@ -324,13 +328,15 @@ export class SourcesTable extends Component {
             Cell: x => this.statusCell(x, this),
         }]
 
+        const selectSupported = !!window.require;
+
         return <div className="padded">
             {this.state.multiUser && <ButtonToolbar className="float-sm-right">
                 &nbsp;
                 <ButtonGroup>
                     <Dropdown>
                         <Dropdown.Toggle variant="outline-primary" id="dropdown-basic">
-                            {this.state.selectedOwner}
+                        <FontAwesomeIcon icon={faUserFriends} />&nbsp;{this.state.selectedOwner}
                         </Dropdown.Toggle>
 
                         <Dropdown.Menu>
@@ -343,7 +349,7 @@ export class SourcesTable extends Component {
                 </ButtonGroup>
                 &nbsp;
                 <ButtonGroup>
-                    <Button variant="primary">Refresh</Button>
+                    <Button variant="primary"><FontAwesomeIcon icon={faSync} /></Button>
                 </ButtonGroup>
             </ButtonToolbar>}
             <ButtonToolbar>
@@ -355,11 +361,11 @@ export class SourcesTable extends Component {
                         value={this.state.selectedDirectory}
                         onChange={this.handleChange}
                     />
-                    <Button as={InputGroup.Prepend}
+                    {selectSupported && <Button as={InputGroup.Prepend}
                         title="Snapshot"
                         variant="primary"
                         id="input-group-dropdown-2"
-                        onClick={this.selectDirectory}>...</Button>
+                        onClick={this.selectDirectory}>...</Button>}
                 </InputGroup>
                 &nbsp;
                 <DropdownButton
