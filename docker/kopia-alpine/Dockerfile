@@ -1,12 +1,21 @@
-FROM golang:1.14-alpine3.12 AS builder
+FROM golang:1.15-alpine3.12 AS builder
 
 RUN adduser -D kopia && addgroup kopia kopia
 USER kopia:kopia
 
 COPY --chown=kopia . /kopia
 WORKDIR /kopia
+
+ARG imageVersion="unknown"
+ARG kopiaCommit="unknown"
+
+LABEL imageVersion="${imageVersion}"
+LABEL kopiaCommit="${kopiaCommit}"
+
 # Build static executable
-RUN GO111MODULE=on CGO_ENABLED=0 GO_EXTLINK_ENABLED=0 go build .
+RUN GO111MODULE=on CGO_ENABLED=0 GO_EXTLINK_ENABLED=0 go build \
+  -ldflags="-s -w -X github.com/kopia/kopia/repo.BuildVersion=${imageVersion} -X github.com/kopia/kopia/repo.BuildInfo=${kopiaCommit}" \
+  .
 
 FROM alpine:3.12
 
@@ -21,7 +30,5 @@ RUN apk add --no-cache --verbose ca-certificates && \
 USER kopia:kopia
 
 ENTRYPOINT [ "/kopia/kopia" ]
-
-LABEL imageVersion="unknown"
 
 COPY --from=builder --chown=kopia:kopia /kopia/kopia /kopia/kopia
