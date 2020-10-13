@@ -17,8 +17,8 @@ cd "${REPO_DIR}"
 
 docker build \
     --label "imageType=${IMAGE_TYPE}" \
-    --label "imageVersion=${IMAGE_VERSION}" \
-    --label "kopiaCommit=$(git rev-parse HEAD)" \
+    --build-arg "imageVersion=${IMAGE_VERSION}" \
+    --build-arg "kopiaCommit=$(git rev-parse HEAD)" \
     --tag "${REPO}:${IMAGE_TYPE}" \
     --tag "${REPO}:${IMAGE_TYPE}-${COMMIT_TAG}" \
     --tag "${REPO}:${IMAGE_TYPE}-${IMAGE_VERSION}" \
