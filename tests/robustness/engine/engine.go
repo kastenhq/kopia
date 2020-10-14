@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kopia/kopia/tests/robustness/checker"
@@ -137,11 +138,15 @@ func (e *Engine) Cleanup() error {
 		}
 	}
 
-	log.Print()
-	log.Print("================\n")
-	log.Print("Cleanup summary:\n")
-	log.Printf("\n%s\n", e.Stats())
-	log.Printf("\n%s\n", e.EngineLog.StringThisRun())
+	cleanupSummaryBuilder := new(strings.Builder)
+	cleanupSummaryBuilder.WriteString("\n================\n")
+	cleanupSummaryBuilder.WriteString("CleanupSummary:\n\n")
+	cleanupSummaryBuilder.WriteString(e.Stats())
+	cleanupSummaryBuilder.WriteString("\n\n")
+	cleanupSummaryBuilder.WriteString(e.EngineLog.StringThisRun())
+	cleanupSummaryBuilder.WriteString("\n")
+
+	log.Print(cleanupSummaryBuilder.String())
 
 	e.RunStats.RunTime = time.Since(e.RunStats.CreationTime)
 	e.CumulativeStats.RunTime += e.RunStats.RunTime
