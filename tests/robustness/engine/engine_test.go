@@ -95,6 +95,11 @@ func makeTempS3Bucket(t *testing.T) (bucketName string, cleanupCB func()) {
 	accessKeyID := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	sessionToken := os.Getenv("AWS_SESSION_TOKEN")
+
+	if accessKeyID == "" || secretAccessKey == "" || sessionToken == "" {
+		t.Skip("Skipping S3 tests if no creds provided")
+	}
+
 	secure := true
 	region := ""
 	cli, err := minio.NewWithCredentials(endpoint, credentials.NewStaticV4(accessKeyID, secretAccessKey, sessionToken), secure, region)
@@ -454,7 +459,7 @@ func TestPickActionWeighted(t *testing.T) {
 
 func TestActionsFilesystem(t *testing.T) {
 	eng, err := NewEngine("")
-	if err == kopiarunner.ErrExeVariableNotSet {
+	if err == kopiarunner.ErrExeVariableNotSet || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
 
@@ -499,7 +504,7 @@ func TestActionsS3(t *testing.T) {
 	defer cleanupCB()
 
 	eng, err := NewEngine("")
-	if err == kopiarunner.ErrExeVariableNotSet {
+	if err == kopiarunner.ErrExeVariableNotSet || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
 
@@ -546,7 +551,7 @@ func TestIOLimitPerWriteAction(t *testing.T) {
 	const timeout = 10 * time.Second
 
 	eng, err := NewEngine("")
-	if err == kopiarunner.ErrExeVariableNotSet {
+	if err == kopiarunner.ErrExeVariableNotSet || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
 
@@ -601,6 +606,10 @@ func TestStatsPersist(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	snapStore, err := snapmeta.New(tmpDir)
+	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) {
+		t.Skip(err)
+	}
+
 	testenv.AssertNoError(t, err)
 
 	err = snapStore.ConnectOrCreateFilesystem(tmpDir)
@@ -665,6 +674,10 @@ func TestLogsPersist(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	snapStore, err := snapmeta.New(tmpDir)
+	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) {
+		t.Skip(err)
+	}
+
 	testenv.AssertNoError(t, err)
 
 	err = snapStore.ConnectOrCreateFilesystem(tmpDir)
