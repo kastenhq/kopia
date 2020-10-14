@@ -18,13 +18,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/minio/minio-go/v6"
+	"github.com/minio/minio-go/v6/pkg/credentials"
+
 	"github.com/kopia/kopia/tests/robustness/snapmeta"
 	"github.com/kopia/kopia/tests/testenv"
 	"github.com/kopia/kopia/tests/tools/fio"
 	"github.com/kopia/kopia/tests/tools/fswalker"
 	"github.com/kopia/kopia/tests/tools/kopiarunner"
-	"github.com/minio/minio-go/v6"
-	"github.com/minio/minio-go/v6/pkg/credentials"
 )
 
 var (
@@ -53,7 +54,7 @@ func TestEngineWritefilesBasicFS(t *testing.T) {
 		cleanupErr := eng.Cleanup()
 		testenv.AssertNoError(t, cleanupErr)
 
-		os.RemoveAll(fsRepoBaseDirPath) //nolint:errcheck
+		os.RemoveAll(fsRepoBaseDirPath)
 	}()
 
 	ctx := context.TODO()
@@ -84,7 +85,7 @@ func TestEngineWritefilesBasicFS(t *testing.T) {
 
 func randomString(n int) string {
 	b := make([]byte, n)
-	io.ReadFull(rand.Reader, b) //nolint:errcheck
+	io.ReadFull(rand.Reader, b)
 
 	return hex.EncodeToString(b)
 }
@@ -104,9 +105,9 @@ func makeTempS3Bucket(t *testing.T) (bucketName string, cleanupCB func()) {
 	testenv.AssertNoError(t, err)
 
 	return bucketName, func() {
-
 		objNameCh := make(chan string)
 		errCh := cli.RemoveObjects(bucketName, objNameCh)
+
 		go func() {
 			for removeErr := range errCh {
 				t.Errorf("error removing key %s from bucket: %s", removeErr.ObjectName, removeErr.Err)
@@ -115,6 +116,7 @@ func makeTempS3Bucket(t *testing.T) (bucketName string, cleanupCB func()) {
 
 		recursive := true
 		doneCh := make(chan struct{})
+
 		defer close(doneCh)
 
 		for obj := range cli.ListObjects(bucketName, "", recursive, doneCh) {
@@ -125,10 +127,12 @@ func makeTempS3Bucket(t *testing.T) (bucketName string, cleanupCB func()) {
 
 		retries := 10
 		retryPeriod := 1 * time.Second
+
 		var err error
 
 		for retry := 0; retry < retries; retry++ {
 			time.Sleep(retryPeriod)
+
 			err = cli.RemoveBucket(bucketName)
 			if err == nil {
 				break
@@ -277,7 +281,7 @@ func TestSnapshotVerificationFail(t *testing.T) {
 	restoreDir, err := ioutil.TempDir(eng.Checker.RestoreDir, fmt.Sprintf("restore-snap-%v", snapID1))
 	testenv.AssertNoError(t, err)
 
-	defer os.RemoveAll(restoreDir) //nolint:errcheck
+	defer os.RemoveAll(restoreDir)
 
 	// Restore snapshot ID 1 with snapshot 2's validation data in metadata, expect error
 	err = eng.Checker.RestoreVerifySnapshot(ctx, snapID1, restoreDir, ssMeta1, os.Stdout)
@@ -290,7 +294,7 @@ func TestDataPersistency(t *testing.T) {
 	tempDir, err := ioutil.TempDir("", "")
 	testenv.AssertNoError(t, err)
 
-	defer os.RemoveAll(tempDir) //nolint:errcheck
+	defer os.RemoveAll(tempDir)
 
 	eng, err := NewEngine("")
 	if err == kopiarunner.ErrExeVariableNotSet || errors.Is(err, fio.ErrEnvNotSet) {
@@ -460,7 +464,7 @@ func TestActionsFilesystem(t *testing.T) {
 		cleanupErr := eng.Cleanup()
 		testenv.AssertNoError(t, cleanupErr)
 
-		os.RemoveAll(fsRepoBaseDirPath) //nolint:errcheck
+		os.RemoveAll(fsRepoBaseDirPath)
 	}()
 
 	ctx := context.TODO()
@@ -552,7 +556,7 @@ func TestIOLimitPerWriteAction(t *testing.T) {
 		cleanupErr := eng.Cleanup()
 		testenv.AssertNoError(t, cleanupErr)
 
-		os.RemoveAll(fsRepoBaseDirPath) //nolint:errcheck
+		os.RemoveAll(fsRepoBaseDirPath)
 	}()
 
 	ctx := context.TODO()
@@ -594,7 +598,7 @@ func TestStatsPersist(t *testing.T) {
 	tmpDir, err := ioutil.TempDir("", "stats-persist-test")
 	testenv.AssertNoError(t, err)
 
-	defer os.RemoveAll(tmpDir) //nolint:errcheck
+	defer os.RemoveAll(tmpDir)
 
 	snapStore, err := snapmeta.New(tmpDir)
 	testenv.AssertNoError(t, err)
@@ -658,7 +662,7 @@ func TestLogsPersist(t *testing.T) {
 	tmpDir, err := ioutil.TempDir("", "logs-persist-test")
 	testenv.AssertNoError(t, err)
 
-	defer os.RemoveAll(tmpDir) //nolint:errcheck
+	defer os.RemoveAll(tmpDir)
 
 	snapStore, err := snapmeta.New(tmpDir)
 	testenv.AssertNoError(t, err)

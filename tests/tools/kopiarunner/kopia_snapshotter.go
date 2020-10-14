@@ -5,8 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kopia/kopia/tests/robustness/snap"
 	"github.com/pkg/errors"
+
+	"github.com/kopia/kopia/tests/robustness/snap"
 )
 
 var _ snap.Snapshotter = &KopiaSnapshotter{}

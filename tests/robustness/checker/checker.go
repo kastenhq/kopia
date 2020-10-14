@@ -37,7 +37,7 @@ type Checker struct {
 }
 
 // NewChecker instantiates a new Checker, returning its pointer. A temporary
-// directory is created to mount restored data
+// directory is created to mount restored data.
 func NewChecker(snapIssuer snap.Snapshotter, snapmetaStore snapmeta.Store, validator Comparer, restoreDir string) (*Checker, error) {
 	restoreDir, err := ioutil.TempDir(restoreDir, "restore-data-")
 	if err != nil {
@@ -45,6 +45,7 @@ func NewChecker(snapIssuer snap.Snapshotter, snapmetaStore snapmeta.Store, valid
 	}
 
 	delLimitStr := os.Getenv(deleteLimitEnvKey)
+
 	delLimit, err := strconv.Atoi(delLimitStr)
 	if err != nil {
 		log.Printf("using default delete limit %d", defaultDeleteLimit)
@@ -132,6 +133,7 @@ func (chk *Checker) VerifySnapshotMetadata() error {
 	for _, metaSnapID := range liveSnapsInMetadata {
 		if _, ok := liveMap[metaSnapID]; !ok {
 			log.Printf("Metadata present for snapID %v but not found in list of repo snapshots", metaSnapID)
+
 			if chk.RecoveryMode {
 				chk.snapshotMetadataStore.Delete(metaSnapID)
 				chk.snapshotMetadataStore.RemoveFromIndex(metaSnapID, liveSnapshotsIdxName)
@@ -144,26 +146,31 @@ func (chk *Checker) VerifySnapshotMetadata() error {
 	var liveSnapsDeleted int
 
 	for _, liveSnapID := range liveSnapsInRepo {
-		if _, ok := metadataMap[liveSnapID]; !ok {
-			log.Printf("Live snapshot present for snapID %v but not found in known metadata", liveSnapID)
-			if chk.RecoveryMode {
-				if liveSnapsDeleted >= chk.DeleteLimit {
-					log.Printf("delete limit (%v) reached", chk.DeleteLimit)
-					errCount++
-				}
+		if _, ok := metadataMap[liveSnapID]; ok {
+			// Found live snapshot ID in the metadata. No recovery handling needed.
+			continue
+		}
 
-				// Might as well delete the snapshot since we don't have metadata for it
-				log.Printf("Deleting snapshot ID %s", liveSnapID)
-				err = chk.snapshotIssuer.DeleteSnapshot(liveSnapID)
-				if err != nil {
-					log.Printf("error deleting snapshot: %s", err)
-					errCount++
-				}
+		log.Printf("Live snapshot present for snapID %v but not found in known metadata", liveSnapID)
 
-				liveSnapsDeleted++
-			} else {
+		if chk.RecoveryMode {
+			if liveSnapsDeleted >= chk.DeleteLimit {
+				log.Printf("delete limit (%v) reached", chk.DeleteLimit)
 				errCount++
 			}
+
+			// Might as well delete the snapshot since we don't have metadata for it
+			log.Printf("Deleting snapshot ID %s", liveSnapID)
+
+			err = chk.snapshotIssuer.DeleteSnapshot(liveSnapID)
+			if err != nil {
+				log.Printf("error deleting snapshot: %s", err)
+				errCount++
+			}
+
+			liveSnapsDeleted++
+		} else {
+			errCount++
 		}
 	}
 
@@ -245,12 +252,14 @@ func (chk *Checker) RestoreVerifySnapshot(ctx context.Context, snapID, destPath 
 	}
 
 	if ssMeta == nil && chk.RecoveryMode {
-		b, err := chk.validator.Gather(ctx, destPath)
+		var b []byte
+
+		b, err = chk.validator.Gather(ctx, destPath)
 		if err != nil {
 			return err
 		}
 
-		ssMeta := &SnapshotMetadata{
+		ssMeta = &SnapshotMetadata{
 			SnapID:         snapID,
 			ValidationData: b,
 		}

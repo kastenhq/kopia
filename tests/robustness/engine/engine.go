@@ -23,22 +23,22 @@ import (
 )
 
 const (
-	// S3BucketNameEnvKey is the environment variable required to connect to a repo on S3
+	// S3BucketNameEnvKey is the environment variable required to connect to a repo on S3.
 	S3BucketNameEnvKey = "S3_BUCKET_NAME"
 )
 
 var (
-	// ErrNoOp is thrown when an action could not do anything useful
+	// ErrNoOp is thrown when an action could not do anything useful.
 	ErrNoOp = fmt.Errorf("no-op")
 	// ErrCannotPerformIO is returned if the engine determines there is not enough space
-	// to write files
+	// to write files.
 	ErrCannotPerformIO = fmt.Errorf("cannot perform i/o")
-	// ErrS3BucketNameEnvUnset is the error returned when the S3BucketNameEnvKey environment variable is not set
+	// ErrS3BucketNameEnvUnset is the error returned when the S3BucketNameEnvKey environment variable is not set.
 	ErrS3BucketNameEnvUnset = fmt.Errorf("environment variable required: %v", S3BucketNameEnvKey)
 	noSpaceOnDeviceMatchStr = "no space left on device"
 )
 
-// Engine is the outer level testing framework for robustness testing
+// Engine is the outer level testing framework for robustness testing.
 type Engine struct {
 	FileWriter      *fio.Runner
 	TestRepo        snap.Snapshotter
@@ -76,7 +76,7 @@ func NewEngine(workingDir string) (*Engine, error) {
 	// Fill the file writer
 	e.FileWriter, err = fio.NewRunner()
 	if err != nil {
-		e.CleanComponents() //nolint:errcheck
+		e.CleanComponents()
 		return nil, err
 	}
 
@@ -85,7 +85,7 @@ func NewEngine(workingDir string) (*Engine, error) {
 	// Fill Snapshotter interface
 	kopiaSnapper, err := kopiarunner.NewKopiaSnapshotter(baseDirPath)
 	if err != nil {
-		e.CleanComponents() //nolint:errcheck
+		e.CleanComponents()
 		return nil, err
 	}
 
@@ -95,7 +95,7 @@ func NewEngine(workingDir string) (*Engine, error) {
 	// Fill the snapshot store interface
 	snapStore, err := snapmeta.New(baseDirPath)
 	if err != nil {
-		e.CleanComponents() //nolint:errcheck
+		e.CleanComponents()
 		return nil, err
 	}
 
@@ -103,14 +103,18 @@ func NewEngine(workingDir string) (*Engine, error) {
 
 	e.MetaStore = snapStore
 
-	e.setupLogging()
+	err = e.setupLogging()
+	if err != nil {
+		e.CleanComponents()
+		return nil, err
+	}
 
 	// Create the data integrity checker
 	chk, err := checker.NewChecker(kopiaSnapper, snapStore, fswalker.NewWalkCompare(), baseDirPath)
 	e.cleanupRoutines = append(e.cleanupRoutines, chk.Cleanup)
 
 	if err != nil {
-		e.CleanComponents() //nolint:errcheck
+		e.CleanComponents()
 		return nil, err
 	}
 
@@ -119,12 +123,13 @@ func NewEngine(workingDir string) (*Engine, error) {
 	return e, nil
 }
 
-// Cleanup cleans up after each component of the test engine
+// Cleanup cleans up after each component of the test engine.
 func (e *Engine) Cleanup() error {
 	// Perform a snapshot action to capture the state of the data directory
 	// at the end of the run
 	lastWriteEntry := e.EngineLog.FindLastThisRun(WriteRandomFilesActionKey)
 	lastSnapEntry := e.EngineLog.FindLastThisRun(SnapshotRootDirActionKey)
+
 	if lastWriteEntry != nil {
 		if lastSnapEntry == nil || lastSnapEntry.Idx < lastWriteEntry.Idx {
 			// Only force a final snapshot if the data tree has been modified since the last snapshot
@@ -164,6 +169,7 @@ func (e *Engine) setupLogging() error {
 	dirPath := e.MetaStore.GetPersistDir()
 
 	newLogPath := filepath.Join(dirPath, e.formatLogName())
+
 	f, err := os.Create(newLogPath)
 	if err != nil {
 		return err
@@ -181,7 +187,7 @@ func (e *Engine) formatLogName() string {
 	return fmt.Sprintf("Log_%s", st.Format("2006_01_02_15_04_05"))
 }
 
-// CleanComponents cleans up each component part of the test engine
+// CleanComponents cleans up each component part of the test engine.
 func (e *Engine) CleanComponents() {
 	for _, f := range e.cleanupRoutines {
 		f()
@@ -192,7 +198,7 @@ func (e *Engine) CleanComponents() {
 
 // Init initializes the Engine to a repository location according to the environment setup.
 // - If S3_BUCKET_NAME is set, initialize S3
-// - Else initialize filesystem
+// - Else initialize filesystem.
 func (e *Engine) Init(ctx context.Context, testRepoPath, metaRepoPath string) error {
 	switch {
 	case os.Getenv(S3BucketNameEnvKey) != "":
@@ -207,7 +213,7 @@ func (e *Engine) Init(ctx context.Context, testRepoPath, metaRepoPath string) er
 // is successful, the engine is populated with the metadata associated with the
 // snapshot in that repo. A new repo will be created if one does not already
 // exist.
-func (e *Engine) InitS3(ctx context.Context, bucketName string, testRepoPath, metaRepoPath string) error {
+func (e *Engine) InitS3(ctx context.Context, bucketName, testRepoPath, metaRepoPath string) error {
 	err := e.MetaStore.ConnectOrCreateS3(bucketName, metaRepoPath)
 	if err != nil {
 		return err

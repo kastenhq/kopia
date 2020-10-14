@@ -6,13 +6,13 @@ import (
 	"time"
 )
 
-// Log keeps track of the actions taken by the engine
+// Log keeps track of the actions taken by the engine.
 type Log struct {
 	runOffset int
 	Log       []*LogEntry
 }
 
-// LogEntry is an entry for the engine log
+// LogEntry is an entry for the engine log.
 type LogEntry struct {
 	StartTime       time.Time
 	EndTime         time.Time
@@ -46,7 +46,7 @@ func formatTime(tm time.Time) string {
 }
 
 // StringThisRun returns a string of only the log entries generated
-// by actions in this run of the engine
+// by actions in this run of the engine.
 func (elog *Log) StringThisRun() string {
 	b := &strings.Builder{}
 
@@ -72,7 +72,7 @@ func (elog *Log) String() string {
 	return b.String()
 }
 
-// AddEntry adds a LogEntry to the Log
+// AddEntry adds a LogEntry to the Log.
 func (elog *Log) AddEntry(l *LogEntry) {
 	l.Idx = int64(len(elog.Log))
 	elog.Log = append(elog.Log, l)
@@ -93,13 +93,13 @@ func (elog *Log) AddCompleted(logEntry *LogEntry, err error) {
 	}
 }
 
-// FindLast finds the most recent log entry with the provided ActionKey
+// FindLast finds the most recent log entry with the provided ActionKey.
 func (elog *Log) FindLast(actionKey ActionKey) *LogEntry {
 	return elog.findLastUntilIdx(actionKey, 0)
 }
 
 // FindLastThisRun finds the most recent log entry with the provided ActionKey,
-// limited to the current run only
+// limited to the current run only.
 func (elog *Log) FindLastThisRun(actionKey ActionKey) (found *LogEntry) {
 	return elog.findLastUntilIdx(actionKey, elog.runOffset)
 }

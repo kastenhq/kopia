@@ -15,7 +15,7 @@ var (
 	testGitBranch   = "unknown"
 )
 
-// Stats prints the engine stats, cumulative and from the current run
+// Stats prints the engine stats, cumulative and from the current run.
 func (e *Engine) Stats() string {
 	b := &strings.Builder{}
 
@@ -47,7 +47,7 @@ func (e *Engine) Stats() string {
 	return b.String()
 }
 
-// Stats tracks statistics during engine runtime
+// Stats tracks statistics during engine runtime.
 type Stats struct {
 	RunCounter     int64
 	ActionCounter  int64
@@ -61,7 +61,7 @@ type Stats struct {
 	NoOpCount          int64
 }
 
-// Stats returns a string report of the engine's stats
+// Stats returns a string report of the engine's stats.
 func (stats *Stats) Stats() string {
 	b := &strings.Builder{}
 
@@ -93,7 +93,7 @@ func (stats *Stats) Stats() string {
 	return b.String()
 }
 
-// ActionStats tracks runtime statistics for an action
+// ActionStats tracks runtime statistics for an action.
 type ActionStats struct {
 	Count        int64
 	TotalRuntime time.Duration
@@ -102,13 +102,13 @@ type ActionStats struct {
 	ErrorCount   int64
 }
 
-// AverageRuntime returns the average run time for the action
+// AverageRuntime returns the average run time for the action.
 func (s *ActionStats) AverageRuntime() time.Duration {
 	return time.Duration(int64(s.TotalRuntime) / s.Count)
 }
 
 // Record records the current time against the provided start time
-// and updates the stats accordingly
+// and updates the stats accordingly.
 func (s *ActionStats) Record(st time.Time, err error) {
 	thisRuntime := time.Since(st)
 	s.TotalRuntime += thisRuntime

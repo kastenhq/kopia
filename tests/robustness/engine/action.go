@@ -3,7 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"log"
 	"math/rand"
 	"strconv"
@@ -13,7 +13,13 @@ import (
 	"github.com/kopia/kopia/tests/tools/fio"
 )
 
-// ExecAction executes the action denoted by the provided ActionKey
+// Errors associated with action-picking.
+var (
+	ErrNoActionPicked = errors.New("unable to pick an action with the action control options provided")
+	ErrInvalidOption  = errors.New("invalid option setting")
+)
+
+// ExecAction executes the action denoted by the provided ActionKey.
 func (e *Engine) ExecAction(actionKey ActionKey, opts map[string]string) (map[string]string, error) {
 	if opts == nil {
 		opts = make(map[string]string)
@@ -49,7 +55,7 @@ func (e *Engine) ExecAction(actionKey ActionKey, opts map[string]string) (map[st
 
 	// If error was just a no-op, don't bother logging the action
 	switch {
-	case errorIs(err, ErrNoOp):
+	case errors.Is(err, ErrNoOp):
 		e.RunStats.NoOpCount++
 		e.CumulativeStats.NoOpCount++
 
@@ -77,13 +83,13 @@ func (e *Engine) ExecAction(actionKey ActionKey, opts map[string]string) (map[st
 
 // RandomAction executes a random action picked by the relative weights given
 // in actionOpts[ActionControlActionKey], or uniform probability if that
-// key is not present in the input options
+// key is not present in the input options.
 func (e *Engine) RandomAction(actionOpts ActionOpts) error {
 	actionControlOpts := actionOpts.getActionControlOpts()
 
 	actionName := pickActionWeighted(actionControlOpts, actions)
 	if string(actionName) == "" {
-		return fmt.Errorf("unable to pick an action with the action control options provided")
+		return ErrNoActionPicked
 	}
 
 	_, err := e.ExecAction(actionName, actionOpts[actionName])
@@ -94,6 +100,7 @@ func (e *Engine) RandomAction(actionOpts ActionOpts) error {
 
 func (e *Engine) checkErrRecovery(incomingErr error, actionOpts ActionOpts) (outgoingErr error) {
 	outgoingErr = incomingErr
+
 	if incomingErr == nil {
 		return nil
 	}
@@ -123,7 +130,7 @@ func (e *Engine) checkErrRecovery(incomingErr error, actionOpts ActionOpts) (out
 		restoreActionKey := RestoreIntoDataDirectoryActionKey
 		_, outgoingErr = e.ExecAction(restoreActionKey, actionOpts[restoreActionKey])
 
-		if errorIs(outgoingErr, ErrNoOp) {
+		if errors.Is(outgoingErr, ErrNoOp) {
 			outgoingErr = nil
 		} else {
 			e.RunStats.DataRestoreCount++
@@ -139,7 +146,7 @@ func (e *Engine) checkErrRecovery(incomingErr error, actionOpts ActionOpts) (out
 	return outgoingErr
 }
 
-// List of action keys
+// List of action keys.
 const (
 	ActionControlActionKey            ActionKey = "action-control"
 	SnapshotRootDirActionKey          ActionKey = "snapshot-root"
@@ -153,7 +160,7 @@ const (
 )
 
 // ActionOpts is a structure that designates the options for
-// picking and running an action
+// picking and running an action.
 type ActionOpts map[ActionKey]map[string]string
 
 func (actionOpts ActionOpts) getActionControlOpts() map[string]string {
@@ -166,18 +173,17 @@ func (actionOpts ActionOpts) getActionControlOpts() map[string]string {
 }
 
 // Action is a unit of functionality that can be executed by
-// the engine
+// the engine.
 type Action struct {
 	f func(eng *Engine, opts map[string]string, l *LogEntry) (out map[string]string, err error)
 }
 
-// ActionKey refers to an action that can be executed by the engine
+// ActionKey refers to an action that can be executed by the engine.
 type ActionKey string
 
 var actions = map[ActionKey]Action{
 	SnapshotRootDirActionKey: {
 		f: func(e *Engine, opts map[string]string, l *LogEntry) (out map[string]string, err error) {
-
 			log.Printf("Creating snapshot of root directory %s", e.FileWriter.LocalDataDir)
 
 			ctx := context.TODO()
@@ -238,10 +244,9 @@ var actions = map[ActionKey]Action{
 	},
 	WriteRandomFilesActionKey: {
 		f: func(e *Engine, opts map[string]string, l *LogEntry) (out map[string]string, err error) {
-
 			// Directory depth
 			maxDirDepth := getOptAsIntOrDefault(MaxDirDepthField, opts, defaultMaxDirDepth)
-			dirDepth := rand.Intn(maxDirDepth + 1)
+			dirDepth := rand.Intn(maxDirDepth + 1) //nolint:gosec
 
 			// File size range
 			maxFileSizeB := getOptAsIntOrDefault(MaxFileSizeField, opts, defaultMaxFileSize)
@@ -251,7 +256,7 @@ var actions = map[ActionKey]Action{
 			maxNumFiles := getOptAsIntOrDefault(MaxNumFilesPerWriteField, opts, defaultMaxNumFilesPerWrite)
 			minNumFiles := getOptAsIntOrDefault(MinNumFilesPerWriteField, opts, defaultMinNumFilesPerWrite)
 
-			numFiles := rand.Intn(maxNumFiles-minNumFiles+1) + minNumFiles
+			numFiles := rand.Intn(maxNumFiles-minNumFiles+1) + minNumFiles //nolint:gosec
 
 			// Dedup Percentage
 			maxDedupPcnt := getOptAsIntOrDefault(MaxDedupePercentField, opts, defaultMaxDedupePercent)
@@ -259,7 +264,7 @@ var actions = map[ActionKey]Action{
 
 			dedupStep := getOptAsIntOrDefault(DedupePercentStepField, opts, defaultDedupePercentStep)
 
-			dedupPcnt := dedupStep * (rand.Intn(maxDedupPcnt/dedupStep-minDedupPcnt/dedupStep+1) + minDedupPcnt/dedupStep)
+			dedupPcnt := dedupStep * (rand.Intn(maxDedupPcnt/dedupStep-minDedupPcnt/dedupStep+1) + minDedupPcnt/dedupStep) //nolint:gosec
 
 			blockSize := int64(defaultMinFileSize)
 
@@ -312,16 +317,16 @@ var actions = map[ActionKey]Action{
 		f: func(e *Engine, opts map[string]string, l *LogEntry) (out map[string]string, err error) {
 			maxDirDepth := getOptAsIntOrDefault(MaxDirDepthField, opts, defaultMaxDirDepth)
 			if maxDirDepth <= 0 {
-				return nil, fmt.Errorf("invalid option setting: %s=%v", MaxDirDepthField, maxDirDepth)
+				return nil, ErrInvalidOption
 			}
-			dirDepth := rand.Intn(maxDirDepth) + 1
+			dirDepth := rand.Intn(maxDirDepth) + 1 //nolint:gosec
 
 			log.Printf("Deleting directory at depth %v\n", dirDepth)
 
 			setLogEntryCmdOpts(l, map[string]string{"dirDepth": strconv.Itoa(dirDepth)})
 
 			err = e.FileWriter.DeleteDirAtDepth("", dirDepth)
-			if err == fio.ErrNoDirFound {
+			if errors.Is(err, fio.ErrNoDirFound) {
 				log.Print(err)
 				return nil, ErrNoOp
 			}
@@ -332,7 +337,7 @@ var actions = map[ActionKey]Action{
 	DeleteDirectoryContentsActionKey: {
 		f: func(e *Engine, opts map[string]string, l *LogEntry) (out map[string]string, err error) {
 			maxDirDepth := getOptAsIntOrDefault(MaxDirDepthField, opts, defaultMaxDirDepth)
-			dirDepth := rand.Intn(maxDirDepth + 1)
+			dirDepth := rand.Intn(maxDirDepth + 1) //nolint:gosec
 
 			pcnt := getOptAsIntOrDefault(DeletePercentOfContentsField, opts, defaultDeletePercentOfContents)
 
@@ -343,8 +348,9 @@ var actions = map[ActionKey]Action{
 				"percent":  strconv.Itoa(pcnt),
 			})
 
-			err = e.FileWriter.DeleteContentsAtDepth("", dirDepth, float32(pcnt)/100)
-			if err == fio.ErrNoDirFound {
+			const pcntConv = 100
+			err = e.FileWriter.DeleteContentsAtDepth("", dirDepth, float32(pcnt)/pcntConv)
+			if errors.Is(err, fio.ErrNoDirFound) {
 				log.Print(err)
 				return nil, ErrNoOp
 			}
@@ -375,7 +381,7 @@ var actions = map[ActionKey]Action{
 	},
 }
 
-// Action constants
+// Action constants.
 const (
 	defaultMaxDirDepth             = 20
 	defaultMaxFileSize             = 1 * 1024 * 1024 * 1024 // 1GB
@@ -391,7 +397,7 @@ const (
 	defaultActionRepeats           = 1
 )
 
-// Option field names
+// Option field names.
 const (
 	MaxDirDepthField             = "max-dir-depth"
 	MaxFileSizeField             = "max-file-size"
@@ -454,7 +460,7 @@ func pickActionWeighted(actionControlOpts map[string]string, actionList map[Acti
 		}
 
 		sum += weight
-		if rand.Intn(sum) < weight {
+		if rand.Intn(sum) < weight { //nolint:gosec
 			keepKey = actionName
 		}
 	}
@@ -462,12 +468,8 @@ func pickActionWeighted(actionControlOpts map[string]string, actionList map[Acti
 	return keepKey
 }
 
-func errorIs(err, target error) bool {
-	return err == target
-}
-
 func errIsNotEnoughSpace(err error) bool {
-	return err == ErrCannotPerformIO || strings.Contains(err.Error(), noSpaceOnDeviceMatchStr)
+	return errors.Is(err, ErrCannotPerformIO) || strings.Contains(err.Error(), noSpaceOnDeviceMatchStr)
 }
 
 func (e *Engine) getSnapIDOptOrRandLive(opts map[string]string) (snapID string, err error) {
@@ -481,5 +483,5 @@ func (e *Engine) getSnapIDOptOrRandLive(opts map[string]string) (snapID string, 
 		return "", ErrNoOp
 	}
 
-	return snapIDList[rand.Intn(len(snapIDList))], nil
+	return snapIDList[rand.Intn(len(snapIDList))], nil //nolint:gosec
 }

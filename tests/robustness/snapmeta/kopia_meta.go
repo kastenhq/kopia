@@ -108,7 +108,7 @@ func (store *kopiaMetadata) LoadMetadata() error {
 }
 
 // GetPersistDir returns the path to the directory that will be persisted
-// as a snapshot to the kopia repository
+// as a snapshot to the kopia repository.
 func (store *kopiaMetadata) GetPersistDir() string {
 	return store.persistenceDir
 }
@@ -118,6 +118,7 @@ func (store *kopiaMetadata) GetPersistDir() string {
 // as a snapshot create.
 func (store *kopiaMetadata) FlushMetadata() error {
 	metadataPath := filepath.Join(store.persistenceDir, metadataStoreFileName)
+
 	f, err := os.Create(metadataPath)
 	if err != nil {
 		return err
