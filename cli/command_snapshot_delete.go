@@ -40,40 +40,29 @@ func deleteSnapshot(ctx context.Context, rep repo.Repository, m *snapshot.Manife
 	desc := fmt.Sprintf("snapshot %v of %v at %v", m.ID, m.Source, formatTimestamp(m.StartTime))
 
 	if !*snapshotDeleteConfirm {
-		printStderr("Would delete %v (pass --delete to confirm)\n", desc)
+		log(ctx).Infof("Would delete %v (pass --delete to confirm)\n", desc)
 		return nil
 	}
 
-	printStderr("Deleting %v...\n", desc)
+	log(ctx).Infof("Deleting %v...", desc)
 
 	return rep.DeleteManifest(ctx, m.ID)
 }
 
 func deleteSnapshotsByRootObjectID(ctx context.Context, rep repo.Repository, rootID object.ID) error {
-	ids, err := snapshot.ListSnapshotManifests(ctx, rep, nil)
+	manifests, err := snapshot.FindSnapshotsByRootObjectID(ctx, rep, rootID)
 	if err != nil {
-		return errors.Wrap(err, "error listing snapshot manifests")
+		return err
 	}
 
-	manifests, err := snapshot.LoadSnapshots(ctx, rep, ids)
-	if err != nil {
-		return errors.Wrap(err, "error loading snapshot manifests")
+	if len(manifests) == 0 {
+		return errors.Errorf("no snapshots matched %v", rootID)
 	}
-
-	cnt := 0
 
 	for _, m := range manifests {
-		if m.RootObjectID() == rootID {
-			cnt++
-
-			if err := deleteSnapshot(ctx, rep, m); err != nil {
-				return errors.Wrap(err, "error deleting")
-			}
+		if err := deleteSnapshot(ctx, rep, m); err != nil {
+			return errors.Wrap(err, "error deleting")
 		}
-	}
-
-	if cnt == 0 {
-		return errors.Errorf("no snapshots matched %v", rootID)
 	}
 
 	return nil

@@ -127,6 +127,10 @@ func (u *Uploader) uploadFileInternal(ctx context.Context, parentCheckpointRegis
 			return nil, err
 		}
 
+		if checkpointID == "" {
+			return nil, nil
+		}
+
 		return newDirEntry(f, checkpointID)
 	})
 
@@ -337,6 +341,10 @@ func (u *Uploader) checkpointRoot(ctx context.Context, cp *checkpointRegistry, p
 		return errors.Wrap(err, "error saving checkpoint snapshot")
 	}
 
+	if _, err := policy.ApplyRetentionPolicy(ctx, u.repo, man.Source, true); err != nil {
+		return errors.Wrap(err, "unable to apply retention policy")
+	}
+
 	if err := u.repo.Flush(ctx); err != nil {
 		return errors.Wrap(err, "error flushing after checkpoint")
 	}
@@ -471,15 +479,18 @@ func (b *dirManifestBuilder) addEntry(de *snapshot.DirEntry) {
 
 	b.entries = append(b.entries, de)
 
+	if de.ModTime.After(b.summary.MaxModTime) {
+		b.summary.MaxModTime = de.ModTime
+	}
+
 	// nolint:exhaustive
 	switch de.Type {
+	case snapshot.EntryTypeSymlink:
+		b.summary.TotalSymlinkCount++
+
 	case snapshot.EntryTypeFile:
 		b.summary.TotalFileCount++
 		b.summary.TotalFileSize += de.FileSize
-
-		if de.ModTime.After(b.summary.MaxModTime) {
-			b.summary.MaxModTime = de.ModTime
-		}
 
 	case snapshot.EntryTypeDirectory:
 		if childSummary := de.DirSummary; childSummary != nil {
@@ -788,7 +799,7 @@ func uploadDirInternal(
 	thisDirBuilder *dirManifestBuilder,
 	thisCheckpointRegistry *checkpointRegistry,
 ) (*snapshot.DirEntry, error) {
-	u.stats.TotalDirectoryCount++
+	atomic.AddInt32(&u.stats.TotalDirectoryCount, 1)
 
 	u.Progress.StartedDirectory(dirRelativePath)
 	defer u.Progress.FinishedDirectory(dirRelativePath)
@@ -848,7 +859,7 @@ func uploadDirInternal(
 func (u *Uploader) writeDirManifest(ctx context.Context, dirRelativePath string, dirManifest *snapshot.DirManifest) (object.ID, error) {
 	writer := u.repo.NewObjectWriter(ctx, object.WriterOptions{
 		Description: "DIR:" + dirRelativePath,
-		Prefix:      "k",
+		Prefix:      objectIDPrefixDirectory,
 	})
 
 	defer writer.Close() //nolint:errcheck
@@ -959,7 +970,10 @@ func (u *Uploader) Upload(
 
 	s.StartTime = u.repo.Time()
 
+	var scanWG sync.WaitGroup
+
 	scanctx, cancelScan := context.WithCancel(ctx)
+
 	defer cancelScan()
 
 	switch entry := source.(type) {
@@ -976,7 +990,11 @@ func (u *Uploader) Upload(
 			u.stats.AddExcluded(md)
 		}))
 
+		scanWG.Add(1)
+
 		go func() {
+			defer scanWG.Done()
+
 			ds, _ := u.scanDirectory(scanctx, entry)
 
 			u.Progress.EstimatedDataSize(ds.numFiles, ds.totalFileSize)
@@ -995,6 +1013,9 @@ func (u *Uploader) Upload(
 	if err != nil {
 		return nil, err
 	}
+
+	cancelScan()
+	scanWG.Wait()
 
 	s.IncompleteReason = u.incompleteReason()
 	s.EndTime = u.repo.Time()

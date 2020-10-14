@@ -1,5 +1,4 @@
 COVERAGE_PACKAGES=github.com/kopia/kopia/repo/...,github.com/kopia/kopia/fs/...,github.com/kopia/kopia/snapshot/...
-GO_TEST=go test
 TEST_FLAGS?=
 KOPIA_INTEGRATION_EXE=$(CURDIR)/dist/integration/kopia.exe
 FIO_DOCKER_TAG=ljishen/fio
@@ -15,6 +14,9 @@ retry=$(CURDIR)/tools/retry.sh
 endif
 
 include tools/tools.mk
+
+GOTESTSUM_FORMAT=pkgname-and-test-fails
+GO_TEST=$(gotestsum) --format=$(GOTESTSUM_FORMAT) --no-summary=skipped --
 
 LINTER_DEADLINE=300s
 UNIT_TESTS_TIMEOUT=300s
@@ -60,7 +62,7 @@ vet-time-inject:
 ifneq ($(TRAVIS_OS_NAME),windows)
 	! find . -name '*.go' \
 	-exec grep -n -e time.Now -e time.Since -e time.Until {} + \
-	| grep -v -e allow:no-inject-time
+	grep -v src/golang.org | grep -v -e allow:no-inject-time
 endif
 
 vet: vet-time-inject
@@ -181,52 +183,40 @@ dev-deps:
 	GO111MODULE=off go get -u github.com/sqs/goreturns
 
 test-with-coverage:
-	$(GO_TEST) -count=1 -coverprofile=tmp.cov --coverpkg $(COVERAGE_PACKAGES) -timeout 90s $(shell go list ./...)
+	$(GO_TEST) -count=1 -coverprofile=tmp.cov --coverpkg $(COVERAGE_PACKAGES) -timeout 300s $(shell go list ./...)
 
 test-with-coverage-pkgonly:
-	$(GO_TEST) -count=1 -coverprofile=tmp.cov -timeout 90s github.com/kopia/kopia/...
+	$(GO_TEST) -count=1 -coverprofile=tmp.cov -timeout 300s github.com/kopia/kopia/...
 
-test:
+test: $(gotestsum)
 	$(GO_TEST) -count=1 -timeout $(UNIT_TESTS_TIMEOUT) ./...
 
-vtest:
+vtest: $(gotestsum)
 	$(GO_TEST) -count=1 -short -v -timeout $(UNIT_TESTS_TIMEOUT) ./...
 
-dist-binary:
+build-integration-test-binary:
 	go build -o $(KOPIA_INTEGRATION_EXE) -tags testing github.com/kopia/kopia
 
 integration-tests: export KOPIA_EXE ?= $(KOPIA_INTEGRATION_EXE)
-integration-tests: dist-binary
+integration-tests: build-integration-test-binary $(gotestsum)
 	 $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 3600s github.com/kopia/kopia/tests/end_to_end_test
 
 endurance-tests: export KOPIA_EXE ?= $(KOPIA_INTEGRATION_EXE)
-endurance-tests: dist-binary
+endurance-tests: build-integration-test-binary $(gotestsum)
 	 $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 3600s github.com/kopia/kopia/tests/endurance_test
 
-ifeq ($(KOPIA_EXE),)
-
-# If KOPIA_EXE was NOT provided, build kopia from this repo and run robustness
-# tests and utils using the built binary
-robustness-tests: dist-binary
-	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
-	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) \
-	$(GO_TEST) -count=1 github.com/kopia/kopia/tests/robustness/robustness_test $(TEST_FLAGS)
-
-else 
-
-# If KOPIA_EXE was provided, run the robustness tests and utils against that binary
-robustness-tests:
+robustness_tests: export KOPIA_EXE ?= $(KOPIA_INTEGRATION_EXE)
+robustness-tests: build-integration-test-binary $(gotestsum)
 	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
 	$(GO_TEST) -count=1 github.com/kopia/kopia/tests/robustness/robustness_test $(TEST_FLAGS)
 
-endif
-
-robustness-tool-tests: dist-binary
+robustness-tool-tests: export KOPIA_EXE ?= $(KOPIA_INTEGRATION_EXE)
+robustness-tool-tests: build-integration-test-binary $(gotestsum)
 	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) \
 	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
 	$(GO_TEST) -count=1 github.com/kopia/kopia/tests/tools/... github.com/kopia/kopia/tests/robustness/engine/... $(TEST_FLAGS)
 
-stress-test:
+stress-test: $(gotestsum)
 	KOPIA_LONG_STRESS_TEST=1 $(GO_TEST) -count=1 -timeout 200s github.com/kopia/kopia/tests/stress_test
 	$(GO_TEST) -count=1 -timeout 200s github.com/kopia/kopia/tests/repository_stress_test
 
@@ -297,7 +287,7 @@ endif
 
 ifneq ($(TRAVIS_TAG),)
 
-travis-create-long-term-repository: dist-binary travis-install-cloud-sdk
+travis-create-long-term-repository: build-integration-test-binary travis-install-cloud-sdk
 	echo Creating long-term repository $(TRAVIS_TAG)...
 	KOPIA_EXE=$(KOPIA_INTEGRATION_EXE) ./tests/compat_test/gen-compat-repo.sh
 

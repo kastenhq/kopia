@@ -131,7 +131,7 @@ func translateError(err error) error {
 			return blob.ErrBlobNotFound
 		}
 
-		if b2err.Status == http.StatusBadRequest && b2err.Code == "already_hidden" {
+		if b2err.Status == http.StatusBadRequest && (b2err.Code == "already_hidden" || b2err.Code == "no_such_file") {
 			// Special case when hiding a file that is already hidden. It's basically
 			// not found.
 			return blob.ErrBlobNotFound
@@ -165,21 +165,29 @@ func isRetriableError(err error) bool {
 }
 
 func (s *b2Storage) PutBlob(ctx context.Context, id blob.ID, data blob.Bytes) error {
-	throttled, err := s.uploadThrottler.AddReader(ioutil.NopCloser(data.Reader()))
-	if err != nil {
-		return err
-	}
-
 	progressCallback := blob.ProgressCallback(ctx)
 	if progressCallback != nil {
 		progressCallback(string(id), 0, int64(data.Length()))
 		defer progressCallback(string(id), int64(data.Length()), int64(data.Length()))
 	}
 
-	fileName := s.getObjectNameString(id)
-	_, err = s.bucket.UploadFile(fileName, nil, throttled)
+	attempt := func() (interface{}, error) {
+		throttled, err := s.uploadThrottler.AddReader(ioutil.NopCloser(data.Reader()))
+		if err != nil {
+			return nil, err
+		}
 
-	return translateError(err)
+		fileName := s.getObjectNameString(id)
+		_, err = s.bucket.UploadFile(fileName, nil, throttled)
+
+		return nil, err
+	}
+
+	if _, err := exponentialBackoff(ctx, fmt.Sprintf("PutBlob(%q)", id), attempt); err != nil {
+		return translateError(err)
+	}
+
+	return nil
 }
 
 func (s *b2Storage) SetTime(ctx context.Context, b blob.ID, t time.Time) error {
@@ -187,16 +195,20 @@ func (s *b2Storage) SetTime(ctx context.Context, b blob.ID, t time.Time) error {
 }
 
 func (s *b2Storage) DeleteBlob(ctx context.Context, id blob.ID) error {
-	fileName := s.getObjectNameString(id)
-	_, err := s.bucket.HideFile(fileName)
-	err = translateError(err)
-
-	if errors.Is(err, blob.ErrBlobNotFound) {
-		// Deleting failed because it already is deleted? Fine.
-		return nil
+	attempt := func() (interface{}, error) {
+		fileName := s.getObjectNameString(id)
+		return s.bucket.HideFile(fileName)
 	}
 
-	return err
+	if _, err := exponentialBackoff(ctx, fmt.Sprintf("DeleteBlob(%q)", id), attempt); err != nil {
+		err = translateError(err)
+		if errors.Is(err, blob.ErrBlobNotFound) {
+			// Deleting failed because it already is deleted? Fine.
+			return nil
+		}
+	}
+
+	return nil
 }
 
 func (s *b2Storage) getObjectNameString(id blob.ID) string {

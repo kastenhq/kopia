@@ -41,6 +41,8 @@ type CLITest struct {
 	fixedArgs   []string
 	Environment []string
 
+	DefaultRepositoryCreateFlags []string
+
 	PassthroughStderr bool
 
 	LogsDir string
@@ -70,7 +72,22 @@ func NewCLITest(t *testing.T) *CLITest {
 	}
 
 	configDir := t.TempDir()
-	logsDir := t.TempDir()
+
+	cleanName := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(
+		t.Name(),
+		"/", "_"), "\\", "_"), ":", "_")
+
+	logsDir := filepath.Join(os.TempDir(), "kopia-logs", cleanName+"."+clock.Now().Local().Format("20060102150405"))
+
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("logs are available in %v", logsDir)
+			return
+		}
+
+		os.RemoveAll(logsDir)
+	})
+
 	fixedArgs := []string{
 		// use per-test config file, to avoid clobbering current user's setup.
 		"--config-file", filepath.Join(configDir, ".kopia.config"),
@@ -87,13 +104,24 @@ func NewCLITest(t *testing.T) *CLITest {
 		fixedArgs = append(fixedArgs, "--no-use-keyring")
 	}
 
+	var formatFlags []string
+
+	switch runtime.GOARCH {
+	case "arm64", "arm":
+		formatFlags = []string{
+			"--encryption", "CHACHA20-POLY1305-HMAC-SHA256",
+			"--block-hash", "BLAKE2S-256",
+		}
+	}
+
 	return &CLITest{
-		startTime: clock.Now(),
-		RepoDir:   t.TempDir(),
-		ConfigDir: configDir,
-		Exe:       filepath.FromSlash(exe),
-		fixedArgs: fixedArgs,
-		LogsDir:   logsDir,
+		startTime:                    clock.Now(),
+		RepoDir:                      t.TempDir(),
+		ConfigDir:                    configDir,
+		Exe:                          filepath.FromSlash(exe),
+		fixedArgs:                    fixedArgs,
+		DefaultRepositoryCreateFlags: formatFlags,
+		LogsDir:                      logsDir,
 		Environment: []string{
 			"KOPIA_PASSWORD=" + TestRepoPassword,
 			"KOPIA_ADVANCED_COMMANDS=enabled",
@@ -105,7 +133,7 @@ func NewCLITest(t *testing.T) *CLITest {
 func (e *CLITest) RunAndExpectSuccess(t *testing.T, args ...string) []string {
 	t.Helper()
 
-	stdout, _, err := e.Run(t, args...)
+	stdout, _, err := e.Run(t, false, args...)
 	if err != nil {
 		t.Fatalf("'kopia %v' failed with %v", strings.Join(args, " "), err)
 	}
@@ -117,11 +145,9 @@ func (e *CLITest) RunAndExpectSuccess(t *testing.T, args ...string) []string {
 func (e *CLITest) RunAndProcessStderr(t *testing.T, callback func(line string) bool, args ...string) *exec.Cmd {
 	t.Helper()
 
-	t.Logf("running 'kopia %v'", strings.Join(args, " "))
-	cmdArgs := append(append([]string(nil), e.fixedArgs...), args...)
-
-	c := exec.Command(e.Exe, cmdArgs...)
+	c := exec.Command(e.Exe, e.cmdArgs(args)...)
 	c.Env = append(os.Environ(), e.Environment...)
+	t.Logf("running '%v %v'", c.Path, c.Args)
 
 	stderrPipe, err := c.StderrPipe()
 	if err != nil {
@@ -152,7 +178,7 @@ func (e *CLITest) RunAndProcessStderr(t *testing.T, callback func(line string) b
 func (e *CLITest) RunAndExpectSuccessWithErrOut(t *testing.T, args ...string) (stdout, stderr []string) {
 	t.Helper()
 
-	stdout, stderr, err := e.Run(t, args...)
+	stdout, stderr, err := e.Run(t, false, args...)
 	if err != nil {
 		t.Fatalf("'kopia %v' failed with %v", strings.Join(args, " "), err)
 	}
@@ -164,7 +190,7 @@ func (e *CLITest) RunAndExpectSuccessWithErrOut(t *testing.T, args ...string) (s
 func (e *CLITest) RunAndExpectFailure(t *testing.T, args ...string) []string {
 	t.Helper()
 
-	stdout, _, err := e.Run(t, args...)
+	stdout, _, err := e.Run(t, true, args...)
 	if err == nil {
 		t.Fatalf("'kopia %v' succeeded, but expected failure", strings.Join(args, " "))
 	}
@@ -184,14 +210,26 @@ func (e *CLITest) RunAndVerifyOutputLineCount(t *testing.T, wantLines int, args 
 	return lines
 }
 
-// Run executes kopia with given arguments and returns the output lines.
-func (e *CLITest) Run(t *testing.T, args ...string) (stdout, stderr []string, err error) {
-	t.Helper()
-	t.Logf("running '%v %v'", e.Exe, strings.Join(args, " "))
-	cmdArgs := append(append([]string(nil), e.fixedArgs...), args...)
+func (e *CLITest) cmdArgs(args []string) []string {
+	var suffix []string
 
-	c := exec.Command(e.Exe, cmdArgs...)
+	// detect repository creation and override DefaultRepositoryCreateFlags for best
+	// performance on the current platform.
+	if len(args) >= 2 && (args[0] == "repo" && args[1] == "create") {
+		suffix = e.DefaultRepositoryCreateFlags
+	}
+
+	return append(append(append([]string(nil), e.fixedArgs...), args...), suffix...)
+}
+
+// Run executes kopia with given arguments and returns the output lines.
+func (e *CLITest) Run(t *testing.T, expectedError bool, args ...string) (stdout, stderr []string, err error) {
+	t.Helper()
+
+	c := exec.Command(e.Exe, e.cmdArgs(args)...)
 	c.Env = append(os.Environ(), e.Environment...)
+
+	t.Logf("running '%v %v'", c.Path, c.Args)
 
 	errOut := &bytes.Buffer{}
 	c.Stderr = errOut
@@ -202,7 +240,9 @@ func (e *CLITest) Run(t *testing.T, args ...string) (stdout, stderr []string, er
 
 	o, err := c.Output()
 
-	t.Logf("finished 'kopia %v' with err=%v and output:\n%v\nstderr:\n%v\n", strings.Join(args, " "), err, trimOutput(string(o)), trimOutput(errOut.String()))
+	if err != nil && !expectedError {
+		t.Logf("finished 'kopia %v' with err=%v (expected=%v) and output:\n%v\nstderr:\n%v\n", strings.Join(args, " "), err, expectedError, trimOutput(string(o)), trimOutput(errOut.String()))
+	}
 
 	return splitLines(string(o)), splitLines(errOut.String()), err
 }
@@ -280,7 +320,7 @@ func MustCreateDirectoryTree(t *testing.T, dirname string, options DirectoryTree
 
 	var counters DirectoryTreeCounters
 	if err := createDirectoryTreeInternal(dirname, options, &counters); err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	t.Logf("created directory tree %#v", counters)
@@ -299,7 +339,7 @@ func CreateDirectoryTree(dirname string, options DirectoryTreeOptions, counters 
 // It will fail with a test error if the creation does not succeed.
 func MustCreateRandomFile(t *testing.T, filePath string, options DirectoryTreeOptions, counters *DirectoryTreeCounters) {
 	if err := CreateRandomFile(filePath, options, counters); err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 }
 

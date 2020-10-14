@@ -43,7 +43,11 @@ type Directory interface {
 	Entry
 	Child(ctx context.Context, name string) (Entry, error)
 	Readdir(ctx context.Context) (Entries, error)
-	Summary() *DirectorySummary
+}
+
+// DirectoryWithSummary is optionally implemented by Directory that provide summary.
+type DirectoryWithSummary interface {
+	Summary(ctx context.Context) (*DirectorySummary, error)
 }
 
 // ErrEntryNotFound is returned when an entry is not found.
@@ -76,11 +80,12 @@ type EntryWithError struct {
 
 // DirectorySummary represents summary information about a directory.
 type DirectorySummary struct {
-	TotalFileSize    int64     `json:"size"`
-	TotalFileCount   int64     `json:"files"`
-	TotalDirCount    int64     `json:"dirs"`
-	MaxModTime       time.Time `json:"maxTime"`
-	IncompleteReason string    `json:"incomplete,omitempty"`
+	TotalFileSize     int64     `json:"size"`
+	TotalFileCount    int64     `json:"files"`
+	TotalSymlinkCount int64     `json:"symlinks"`
+	TotalDirCount     int64     `json:"dirs"`
+	MaxModTime        time.Time `json:"maxTime"`
+	IncompleteReason  string    `json:"incomplete,omitempty"`
 
 	// number of failed files
 	NumFailed int `json:"numFailed"`

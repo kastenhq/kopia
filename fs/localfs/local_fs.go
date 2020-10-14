@@ -102,14 +102,10 @@ func (fsd *filesystemDirectory) Size() int64 {
 	return 0
 }
 
-func (fsd *filesystemDirectory) Summary() *fs.DirectorySummary {
-	return nil
-}
-
 func (fsd *filesystemDirectory) Child(ctx context.Context, name string) (fs.Entry, error) {
 	fullPath := fsd.fullPath()
 
-	st, err := os.Stat(filepath.Join(fullPath, name))
+	st, err := os.Lstat(filepath.Join(fullPath, name))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fs.ErrEntryNotFound

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/kopia/kopia/fs"
@@ -14,14 +15,15 @@ import (
 var (
 	lsCommand = app.Command("list", "List a directory stored in repository object.").Alias("ls")
 
-	lsCommandLong      = lsCommand.Flag("long", "Long output").Short('l').Bool()
-	lsCommandRecursive = lsCommand.Flag("recursive", "Recursive output").Short('r').Bool()
-	lsCommandShowOID   = lsCommand.Flag("show-object-id", "Show object IDs").Short('o').Bool()
-	lsCommandPath      = lsCommand.Arg("object-path", "Path").Required().String()
+	lsCommandLong         = lsCommand.Flag("long", "Long output").Short('l').Bool()
+	lsCommandRecursive    = lsCommand.Flag("recursive", "Recursive output").Short('r').Bool()
+	lsCommandShowOID      = lsCommand.Flag("show-object-id", "Show object IDs").Short('o').Bool()
+	lsCommandErrorSummary = lsCommand.Flag("error-summary", "Emit error summary").Default("true").Bool()
+	lsCommandPath         = lsCommand.Arg("object-path", "Path").Required().String()
 )
 
 func runLSCommand(ctx context.Context, rep repo.Repository) error {
-	oid, err := parseObjectID(ctx, rep, *lsCommandPath)
+	dir, err := snapshotfs.FilesystemDirectoryFromIDWithPath(ctx, rep, *lsCommandPath, false)
 	if err != nil {
 		return err
 	}
@@ -34,60 +36,78 @@ func runLSCommand(ctx context.Context, rep repo.Repository) error {
 		}
 	}
 
-	return listDirectory(ctx, rep, prefix, oid, "")
+	return listDirectory(ctx, dir, prefix, "")
 }
 
 func init() {
 	lsCommand.Action(repositoryAction(runLSCommand))
 }
 
-func listDirectory(ctx context.Context, rep repo.Repository, prefix string, oid object.ID, indent string) error {
-	d := snapshotfs.DirectoryEntry(rep, oid, nil)
-
+func listDirectory(ctx context.Context, d fs.Directory, prefix, indent string) error {
 	entries, err := d.Readdir(ctx)
 	if err != nil {
 		return err
 	}
 
 	for _, e := range entries {
-		objectID := e.(object.HasObjectID).ObjectID()
-		oid := objectID.String()
-		col := defaultColor
+		if err := printDirectoryEntry(ctx, e, prefix, indent); err != nil {
+			return err
+		}
+	}
 
-		var (
-			errorSummary string
-			info         string
-		)
+	if dws, ok := d.(fs.DirectoryWithSummary); ok && *lsCommandErrorSummary {
+		if ds, _ := dws.Summary(ctx); ds != nil && ds.NumFailed > 0 {
+			errorColor.Fprintf(os.Stderr, "\nNOTE: Encountered %v errors while snapshotting this directory:\n\n", ds.NumFailed) //nolint:errcheck
 
-		if dir, ok := e.(fs.Directory); ok {
-			if ds := dir.Summary(); ds != nil && ds.NumFailed > 0 {
-				errorSummary = fmt.Sprintf(" (%v errors)", ds.NumFailed)
-				col = errorColor
+			for _, e := range ds.FailedEntries {
+				errorColor.Fprintf(os.Stderr, "- Error in \"%v\": %v\n", e.EntryPath, e.Error) //nolint:errcheck
 			}
 		}
+	}
 
-		switch {
-		case *lsCommandLong:
-			info = fmt.Sprintf(
-				"%v %12d %v %-34v %v%v",
-				e.Mode(),
-				e.Size(),
-				formatTimestamp(e.ModTime().Local()),
-				oid,
-				nameToDisplay(prefix, e),
-				errorSummary,
-			)
-		case *lsCommandShowOID:
-			info = fmt.Sprintf("%-34v %v%v", oid, nameToDisplay(prefix, e), errorSummary)
+	return nil
+}
 
-		default:
-			info = fmt.Sprintf("%v%v", nameToDisplay(prefix, e), errorSummary)
+func printDirectoryEntry(ctx context.Context, e fs.Entry, prefix, indent string) error {
+	objectID := e.(object.HasObjectID).ObjectID()
+	oid := objectID.String()
+	col := defaultColor
+
+	var (
+		errorSummary string
+		info         string
+	)
+
+	if dws, ok := e.(fs.DirectoryWithSummary); ok && *lsCommandErrorSummary {
+		if ds, _ := dws.Summary(ctx); ds != nil && ds.NumFailed > 0 {
+			errorSummary = fmt.Sprintf(" (%v errors)", ds.NumFailed)
+			col = errorColor
 		}
+	}
 
-		col.Println(info) //nolint:errcheck
+	switch {
+	case *lsCommandLong:
+		info = fmt.Sprintf(
+			"%v %12d %v %-34v %v%v",
+			e.Mode(),
+			e.Size(),
+			formatTimestamp(e.ModTime().Local()),
+			oid,
+			nameToDisplay(prefix, e),
+			errorSummary,
+		)
+	case *lsCommandShowOID:
+		info = fmt.Sprintf("%-34v %v%v", oid, nameToDisplay(prefix, e), errorSummary)
 
-		if *lsCommandRecursive && e.Mode().IsDir() {
-			if listerr := listDirectory(ctx, rep, prefix+e.Name()+"/", objectID, indent+"  "); listerr != nil {
+	default:
+		info = fmt.Sprintf("%v%v", nameToDisplay(prefix, e), errorSummary)
+	}
+
+	col.Println(info) //nolint:errcheck
+
+	if *lsCommandRecursive {
+		if subdir, ok := e.(fs.Directory); ok {
+			if listerr := listDirectory(ctx, subdir, prefix+e.Name()+"/", indent+"  "); listerr != nil {
 				return listerr
 			}
 		}

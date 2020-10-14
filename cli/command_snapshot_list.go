@@ -32,7 +32,7 @@ var (
 	shapshotListShowOwner            = snapshotListCommand.Flag("owner", "Include owner").Bool()
 	snapshotListShowIdentical        = snapshotListCommand.Flag("show-identical", "Show identical snapshots").Short('l').Bool()
 	snapshotListShowAll              = snapshotListCommand.Flag("all", "Show all shapshots (not just current username/host)").Short('a').Bool()
-	maxResultsPerPath                = snapshotListCommand.Flag("max-results", "Maximum number of entries per source.").Default("100").Short('n').Int()
+	maxResultsPerPath                = snapshotListCommand.Flag("max-results", "Maximum number of entries per source.").Short('n').Int()
 )
 
 func findSnapshotsForSource(ctx context.Context, rep repo.Repository, sourceInfo snapshot.SourceInfo) (manifestIDs []manifest.ID, relPath string, err error) {
@@ -142,7 +142,7 @@ func outputManifestGroups(ctx context.Context, rep repo.Repository, manifests []
 	}
 
 	if !anyOutput && !*snapshotListShowAll && len(manifests) > 0 {
-		printStderr("No snapshots found. Pass --all to show snapshots from all users/hosts.\n")
+		log(ctx).Infof("No snapshots found. Pass --all to show snapshots from all users/hosts.\n")
 	}
 
 	return nil
@@ -158,7 +158,7 @@ func outputManifestFromSingleSource(ctx context.Context, rep repo.Repository, ma
 	)
 
 	manifests = snapshot.SortByTime(manifests, false)
-	if len(manifests) > *maxResultsPerPath {
+	if *maxResultsPerPath > 0 && len(manifests) > *maxResultsPerPath {
 		manifests = manifests[len(manifests)-*maxResultsPerPath:]
 	}
 
@@ -179,7 +179,7 @@ func outputManifestFromSingleSource(ctx context.Context, rep repo.Repository, ma
 			continue
 		}
 
-		ent, err := getNestedEntry(ctx, root, parts)
+		ent, err := snapshotfs.GetNestedEntry(ctx, root, parts)
 		if err != nil {
 			fmt.Printf("  %v <ERROR> %v\n", formatTimestamp(m.StartTime), err)
 			continue
@@ -194,7 +194,7 @@ func outputManifestFromSingleSource(ctx context.Context, rep repo.Repository, ma
 			continue
 		}
 
-		bits, col := entryBits(m, ent, lastTotalFileSize)
+		bits, col := entryBits(ctx, m, ent, lastTotalFileSize)
 
 		oid := ent.(object.HasObjectID).ObjectID()
 		if !*snapshotListShowIdentical && oid == previousOID {
@@ -224,7 +224,7 @@ func outputManifestFromSingleSource(ctx context.Context, rep repo.Repository, ma
 	return nil
 }
 
-func entryBits(m *snapshot.Manifest, ent fs.Entry, lastTotalFileSize int64) (bits []string, col *color.Color) {
+func entryBits(ctx context.Context, m *snapshot.Manifest, ent fs.Entry, lastTotalFileSize int64) (bits []string, col *color.Color) {
 	col = color.New() // default color
 
 	if m.IncompleteReason != "" {
@@ -252,9 +252,8 @@ func entryBits(m *snapshot.Manifest, ent fs.Entry, lastTotalFileSize int64) (bit
 		bits = append(bits, deltaBytes(ent.Size()-lastTotalFileSize))
 	}
 
-	if d, ok := ent.(fs.Directory); ok {
-		s := d.Summary()
-		if s != nil {
+	if dws, ok := ent.(fs.DirectoryWithSummary); ok {
+		if s, _ := dws.Summary(ctx); s != nil {
 			bits = append(bits,
 				fmt.Sprintf("files:%v", s.TotalFileCount),
 				fmt.Sprintf("dirs:%v", s.TotalDirCount))
