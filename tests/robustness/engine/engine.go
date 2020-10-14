@@ -140,7 +140,7 @@ func (e *Engine) Cleanup() error {
 
 	cleanupSummaryBuilder := new(strings.Builder)
 	cleanupSummaryBuilder.WriteString("\n================\n")
-	cleanupSummaryBuilder.WriteString("CleanupSummary:\n\n")
+	cleanupSummaryBuilder.WriteString("Cleanup Summary:\n\n")
 	cleanupSummaryBuilder.WriteString(e.Stats())
 	cleanupSummaryBuilder.WriteString("\n\n")
 	cleanupSummaryBuilder.WriteString(e.EngineLog.StringThisRun())
