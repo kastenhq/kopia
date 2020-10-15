@@ -195,7 +195,9 @@ func (e *Engine) formatLogName() string {
 // CleanComponents cleans up each component part of the test engine.
 func (e *Engine) CleanComponents() {
 	for _, f := range e.cleanupRoutines {
-		f()
+		if f != nil {
+			f()
+		}
 	}
 
 	os.RemoveAll(e.baseDirPath) //nolint:errcheck

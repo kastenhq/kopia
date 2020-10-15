@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"path"
 	"testing"
@@ -74,7 +75,8 @@ func TestMain(m *testing.M) {
 
 	err = eng.Cleanup()
 	if err != nil {
-		panic(err)
+		log.Printf("error cleaning up the engine: %s\n", err.Error())
+		os.Exit(2)
 	}
 
 	os.Exit(result)
