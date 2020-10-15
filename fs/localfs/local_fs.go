@@ -102,14 +102,10 @@ func (fsd *filesystemDirectory) Size() int64 {
 	return 0
 }
 
-func (fsd *filesystemDirectory) Summary() *fs.DirectorySummary {
-	return nil
-}
-
 func (fsd *filesystemDirectory) Child(ctx context.Context, name string) (fs.Entry, error) {
 	fullPath := fsd.fullPath()
 
-	st, err := os.Stat(filepath.Join(fullPath, name))
+	st, err := os.Lstat(filepath.Join(fullPath, name))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fs.ErrEntryNotFound
@@ -133,7 +129,7 @@ func (fsd *filesystemDirectory) Readdir(ctx context.Context) (fs.Entries, error)
 	if direrr != nil {
 		return nil, direrr
 	}
-	defer f.Close() //nolint:errcheck
+	defer f.Close() //nolint:errcheck,gosec
 
 	// start feeding directory entry names to namesCh
 	namesCh := make(chan string, dirListingPrefetch)
@@ -304,6 +300,8 @@ func entryFromChildFileInfo(fi os.FileInfo, parentDir string) (fs.Entry, error) 
 	}
 }
 
-var _ fs.Directory = &filesystemDirectory{}
-var _ fs.File = &filesystemFile{}
-var _ fs.Symlink = &filesystemSymlink{}
+var (
+	_ fs.Directory = &filesystemDirectory{}
+	_ fs.File      = &filesystemFile{}
+	_ fs.Symlink   = &filesystemSymlink{}
+)

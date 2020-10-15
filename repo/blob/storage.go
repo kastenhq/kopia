@@ -2,13 +2,16 @@ package blob
 
 import (
 	"context"
+	"encoding/json"
 	"io"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/pkg/errors"
 )
+
+// ErrSetTimeUnsupported is returned by implementations of Storage that don't support SetTime.
+var ErrSetTimeUnsupported = errors.Errorf("SetTime is not supported")
 
 // Bytes encapsulates a sequence of bytes, possibly stored in a non-contiguous buffers,
 // which can be written sequentially or treated as a io.Reader.
@@ -35,6 +38,9 @@ type Storage interface {
 	// id with contents gathered from the specified list of slices.
 	PutBlob(ctx context.Context, blobID ID, data Bytes) error
 
+	// SetTime changes last modification time of a given blob, if supported, returns ErrSetTimeUnsupported otherwise.
+	SetTime(ctx context.Context, blobID ID, t time.Time) error
+
 	// DeleteBlob removes the blob from storage. Future Get() operations will fail with ErrNotFound.
 	DeleteBlob(ctx context.Context, blobID ID) error
 
@@ -42,6 +48,9 @@ type Storage interface {
 	// If length>0, the the function retrieves a range of bytes [offset,offset+length)
 	// If length<0, the entire blob must be fetched.
 	GetBlob(ctx context.Context, blobID ID, offset, length int64) ([]byte, error)
+
+	// GetMetadata returns Metadata about single blob.
+	GetMetadata(ctx context.Context, blobID ID) (Metadata, error)
 
 	// ListBlobs invokes the provided callback for each blob in the storage.
 	// Iteration continues until the callback returns an error or until all matching blobs have been reported.
@@ -53,6 +62,9 @@ type Storage interface {
 
 	// Close releases all resources associated with storage.
 	Close(ctx context.Context) error
+
+	// Name of the storage used for quick identification by humans.
+	DisplayName() string
 }
 
 // ID is a string that represents blob identifier.
@@ -60,9 +72,14 @@ type ID string
 
 // Metadata represents metadata about a single BLOB in a storage.
 type Metadata struct {
-	BlobID    ID
-	Length    int64
-	Timestamp time.Time
+	BlobID    ID        `json:"id"`
+	Length    int64     `json:"length"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+func (m *Metadata) String() string {
+	b, _ := json.Marshal(m)
+	return string(b)
 }
 
 // ErrBlobNotFound is returned when a BLOB cannot be found in storage.
@@ -120,58 +137,4 @@ func IterateAllPrefixesInParallel(ctx context.Context, parallelism int, st Stora
 
 	// return first error or nil
 	return <-errch
-}
-
-// ListAllBlobsConsistent lists all blobs with given name prefix in the provided storage until the results are
-// consistent. The results are consistent if the list result fetched twice is identical. This guarantees that while
-// the first scan was in progress, no new blob was added or removed.
-// maxAttempts specifies maximum number of list attempts (must be >= 2)
-func ListAllBlobsConsistent(ctx context.Context, st Storage, prefix ID, maxAttempts int) ([]Metadata, error) {
-	var previous []Metadata
-
-	for i := 0; i < maxAttempts; i++ {
-		result, err := ListAllBlobs(ctx, st, prefix)
-		if err != nil {
-			return nil, err
-		}
-
-		if i > 0 && sameBlobs(result, previous) {
-			return result, nil
-		}
-
-		previous = result
-	}
-
-	return nil, errors.Errorf("unable to achieve consistent snapshot despite %v attempts", maxAttempts)
-}
-
-// sameBlobs returns true if b1 & b2 contain the same blobs (ignoring order).
-func sameBlobs(b1, b2 []Metadata) bool {
-	if len(b1) != len(b2) {
-		log.Printf("a")
-
-		return false
-	}
-
-	m := map[ID]Metadata{}
-
-	for _, b := range b1 {
-		m[b.BlobID] = normalizeMetadata(b)
-	}
-
-	for _, b := range b2 {
-		if r := m[b.BlobID]; r != normalizeMetadata(b) {
-			return false
-		}
-	}
-
-	return true
-}
-
-func normalizeMetadata(m Metadata) Metadata {
-	return Metadata{m.BlobID, m.Length, normalizeTimestamp(m.Timestamp)}
-}
-
-func normalizeTimestamp(t time.Time) time.Time {
-	return time.Unix(0, t.UnixNano())
 }

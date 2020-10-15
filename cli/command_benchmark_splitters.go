@@ -1,13 +1,14 @@
 package cli
 
 import (
+	"context"
 	"math/rand"
 	"sort"
 	"time"
 
+	"github.com/kopia/kopia/internal/clock"
+	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/splitter"
-
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
@@ -17,7 +18,7 @@ var (
 	benchmarkSplitterBlockCount = benchmarkSplitterCommand.Flag("block-count", "Number of data blocks to split").Default("16").Int()
 )
 
-func runBenchmarkSplitterAction(ctx *kingpin.ParseContext) error {
+func runBenchmarkSplitterAction(ctx context.Context, rep repo.Repository) error {
 	type benchResult struct {
 		splitter     string
 		duration     time.Duration
@@ -36,7 +37,7 @@ func runBenchmarkSplitterAction(ctx *kingpin.ParseContext) error {
 	// generate data blocks
 	var dataBlocks [][]byte
 
-	rnd := rand.New(rand.NewSource(*benchmarkSplitterRandSeed))
+	rnd := rand.New(rand.NewSource(*benchmarkSplitterRandSeed)) //nolint:gosec
 
 	for i := 0; i < *benchmarkSplitterBlockCount; i++ {
 		b := make([]byte, *benchmarkSplitterBlockSize)
@@ -47,34 +48,32 @@ func runBenchmarkSplitterAction(ctx *kingpin.ParseContext) error {
 		dataBlocks = append(dataBlocks, b)
 	}
 
-	printStderr("splitting %v blocks of %v each\n", *benchmarkSplitterBlockCount, *benchmarkSplitterBlockSize)
+	log(ctx).Infof("splitting %v blocks of %v each", *benchmarkSplitterBlockCount, *benchmarkSplitterBlockSize)
 
 	for _, sp := range splitter.SupportedAlgorithms() {
 		fact := splitter.GetFactory(sp)
 
 		var segmentLengths []int
 
-		t0 := time.Now()
+		t0 := clock.Now()
 
 		for _, data := range dataBlocks {
 			s := fact()
-			l := 0
 
-			for _, d := range data {
-				l++
-
-				if s.ShouldSplit(d) {
-					segmentLengths = append(segmentLengths, l)
-					l = 0
+			d := data
+			for len(d) > 0 {
+				n := s.NextSplitPoint(d)
+				if n < 0 {
+					segmentLengths = append(segmentLengths, len(d))
+					break
 				}
-			}
 
-			if l > 0 {
-				segmentLengths = append(segmentLengths, l)
+				segmentLengths = append(segmentLengths, n)
+				d = d[n:]
 			}
 		}
 
-		dur := time.Since(t0)
+		dur := clock.Since(t0)
 
 		sort.Ints(segmentLengths)
 
@@ -118,5 +117,5 @@ func runBenchmarkSplitterAction(ctx *kingpin.ParseContext) error {
 }
 
 func init() {
-	benchmarkSplitterCommand.Action(runBenchmarkSplitterAction)
+	benchmarkSplitterCommand.Action(maybeRepositoryAction(runBenchmarkSplitterAction, false))
 }

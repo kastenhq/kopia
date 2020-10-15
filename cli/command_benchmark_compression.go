@@ -2,15 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"hash/fnv"
 	"io/ioutil"
 	"sort"
-	"time"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/units"
+	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/compression"
-
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
@@ -22,7 +22,7 @@ var (
 	benchmarkCompressionVerifyStable = benchmarkCompressionCommand.Flag("verify-stable", "Verify that compression is stable").Bool()
 )
 
-func runBenchmarkCompressionAction(ctx *kingpin.ParseContext) error {
+func runBenchmarkCompressionAction(ctx context.Context, rep repo.Repository) error {
 	type benchResult struct {
 		compression    compression.Name
 		throughput     float64
@@ -43,9 +43,9 @@ func runBenchmarkCompressionAction(ctx *kingpin.ParseContext) error {
 	}
 
 	for name, comp := range compression.ByName {
-		printStderr("Benchmarking compressor '%v' (%v x %v bytes)\n", name, *benchmarkCompressionRepeat, len(data))
+		log(ctx).Infof("Benchmarking compressor '%v' (%v x %v bytes)", name, *benchmarkCompressionRepeat, len(data))
 
-		t0 := time.Now()
+		t0 := clock.Now()
 
 		var compressedSize int64
 
@@ -59,7 +59,7 @@ func runBenchmarkCompressionAction(ctx *kingpin.ParseContext) error {
 			compressed.Reset()
 
 			if err := comp.Compress(&compressed, data); err != nil {
-				printStderr("compression %q failed: %v\n", name, err)
+				log(ctx).Errorf("compression %q failed: %v", name, err)
 				continue
 			}
 
@@ -71,13 +71,13 @@ func runBenchmarkCompressionAction(ctx *kingpin.ParseContext) error {
 				if i == 0 {
 					lastHash = h
 				} else if h != lastHash {
-					printStderr("compression %q is not stable\n", name)
+					log(ctx).Errorf("compression %q is not stable", name)
 					continue
 				}
 			}
 		}
 
-		hashTime := time.Since(t0)
+		hashTime := clock.Since(t0)
 		bytesPerSecond := float64(len(data)) * float64(cnt) / hashTime.Seconds()
 
 		results = append(results, benchResult{compression: name, throughput: bytesPerSecond, compressedSize: compressedSize})
@@ -104,7 +104,7 @@ func runBenchmarkCompressionAction(ctx *kingpin.ParseContext) error {
 }
 
 func init() {
-	benchmarkCompressionCommand.Action(runBenchmarkCompressionAction)
+	benchmarkCompressionCommand.Action(maybeRepositoryAction(runBenchmarkCompressionAction, false))
 }
 
 func hashOf(b []byte) uint64 {

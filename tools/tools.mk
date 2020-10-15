@@ -6,6 +6,51 @@
 #
 # you will need to have git and golang too in the PATH.
 
+ifeq ($(TRAVIS_OS_NAME),windows)
+UNIX_SHELL_ON_WINDOWS=true
+endif
+
+kopia_arch_name=amd64
+node_arch_name=x64
+goreleaser_arch_name=x86_64
+linter_arch_name=amd64
+
+raw_arch:=$(shell uname -m)
+ifeq ($(raw_arch),aarch64)
+	kopia_arch_name=arm64
+	node_arch_name=arm64
+	goreleaser_arch_name=arm64
+	linter_arch_name=arm64
+endif
+
+ifeq ($(raw_arch),armv7l)
+	kopia_arch_name=arm
+	node_arch_name=armv7l
+	goreleaser_arch_name=armv6
+	linter_arch_name=armv7
+endif
+
+ifneq ($(APPVEYOR),)
+
+UNIX_SHELL_ON_WINDOWS=false
+
+# running Windows build on AppVeyor
+# emulate Travis CI environment variables, so we can use TRAVIS logic everywhere
+
+ifeq ($(APPVEYOR_PULL_REQUEST_NUMBER),)
+export TRAVIS_PULL_REQUEST=false
+else
+export TRAVIS_PULL_REQUEST=$(APPVEYOR_PULL_REQUEST_NUMBER)
+endif
+
+ifneq ($(APPVEYOR_REPO_TAG_NAME),)
+export TRAVIS_TAG=$(APPVEYOR_REPO_TAG_NAME)
+endif
+
+TRAVIS_OS_NAME=windows
+
+endif
+
 # uname will be Windows, Darwin, Linux
 ifeq ($(OS),Windows_NT)
 	exe_suffix := .exe
@@ -15,7 +60,7 @@ ifeq ($(OS),Windows_NT)
 	path_separator=;
 	date_ymd := $(shell powershell -noprofile -executionpolicy bypass -Command "(Get-Date).ToString('yyyyMMdd')")
 	date_full := $(shell powershell -noprofile -executionpolicy bypass -Command "(Get-Date).datetime")
-ifeq ($(TRAVIS_OS_NAME),windows)
+ifeq ($(UNIX_SHELL_ON_WINDOWS),true)
 	mkdir=mkdir -p
 	move=mv
 	slash=/
@@ -35,20 +80,41 @@ else
 	date_full := $(shell date)
 endif
 
+# compute build date and time from the current commit
+commit_date_ymd:=$(subst -,,$(word 1, $(shell git show -s --format=%ci HEAD)))
+
+# compute time of day as a decimal number, without leading zeroes
+# midnight will be 0
+# 00:01:00 becomes 100
+# 00:10:00 becomes 1000
+# 07:00:00 becomes 70000
+# end of day is 235959
+# time of day as hhmmss from 000000 to 235969
+commit_time_raw:=$(subst :,,$(word 2, $(shell git show -s --format=%ci HEAD)))
+commit_time_stripped1=$(commit_time_raw:0%=%)
+commit_time_stripped2=$(commit_time_stripped1:0%=%)
+commit_time_stripped3=$(commit_time_stripped2:0%=%)
+commit_time_stripped4=$(commit_time_stripped3:0%=%)
+
+# final time of day number
+commit_time_of_day=$(commit_time_stripped4:0%=%)
+
+
 SELF_DIR := $(subst /,$(slash),$(realpath $(dir $(lastword $(MAKEFILE_LIST)))))
 TOOLS_DIR:=$(SELF_DIR)$(slash).tools
 
 # tool versions
-GOLANGCI_LINT_VERSION=1.23.6
-NODE_VERSION=12.16.1
-HUGO_VERSION=0.67.1
-GORELEASER_VERSION=v0.128.0
+GOLANGCI_LINT_VERSION=1.30.0
+NODE_VERSION=12.18.3
+HUGO_VERSION=0.74.3
+GOTESTSUM_VERSION=0.5.3
+GORELEASER_VERSION=v0.140.1
 
 # goveralls
 GOVERALLS_TOOL=$(TOOLS_DIR)/bin/goveralls
 
 $(GOVERALLS_TOOL):
-	$(mkdir) $(TOOLS_DIR)
+	-$(mkdir) $(TOOLS_DIR)
 	GO111MODULE=off GOPATH=$(TOOLS_DIR) go get github.com/mattn/goveralls
 
 # nodejs / npm
@@ -76,7 +142,7 @@ ifeq ($(uname),Windows)
 else
 
 ifeq ($(uname),Linux)
-	curl -LsS https://nodejs.org/dist/v$(NODE_VERSION)/node-v$(NODE_VERSION)-linux-x64.tar.gz | tar zx -C $(node_base_dir)
+	curl -LsS https://nodejs.org/dist/v$(NODE_VERSION)/node-v$(NODE_VERSION)-linux-$(node_arch_name).tar.gz | tar zx -C $(node_base_dir)
 else
 	curl -LsS https://nodejs.org/dist/v$(NODE_VERSION)/node-v$(NODE_VERSION)-darwin-x64.tar.gz | tar zx -C $(node_base_dir)
 endif
@@ -108,7 +174,12 @@ ifeq ($(uname),Windows)
 	$(move) $(linter_dir)\golangci-lint-$(GOLANGCI_LINT_VERSION)-windows-amd64\golangci-lint.exe $(linter)
 else
 	mkdir -p $(linter_dir)
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(linter_dir) v$(GOLANGCI_LINT_VERSION)
+ifeq ($(uname),Linux)
+	curl -LsS https://github.com/golangci/golangci-lint/releases/download/v$(GOLANGCI_LINT_VERSION)/golangci-lint-$(GOLANGCI_LINT_VERSION)-linux-$(linter_arch_name).tar.gz | tar zxv --strip=1 -C $(linter_dir)
+else
+	curl -LsS https://github.com/golangci/golangci-lint/releases/download/v$(GOLANGCI_LINT_VERSION)/golangci-lint-$(GOLANGCI_LINT_VERSION)-darwin-amd64.tar.gz | tar zxv --strip=1 -C $(linter_dir)
+endif
+
 endif
 
 # hugo
@@ -117,7 +188,7 @@ hugo=$(hugo_dir)$(slash)hugo$(exe_suffix)
 
 $(hugo):
 	@echo Downloading Hugo v$(HUGO_VERSION) to $(hugo)
-	$(mkdir) $(TOOLS_DIR)$(slash)hugo-$(HUGO_VERSION)
+	-$(mkdir) $(TOOLS_DIR)$(slash)hugo-$(HUGO_VERSION)
 
 ifeq ($(uname),Windows)
 	curl -LsS -o $(hugo_dir).zip https://github.com/gohugoio/hugo/releases/download/v$(HUGO_VERSION)/hugo_extended_$(HUGO_VERSION)_Windows-64bit.zip
@@ -132,6 +203,14 @@ endif
 
 endif
 
+gotestsum=$(TOOLS_DIR)/bin/gotestsum
+
+$(gotestsum): export GO111MODULE=off
+$(gotestsum): export GOPATH=$(TOOLS_DIR)
+$(gotestsum):
+	-$(mkdir) $(TOOLS_DIR)
+	go get gotest.tools/gotestsum
+
 # goreleaser
 goreleaser_dir=$(TOOLS_DIR)$(slash)goreleaser-$(GORELEASER_VERSION)
 goreleaser=$(goreleaser_dir)$(slash)goreleaser$(exe_suffix)
@@ -143,25 +222,27 @@ ifeq ($(uname),Windows)
 	curl -LsS -o $(goreleaser_dir).zip https://github.com/goreleaser/goreleaser/releases/download/$(GORELEASER_VERSION)/goreleaser_Windows_x86_64.zip
 	unzip -q $(goreleaser_dir).zip -d $(goreleaser_dir)
 else
-	curl -LsS https://github.com/goreleaser/goreleaser/releases/download/$(GORELEASER_VERSION)/goreleaser_$$(uname -s)_$$(uname -m).tar.gz | tar zx -C $(TOOLS_DIR)/goreleaser-$(GORELEASER_VERSION)
+	curl -LsS https://github.com/goreleaser/goreleaser/releases/download/$(GORELEASER_VERSION)/goreleaser_$$(uname -s)_$(goreleaser_arch_name).tar.gz | tar zx -C $(TOOLS_DIR)/goreleaser-$(GORELEASER_VERSION)
 endif
 
 ifeq ($(TRAVIS_PULL_REQUEST),false)
 
 ifneq ($(TRAVIS_TAG),)
 # travis, tagged release
-KOPIA_VERSION:=$(TRAVIS_TAG:v%=%)
+KOPIA_VERSION:=$(TRAVIS_TAG)
 else
 # travis, non-tagged release
-KOPIA_VERSION:=$(date_ymd).0.$(TRAVIS_BUILD_NUMBER)
+KOPIA_VERSION:=v$(commit_date_ymd).0.$(commit_time_of_day)
 endif
 
 else
 
 # non-travis, or travis PR
-KOPIA_VERSION:=$(date_ymd).0.0-$(shell git rev-parse --short HEAD)
+KOPIA_VERSION:=v$(date_ymd).0.0-$(shell git rev-parse --short HEAD)
 
 endif
+
+export KOPIA_VERSION_NO_PREFIX=$(KOPIA_VERSION:v%=%)
 
 # embedded in the HTML pages
 export REACT_APP_SHORT_VERSION_INFO:=$(KOPIA_VERSION)
@@ -170,4 +251,27 @@ export REACT_APP_FULL_VERSION_INFO:=$(KOPIA_VERSION) built on $(date_full) $(she
 clean-tools:
 	rm -rf $(TOOLS_DIR)
 
-all-tools: $(npm) $(goreleaser) $(linter) $(hugo) $(go_bindata)
+windows_signing_dir=$(TOOLS_DIR)$(slash)win_signing
+
+windows-signing-tools:
+ifeq ($(TRAVIS_OS_NAME),windows)
+ifneq ($(WINDOWS_SIGNING_TOOLS_URL),)
+	echo Installing Windows signing tools to $(windows_signing_dir)...
+	-$(mkdir) $(windows_signing_dir)
+	curl -LsS -o $(windows_signing_dir).zip $(WINDOWS_SIGNING_TOOLS_URL)
+	unzip -a -q $(windows_signing_dir).zip -d $(windows_signing_dir)
+	powershell -noprofile -executionpolicy bypass $(windows_signing_dir)\\setup.ps1
+else
+	echo Not installing Windows signing tools because WINDOWS_SIGNING_TOOLS_URL is not set
+endif
+endif
+
+# disable some tools on non-default architectures
+ifeq ($(kopia_arch_name),amd64)
+maybehugo=$(hugo)
+else
+maybehugo=
+endif
+
+all-tools: $(gotestsum) $(npm) $(goreleaser) $(linter) $(maybehugo) $(go_bindata) windows-signing-tools
+

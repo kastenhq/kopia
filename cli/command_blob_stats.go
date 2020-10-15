@@ -13,6 +13,7 @@ import (
 var (
 	blobStatsCommand = blobCommands.Command("stats", "Content statistics")
 	blobStatsRaw     = blobStatsCommand.Flag("raw", "Raw numbers").Short('r').Bool()
+	blobStatsPrefix  = blobStatsCommand.Flag("prefix", "Blob name prefix").String()
 )
 
 func runBlobStatsCommand(ctx context.Context, rep *repo.DirectRepository) error {
@@ -33,12 +34,12 @@ func runBlobStatsCommand(ctx context.Context, rep *repo.DirectRepository) error 
 
 	if err := rep.Blobs.ListBlobs(
 		ctx,
-		"",
+		blob.ID(*blobStatsPrefix),
 		func(b blob.Metadata) error {
 			totalSize += b.Length
 			count++
 			if count%10000 == 0 {
-				printStderr("Got %v blobs...\n", count)
+				log(ctx).Infof("Got %v blobs...", count)
 			}
 			for s := range countMap {
 				if b.Length < s {

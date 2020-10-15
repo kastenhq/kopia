@@ -9,6 +9,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/pkg/errors"
 	"golang.org/x/crypto/blake2s"
 
 	"github.com/kopia/kopia/fs"
@@ -18,7 +19,7 @@ import (
 
 var log = logging.GetContextLoggerFunc("kopia/internal/fshasher")
 
-// Hash computes a recursive hash of e using the given hasher h
+// Hash computes a recursive hash of e using the given hasher h.
 func Hash(ctx context.Context, e fs.Entry) ([]byte, error) {
 	h, err := blake2s.New256(nil)
 	if err != nil {
@@ -46,7 +47,7 @@ func write(ctx context.Context, tw *tar.Writer, fullpath string, e fs.Entry) err
 		return err
 	}
 
-	log(ctx).Debugf("%v %v %v %v", e.Mode(), h.ModTime.Format(time.RFC3339), h.Size, h.Name)
+	log(ctx).Debugf("%v %v %v %v %v", e.Mode(), h.ModTime.Format(time.RFC3339), h.Size, h.Name, h.Linkname)
 
 	if err := tw.WriteHeader(h); err != nil {
 		return err
@@ -57,7 +58,10 @@ func write(ctx context.Context, tw *tar.Writer, fullpath string, e fs.Entry) err
 		return writeDirectory(ctx, tw, fullpath, e)
 	case fs.File:
 		return writeFile(ctx, tw, e)
-	default: // fs.Symlink or bare fs.Entry
+	case fs.Symlink:
+		// link target is part of the header
+		return nil
+	default: // bare fs.Entry
 		return nil
 	}
 }
@@ -88,9 +92,19 @@ func header(ctx context.Context, fullpath string, e os.FileInfo) (*tar.Header, e
 		h.ModTime = time.Time{}
 	}
 
-	h.ModTime = h.ModTime.UTC()
+	// when hashing, compare time to within a second resolution because of
+	// filesystems that don't preserve full timestamp fidelity.
+	// https://travis-ci.org/github/kopia/kopia/jobs/732592885
+	h.ModTime = h.ModTime.Truncate(time.Second).UTC()
 	h.AccessTime = h.ModTime
 	h.ChangeTime = h.ModTime
+
+	if sl, ok := e.(fs.Symlink); ok {
+		h.Linkname, err = sl.Readlink(ctx)
+		if err != nil {
+			return nil, errors.Wrap(err, "error reading link")
+		}
+	}
 
 	return h, nil
 }

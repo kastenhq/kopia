@@ -15,6 +15,7 @@ import (
 	"gocloud.dev/blob/azureblob"
 	"gocloud.dev/gcerrors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/iocopy"
 	"github.com/kopia/kopia/internal/retry"
 	"github.com/kopia/kopia/repo/blob"
@@ -69,6 +70,28 @@ func (az *azStorage) GetBlob(ctx context.Context, b blob.ID, offset, length int6
 	return fetched, nil
 }
 
+func (az *azStorage) GetMetadata(ctx context.Context, b blob.ID) (blob.Metadata, error) {
+	attempt := func() (interface{}, error) {
+		fi, err := az.bucket.Attributes(ctx, az.getObjectNameString(b))
+		if err != nil {
+			return nil, err
+		}
+
+		return blob.Metadata{
+			BlobID:    b,
+			Length:    fi.Size,
+			Timestamp: fi.ModTime,
+		}, nil
+	}
+
+	v, err := exponentialBackoff(ctx, fmt.Sprintf("GetMetadaa(%q)", b), attempt)
+	if err != nil {
+		return blob.Metadata{}, translateError(err)
+	}
+
+	return v.(blob.Metadata), nil
+}
+
 func exponentialBackoff(ctx context.Context, desc string, att retry.AttemptFunc) (interface{}, error) {
 	return retry.WithExponentialBackoff(ctx, desc, att, isRetriableError)
 }
@@ -88,9 +111,9 @@ func isRetriableError(err error) bool {
 		return true
 	case gcerrors.ResourceExhausted:
 		return true
+	default:
+		return false
 	}
-
-	return false
 }
 
 func translateError(err error) error {
@@ -99,9 +122,9 @@ func translateError(err error) error {
 		return nil
 	case gcerrors.NotFound:
 		return blob.ErrBlobNotFound
+	default:
+		return err
 	}
-
-	return err
 }
 
 func (az *azStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes) error {
@@ -133,7 +156,11 @@ func (az *azStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes) er
 	return translateError(writer.Close())
 }
 
-// DeleteBlob deletes azure blob from container with given ID
+func (az *azStorage) SetTime(ctx context.Context, b blob.ID, t time.Time) error {
+	return blob.ErrSetTimeUnsupported
+}
+
+// DeleteBlob deletes azure blob from container with given ID.
 func (az *azStorage) DeleteBlob(ctx context.Context, b blob.ID) error {
 	attempt := func() (interface{}, error) {
 		return nil, az.bucket.Delete(ctx, az.getObjectNameString(b))
@@ -142,7 +169,7 @@ func (az *azStorage) DeleteBlob(ctx context.Context, b blob.ID) error {
 	err = translateError(err)
 
 	// don't return error if blob is already deleted
-	if err == blob.ErrBlobNotFound {
+	if errors.Is(err, blob.ErrBlobNotFound) {
 		return nil
 	}
 
@@ -153,7 +180,7 @@ func (az *azStorage) getObjectNameString(b blob.ID) string {
 	return az.Prefix + string(b)
 }
 
-// ListBlobs list azure blobs with given prefix
+// ListBlobs list azure blobs with given prefix.
 func (az *azStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback func(blob.Metadata) error) error {
 	// create list iterator
 	li := az.bucket.List(&gblob.ListOptions{Prefix: az.getObjectNameString(prefix)})
@@ -188,6 +215,10 @@ func (az *azStorage) ConnectionInfo() blob.ConnectionInfo {
 		Type:   azStorageType,
 		Config: &az.Options,
 	}
+}
+
+func (az *azStorage) DisplayName() string {
+	return fmt.Sprintf("Azure: %v", az.Options.Container)
 }
 
 func (az *azStorage) Close(ctx context.Context) error {
@@ -238,7 +269,7 @@ func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 
 	// verify Azure connection is functional by listing blobs in a bucket, which will fail if the container
 	// does not exist. We list with a prefix that will not exist, to avoid iterating through any objects.
-	nonExistentPrefix := fmt.Sprintf("kopia-azure-storage-initializing-%v", time.Now().UnixNano()) // allow:no-inject-time
+	nonExistentPrefix := fmt.Sprintf("kopia-azure-storage-initializing-%v", clock.Now().UnixNano())
 	err = az.ListBlobs(ctx, blob.ID(nonExistentPrefix), func(md blob.Metadata) error {
 		return nil
 	})

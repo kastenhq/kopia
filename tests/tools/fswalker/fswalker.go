@@ -1,4 +1,4 @@
-// +build linux
+// +build darwin,amd64 linux,amd64
 
 // Package fswalker provides the checker.Comparer interface using FSWalker
 // walker and reporter.
@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	// nolint:staticcheck
 	"github.com/golang/protobuf/proto"
 	"github.com/google/fswalker"
 	fspb "github.com/google/fswalker/proto/fswalker"
@@ -30,13 +31,15 @@ type WalkCompare struct {
 	GlobalFilterFuncs []func(string, fswalker.ActionData) bool
 }
 
-// NewWalkCompare instantiates a new WalkCompare and returns its pointer
+// NewWalkCompare instantiates a new WalkCompare and returns its pointer.
 func NewWalkCompare() *WalkCompare {
 	return &WalkCompare{
 		GlobalFilterFuncs: []func(string, fswalker.ActionData) bool{
 			filterFileTimeDiffs,
 			isRootDirectoryRename,
 			dirSizeMightBeOffByBlockSizeMultiple,
+			ignoreGIDIfZero,
+			ignoreUIDIfZero,
 		},
 	}
 }
@@ -62,6 +65,7 @@ func performWalk(ctx context.Context, path string) (*fspb.Walk, error) {
 	}
 
 	err = processWalk(walkData, path)
+
 	return walkData, errors.Wrap(err, "error during gather phase")
 }
 
@@ -200,6 +204,28 @@ func dirSizeMightBeOffByBlockSizeMultiple(str string, mod fswalker.ActionData) b
 
 func filterFileTimeDiffs(str string, mod fswalker.ActionData) bool {
 	return strings.Contains(str, "ctime:") || strings.Contains(str, "atime:") || strings.Contains(str, "mtime:")
+}
+
+func ignoreGIDIfZero(str string, mod fswalker.ActionData) bool {
+	if !strings.Contains(str, "gid:") {
+		return false
+	}
+
+	beforeGID := mod.Before.Stat.Gid
+	afterGID := mod.After.Stat.Gid
+
+	return beforeGID != afterGID && beforeGID == 0
+}
+
+func ignoreUIDIfZero(str string, mod fswalker.ActionData) bool {
+	if !strings.Contains(str, "uid:") {
+		return false
+	}
+
+	beforeUID := mod.Before.Stat.Uid
+	afterUID := mod.After.Stat.Uid
+
+	return beforeUID != afterUID && beforeUID == 0
 }
 
 func validateReport(report *fswalker.Report) error {

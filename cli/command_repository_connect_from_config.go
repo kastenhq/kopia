@@ -11,8 +11,10 @@ import (
 	"github.com/kopia/kopia/repo/blob"
 )
 
-var connectFromConfigFile string
-var connectFromConfigToken string
+var (
+	connectFromConfigFile  string
+	connectFromConfigToken string
+)
 
 func connectToStorageFromConfig(ctx context.Context, isNew bool) (blob.Storage, error) {
 	if isNew {
@@ -37,13 +39,13 @@ func connectToStorageFromConfigFile(ctx context.Context) (blob.Storage, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to open config")
 	}
-	defer f.Close() //nolint:errcheck
+	defer f.Close() //nolint:errcheck,gosec
 
 	if err := cfg.Load(f); err != nil {
 		return nil, errors.Wrap(err, "unable to load config")
 	}
 
-	return blob.NewStorage(ctx, cfg.Storage)
+	return blob.NewStorage(ctx, *cfg.Storage)
 }
 
 func connectToStorageFromConfigToken(ctx context.Context) (blob.Storage, error) {

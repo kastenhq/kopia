@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// ErrKeyNotFound is returned when the store can't find the key provided
+// ErrKeyNotFound is returned when the store can't find the key provided.
 var ErrKeyNotFound = errors.New("key not found")
 
 var _ Store = &Simple{}
@@ -20,7 +20,7 @@ type Simple struct {
 }
 
 // NewSimple instantiates a new Simple snapstore and
-// returns its pointer
+// returns its pointer.
 func NewSimple() *Simple {
 	return &Simple{
 		Data: make(map[string][]byte),
@@ -28,7 +28,7 @@ func NewSimple() *Simple {
 	}
 }
 
-// Store implements the Storer interface Store method
+// Store implements the Storer interface Store method.
 func (s *Simple) Store(key string, val []byte) error {
 	buf := make([]byte, len(val))
 	_ = copy(buf, val)
@@ -41,7 +41,7 @@ func (s *Simple) Store(key string, val []byte) error {
 	return nil
 }
 
-// Load implements the Storer interface Load method
+// Load implements the Storer interface Load method.
 func (s *Simple) Load(key string) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -56,7 +56,7 @@ func (s *Simple) Load(key string) ([]byte, error) {
 	return nil, ErrKeyNotFound
 }
 
-// Delete implements the Storer interface Delete method
+// Delete implements the Storer interface Delete method.
 func (s *Simple) Delete(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -64,7 +64,7 @@ func (s *Simple) Delete(key string) {
 	delete(s.Data, key)
 }
 
-// AddToIndex implements the Storer interface AddToIndex method
+// AddToIndex implements the Storer interface AddToIndex method.
 func (s *Simple) AddToIndex(key, indexName string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -72,7 +72,7 @@ func (s *Simple) AddToIndex(key, indexName string) {
 	s.Idx.AddToIndex(key, indexName)
 }
 
-// RemoveFromIndex implements the Indexer interface RemoveFromIndex method
+// RemoveFromIndex implements the Indexer interface RemoveFromIndex method.
 func (s *Simple) RemoveFromIndex(key, indexName string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -80,7 +80,7 @@ func (s *Simple) RemoveFromIndex(key, indexName string) {
 	s.Idx.RemoveFromIndex(key, indexName)
 }
 
-// GetKeys implements the Indexer interface GetKeys method
+// GetKeys implements the Indexer interface GetKeys method.
 func (s *Simple) GetKeys(indexName string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

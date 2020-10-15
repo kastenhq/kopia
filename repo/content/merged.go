@@ -21,7 +21,7 @@ func (m mergedIndex) Close() error {
 	return nil
 }
 
-// GetInfo returns information about a single content. If a content is not found, returns (nil,nil)
+// GetInfo returns information about a single content. If a content is not found, returns (nil,nil).
 func (m mergedIndex) GetInfo(id ID) (*Info, error) {
 	var best *Info
 
@@ -65,6 +65,7 @@ func (h nextInfoHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
 func (h *nextInfoHeap) Push(x interface{}) {
 	*h = append(*h, x.(*nextInfo))
 }
+
 func (h *nextInfoHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
@@ -74,16 +75,16 @@ func (h *nextInfoHeap) Pop() interface{} {
 	return x
 }
 
-func iterateChan(prefix ID, ndx packIndex, done chan bool) <-chan Info {
+func iterateChan(r IDRange, ndx packIndex, done chan bool) <-chan Info {
 	ch := make(chan Info, iterateParallelism)
 
 	go func() {
 		defer close(ch)
 
-		_ = ndx.Iterate(prefix, func(i Info) error {
+		_ = ndx.Iterate(r, func(i Info) error {
 			select {
 			case <-done:
-				return errors.New("end of iteration")
+				return errors.New("end of iteration") // nolint:goerr113
 			case ch <- i:
 				return nil
 			}
@@ -95,7 +96,7 @@ func iterateChan(prefix ID, ndx packIndex, done chan bool) <-chan Info {
 
 // Iterate invokes the provided callback for all unique content IDs in the underlying sources until either
 // all contents have been visited or until an error is returned by the callback.
-func (m mergedIndex) Iterate(prefix ID, cb func(i Info) error) error {
+func (m mergedIndex) Iterate(r IDRange, cb func(i Info) error) error {
 	var minHeap nextInfoHeap
 
 	done := make(chan bool)
@@ -103,7 +104,7 @@ func (m mergedIndex) Iterate(prefix ID, cb func(i Info) error) error {
 	defer close(done)
 
 	for _, ndx := range m {
-		ch := iterateChan(prefix, ndx, done)
+		ch := iterateChan(r, ndx, done)
 
 		it, ok := <-ch
 		if ok {

@@ -6,17 +6,17 @@
 package fusemount
 
 import (
+	"io"
 	"io/ioutil"
 	"os"
-
-	"github.com/pkg/errors"
-
-	"github.com/kopia/kopia/fs"
+	"sync"
 
 	"bazil.org/fuse"
 	fusefs "bazil.org/fuse/fs"
-
+	"github.com/pkg/errors"
 	"golang.org/x/net/context"
+
+	"github.com/kopia/kopia/fs"
 )
 
 type fuseNode struct {
@@ -37,6 +37,51 @@ func (n *fuseNode) Attr(ctx context.Context, a *fuse.Attr) error {
 type fuseFileNode struct {
 	fuseNode
 }
+
+var _ fusefs.NodeOpener = (*fuseFileNode)(nil)
+
+func (f *fuseFileNode) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenResponse) (fusefs.Handle, error) {
+	reader, err := f.entry.(fs.File).Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &fuseFileHandle{reader: reader, size: f.entry.Size()}, nil
+}
+
+type fuseFileHandle struct {
+	mu     sync.Mutex
+	reader fs.Reader
+	size   int64
+}
+
+func (f *fuseFileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	_, err := f.reader.Seek(req.Offset, io.SeekStart)
+	if err != nil {
+		return err
+	}
+
+	n, err := f.reader.Read(resp.Data[:req.Size])
+	if err != nil {
+		return err
+	}
+
+	resp.Data = resp.Data[:n]
+
+	return nil
+}
+
+func (f *fuseFileHandle) Release(ctx context.Context, req *fuse.ReleaseRequest) error {
+	return f.reader.Close()
+}
+
+var (
+	_ fusefs.HandleReleaser = (*fuseFileHandle)(nil)
+	_ fusefs.HandleReader   = (*fuseFileHandle)(nil)
+)
 
 func (f *fuseFileNode) ReadAll(ctx context.Context) ([]byte, error) {
 	reader, err := f.entry.(fs.File).Open(ctx)
@@ -87,6 +132,7 @@ func (dir *fuseDirectoryNode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, er
 			Name: e.Name(),
 		}
 
+		// nolint:exhaustive
 		switch e.Mode() & os.ModeType {
 		case os.ModeDir:
 			dirent.Type = fuse.DT_Dir
@@ -127,7 +173,7 @@ func newDirectoryNode(dir fs.Directory) fusefs.Node {
 	return &fuseDirectoryNode{fuseNode{dir}}
 }
 
-// NewDirectoryNode returns FUSE Node for a given fs.Directory
+// NewDirectoryNode returns FUSE Node for a given fs.Directory.
 func NewDirectoryNode(dir fs.Directory) fusefs.Node {
 	return newDirectoryNode(dir)
 }

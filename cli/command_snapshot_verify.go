@@ -10,6 +10,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/iocopy"
 	"github.com/kopia/kopia/internal/parallelwork"
 	"github.com/kopia/kopia/repo"
@@ -33,7 +34,6 @@ var (
 
 type verifier struct {
 	rep       repo.Repository
-	om        *object.Manager
 	workQueue *parallelwork.Queue
 	startTime time.Time
 
@@ -43,8 +43,8 @@ type verifier struct {
 	errors []error
 }
 
-func (v *verifier) progressCallback(enqueued, active, completed int64) {
-	elapsed := time.Since(v.startTime)
+func (v *verifier) progressCallback(ctx context.Context, enqueued, active, completed int64) {
+	elapsed := clock.Since(v.startTime)
 	maybeTimeRemaining := ""
 
 	if elapsed > 1*time.Second && enqueued > 0 && completed > 0 {
@@ -52,13 +52,13 @@ func (v *verifier) progressCallback(enqueued, active, completed int64) {
 		predictedSeconds := elapsed.Seconds() / completedRatio
 		predictedEndTime := v.startTime.Add(time.Duration(predictedSeconds) * time.Second)
 
-		dt := time.Until(predictedEndTime)
+		dt := clock.Until(predictedEndTime)
 		if dt > 0 {
 			maybeTimeRemaining = fmt.Sprintf(" remaining %v (ETA %v)", dt.Truncate(1*time.Second), formatTimestamp(predictedEndTime.Truncate(1*time.Second)))
 		}
 	}
 
-	printStderr("Found %v objects, verifying %v, completed %v objects%v.\n", enqueued, active, completed, maybeTimeRemaining)
+	log(ctx).Infof("Found %v objects, verifying %v, completed %v objects%v.", enqueued, active, completed, maybeTimeRemaining)
 }
 
 func (v *verifier) tooManyErrors() bool {
@@ -99,7 +99,7 @@ func (v *verifier) enqueueVerifyDirectory(ctx context.Context, oid object.ID, pa
 		return
 	}
 
-	v.workQueue.EnqueueFront(func() error {
+	v.workQueue.EnqueueFront(ctx, func() error {
 		return v.doVerifyDirectory(ctx, oid, path)
 	})
 }
@@ -110,7 +110,7 @@ func (v *verifier) enqueueVerifyObject(ctx context.Context, oid object.ID, path 
 		return
 	}
 
-	v.workQueue.EnqueueBack(func() error {
+	v.workQueue.EnqueueBack(ctx, func() error {
 		return v.doVerifyObject(ctx, oid, path)
 	})
 }
@@ -147,11 +147,12 @@ func (v *verifier) doVerifyDirectory(ctx context.Context, oid object.ID, path st
 func (v *verifier) doVerifyObject(ctx context.Context, oid object.ID, path string) error {
 	log(ctx).Debugf("verifying object %v", oid)
 
-	if _, err := v.om.VerifyObject(ctx, oid); err != nil {
+	if _, err := v.rep.VerifyObject(ctx, oid); err != nil {
 		v.reportError(ctx, path, errors.Wrapf(err, "error verifying %v", oid))
 	}
 
-	if rand.Intn(100) < *verifyCommandFilesPercent { //nolint:gomnd
+	//nolint:gomnd,gosec
+	if rand.Intn(100) < *verifyCommandFilesPercent {
 		if err := v.readEntireObject(ctx, oid, path); err != nil {
 			v.reportError(ctx, path, errors.Wrapf(err, "error reading object %v", oid))
 		}
@@ -166,7 +167,7 @@ func (v *verifier) readEntireObject(ctx context.Context, oid object.ID, path str
 	ctx = content.UsingContentCache(ctx, false)
 
 	// also read the entire file
-	r, err := v.om.Open(ctx, oid)
+	r, err := v.rep.OpenObject(ctx, oid)
 	if err != nil {
 		return err
 	}
@@ -180,7 +181,7 @@ func (v *verifier) readEntireObject(ctx context.Context, oid object.ID, path str
 func runVerifyCommand(ctx context.Context, rep repo.Repository) error {
 	v := &verifier{
 		rep:       rep,
-		startTime: time.Now(),
+		startTime: clock.Now(),
 		workQueue: parallelwork.NewQueue(),
 		seen:      map[object.ID]bool{},
 	}
@@ -190,7 +191,7 @@ func runVerifyCommand(ctx context.Context, rep repo.Repository) error {
 	}
 
 	v.workQueue.ProgressCallback = v.progressCallback
-	if err := v.workQueue.Process(*verifyCommandParallel); err != nil {
+	if err := v.workQueue.Process(ctx, *verifyCommandParallel); err != nil {
 		return errors.Wrap(err, "error processing work queue")
 	}
 
@@ -222,7 +223,7 @@ func enqueueRootsToVerify(ctx context.Context, v *verifier, rep repo.Repository)
 	}
 
 	for _, oidStr := range *verifyCommandDirObjectIDs {
-		oid, err := parseObjectID(ctx, rep, oidStr)
+		oid, err := snapshotfs.ParseObjectIDWithPath(ctx, rep, oidStr)
 		if err != nil {
 			return err
 		}
@@ -231,7 +232,7 @@ func enqueueRootsToVerify(ctx context.Context, v *verifier, rep repo.Repository)
 	}
 
 	for _, oidStr := range *verifyCommandFileObjectIDs {
-		oid, err := parseObjectID(ctx, rep, oidStr)
+		oid, err := snapshotfs.ParseObjectIDWithPath(ctx, rep, oidStr)
 		if err != nil {
 			return err
 		}
@@ -254,7 +255,7 @@ func loadSourceManifests(ctx context.Context, rep repo.Repository, sources []str
 		manifestIDs = append(manifestIDs, man...)
 	} else {
 		for _, srcStr := range sources {
-			src, err := snapshot.ParseSourceInfo(srcStr, rep.Hostname(), rep.Username())
+			src, err := snapshot.ParseSourceInfo(srcStr, rep.ClientOptions().Hostname, rep.ClientOptions().Username)
 			if err != nil {
 				return nil, errors.Wrapf(err, "error parsing %q", srcStr)
 			}

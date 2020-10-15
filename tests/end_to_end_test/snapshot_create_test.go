@@ -1,9 +1,13 @@
 package endtoend_test
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/tests/testenv"
 )
 
@@ -11,7 +15,7 @@ func TestSnapshotCreate(t *testing.T) {
 	t.Parallel()
 
 	e := testenv.NewCLITest(t)
-	defer e.Cleanup(t)
+
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	// create some snapshots using different hostname/username
@@ -42,7 +46,6 @@ func TestStartTimeOverride(t *testing.T) {
 	t.Parallel()
 
 	e := testenv.NewCLITest(t)
-	defer e.Cleanup(t)
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1, "--start-time", "2000-01-01 01:01:00 UTC")
@@ -62,7 +65,6 @@ func TestEndTimeOverride(t *testing.T) {
 	t.Parallel()
 
 	e := testenv.NewCLITest(t)
-	defer e.Cleanup(t)
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1, "--end-time", "2000-01-01 01:01:00 UTC")
@@ -83,8 +85,31 @@ func TestInvalidTimeOverride(t *testing.T) {
 	t.Parallel()
 
 	e := testenv.NewCLITest(t)
-	defer e.Cleanup(t)
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1, "--start-time", "2000-01-01 01:01:00 UTC", "--end-time", "1999-01-01 01:01:00 UTC")
+}
+
+func TestSnapshottingCacheDirectory(t *testing.T) {
+	t.Parallel()
+
+	e := testenv.NewCLITest(t)
+
+	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
+	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
+	lines := e.RunAndExpectSuccess(t, "cache", "info")
+	cachePath := filepath.Dir(strings.Split(lines[0], ": ")[0])
+
+	// verify cache marker exists
+	if _, err := os.Stat(filepath.Join(cachePath, repo.CacheDirMarkerFile)); err != nil {
+		t.Fatal(err)
+	}
+
+	e.RunAndExpectSuccess(t, "snapshot", "create", cachePath)
+	snapshots := e.ListSnapshotsAndExpectSuccess(t, cachePath)
+
+	rootID := snapshots[0].Snapshots[0].ObjectID
+	if got, want := len(e.RunAndExpectSuccess(t, "ls", rootID)), 0; got != want {
+		t.Errorf("invalid number of files in snapshot of cache dir %v, want %v", got, want)
+	}
 }

@@ -5,6 +5,9 @@ import (
 	"context"
 	"reflect"
 	"sort"
+	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/repo/blob"
 )
@@ -30,7 +33,7 @@ func AssertGetBlob(ctx context.Context, t testingT, s blob.Storage, blobID blob.
 		t.Errorf("GetBlob(%v) returned %x, but expected %x", blobID, b, expected)
 	}
 
-	half := int64(len(expected) / 2) //nolint:gomnd
+	half := int64(len(expected) / 2)
 	if half == 0 {
 		return
 	}
@@ -72,7 +75,7 @@ func AssertGetBlob(ctx context.Context, t testingT, s blob.Storage, blobID blob.
 	AssertInvalidOffsetLength(ctx, t, s, blobID, int64(len(expected)+1), 3)
 }
 
-// AssertInvalidOffsetLength verifies that the given combination of (offset,length) fails on GetBlob()
+// AssertInvalidOffsetLength verifies that the given combination of (offset,length) fails on GetBlob().
 func AssertInvalidOffsetLength(ctx context.Context, t testingT, s blob.Storage, blobID blob.ID, offset, length int64) {
 	if _, err := s.GetBlob(ctx, blobID, offset, length); err == nil {
 		t.Errorf("GetBlob(%v,%v,%v) did not return error for invalid offset/length", blobID, offset, length)
@@ -84,7 +87,7 @@ func AssertGetBlobNotFound(ctx context.Context, t testingT, s blob.Storage, blob
 	t.Helper()
 
 	b, err := s.GetBlob(ctx, blobID, 0, -1)
-	if err != blob.ErrBlobNotFound || b != nil {
+	if !errors.Is(err, blob.ErrBlobNotFound) || b != nil {
 		t.Errorf("GetBlob(%v) returned %v, %v but expected ErrNotFound", blobID, b, err)
 	}
 }
@@ -95,8 +98,27 @@ func AssertListResults(ctx context.Context, t testingT, s blob.Storage, prefix b
 
 	var names []blob.ID
 
-	if err := s.ListBlobs(ctx, prefix, func(e blob.Metadata) error {
-		names = append(names, e.BlobID)
+	if err := s.ListBlobs(ctx, prefix, func(m blob.Metadata) error {
+		names = append(names, m.BlobID)
+
+		m2, err := s.GetMetadata(ctx, m.BlobID)
+		if err != nil {
+			t.Errorf("GetMetadata() failed: %v", err)
+		}
+
+		if got, want := m2.BlobID, m.BlobID; got != want {
+			t.Errorf("invalid blob ID on %v: %v, want %v", m.BlobID, got, want)
+		}
+
+		if got, want := m2.Length, m.Length; got != want {
+			t.Errorf("invalid length on %v: %v, want %v", m.BlobID, got, want)
+		}
+
+		// truncated time comparison, because some providers return different precision of time in list vs get
+		if got, want := m2.Timestamp, m.Timestamp; !got.Truncate(time.Second).Equal(want.Truncate(time.Second)) {
+			t.Errorf("invalid timestamp on %v: %v, want %v", m.BlobID, got, want)
+		}
+
 		return nil
 	}); err != nil {
 		t.Fatalf("err: %v", err)

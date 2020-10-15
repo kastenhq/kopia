@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"time"
 
+	gcsclient "cloud.google.com/go/storage"
 	"github.com/efarrer/iothrottler"
 	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
@@ -16,12 +17,11 @@ import (
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/iocopy"
 	"github.com/kopia/kopia/internal/retry"
 	"github.com/kopia/kopia/internal/throttle"
 	"github.com/kopia/kopia/repo/blob"
-
-	gcsclient "cloud.google.com/go/storage"
 )
 
 const (
@@ -68,6 +68,28 @@ func (gcs *gcsStorage) GetBlob(ctx context.Context, b blob.ID, offset, length in
 	return fetched, nil
 }
 
+func (gcs *gcsStorage) GetMetadata(ctx context.Context, b blob.ID) (blob.Metadata, error) {
+	attempt := func() (interface{}, error) {
+		attrs, err := gcs.bucket.Object(gcs.getObjectNameString(b)).Attrs(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		return blob.Metadata{
+			BlobID:    b,
+			Length:    attrs.Size,
+			Timestamp: attrs.Created,
+		}, nil
+	}
+
+	v, err := exponentialBackoff(ctx, fmt.Sprintf("GetMetadata(%q)", b), attempt)
+	if err != nil {
+		return blob.Metadata{}, translateError(err)
+	}
+
+	return v.(blob.Metadata), nil
+}
+
 func exponentialBackoff(ctx context.Context, desc string, att retry.AttemptFunc) (interface{}, error) {
 	return retry.WithExponentialBackoff(ctx, desc, att, isRetriableError)
 }
@@ -99,6 +121,7 @@ func translateError(err error) error {
 		return errors.Wrap(err, "unexpected GCS error")
 	}
 }
+
 func (gcs *gcsStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes) error {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -137,6 +160,10 @@ func (gcs *gcsStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes) 
 	return translateError(writer.Close())
 }
 
+func (gcs *gcsStorage) SetTime(ctx context.Context, b blob.ID, t time.Time) error {
+	return blob.ErrSetTimeUnsupported
+}
+
 func (gcs *gcsStorage) DeleteBlob(ctx context.Context, b blob.ID) error {
 	attempt := func() (interface{}, error) {
 		return nil, gcs.bucket.Object(gcs.getObjectNameString(b)).Delete(gcs.ctx)
@@ -145,7 +172,7 @@ func (gcs *gcsStorage) DeleteBlob(ctx context.Context, b blob.ID) error {
 	_, err := exponentialBackoff(ctx, fmt.Sprintf("DeleteBlob(%q)", b), attempt)
 	err = translateError(err)
 
-	if err == blob.ErrBlobNotFound {
+	if errors.Is(err, blob.ErrBlobNotFound) {
 		return nil
 	}
 
@@ -174,7 +201,7 @@ func (gcs *gcsStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback f
 		oa, err = lst.Next()
 	}
 
-	if err != iterator.Done {
+	if !errors.Is(err, iterator.Done) {
 		return err
 	}
 
@@ -186,6 +213,10 @@ func (gcs *gcsStorage) ConnectionInfo() blob.ConnectionInfo {
 		Type:   gcsStorageType,
 		Config: &gcs.Options,
 	}
+}
+
+func (gcs *gcsStorage) DisplayName() string {
+	return fmt.Sprintf("GCS: %v", gcs.BucketName)
 }
 
 func (gcs *gcsStorage) Close(ctx context.Context) error {
@@ -277,7 +308,7 @@ func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 
 	// verify GCS connection is functional by listing blobs in a bucket, which will fail if the bucket
 	// does not exist. We list with a prefix that will not exist, to avoid iterating through any objects.
-	nonExistentPrefix := fmt.Sprintf("kopia-gcs-storage-initializing-%v", time.Now().UnixNano()) // allow:no-inject-time
+	nonExistentPrefix := fmt.Sprintf("kopia-gcs-storage-initializing-%v", clock.Now().UnixNano())
 	err = gcs.ListBlobs(ctx, blob.ID(nonExistentPrefix), func(md blob.Metadata) error {
 		return nil
 	})

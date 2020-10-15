@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kopia/kopia/tests/testenv"
 )
@@ -14,18 +15,17 @@ func TestSnapshotGC(t *testing.T) {
 	t.Parallel()
 
 	e := testenv.NewCLITest(t)
-	defer e.Cleanup(t)
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 
 	expectedContentCount := len(e.RunAndExpectSuccess(t, "content", "list"))
 
-	dataDir := makeScratchDir(t)
-	testenv.AssertNoError(t, os.MkdirAll(dataDir, 0777))
+	dataDir := t.TempDir()
+	testenv.AssertNoError(t, os.MkdirAll(dataDir, 0o777))
 	testenv.AssertNoError(t, ioutil.WriteFile(filepath.Join(dataDir, "some-file1"), []byte(`
 hello world
 how are you
-`), 0600))
+`), 0o600))
 
 	// take a snapshot of a directory with 1 file
 	e.RunAndExpectSuccess(t, "snap", "create", dataDir)
@@ -61,6 +61,9 @@ how are you
 
 	// data block + directory block + manifest block + manifest block from manifest deletion
 	e.RunAndVerifyOutputLineCount(t, expectedContentCount, "content", "list")
+
+	// make sure we are not too quick
+	time.Sleep(2 * time.Second)
 
 	// garbage-collect for real, this time without age limit
 	e.RunAndExpectSuccess(t, "snapshot", "gc", "--delete", "--min-age", "0s")

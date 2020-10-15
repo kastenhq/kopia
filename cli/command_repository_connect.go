@@ -5,12 +5,11 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"gopkg.in/alecthomas/kingpin.v2"
 
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/content"
-
-	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
@@ -23,6 +22,8 @@ var (
 	connectHostname               string
 	connectUsername               string
 	connectCheckForUpdates        bool
+	connectReadonly               bool
+	connectDescription            string
 )
 
 func setupConnectOptions(cmd *kingpin.CmdClause) {
@@ -36,6 +37,8 @@ func setupConnectOptions(cmd *kingpin.CmdClause) {
 	cmd.Flag("override-hostname", "Override hostname used by this repository connection").Hidden().StringVar(&connectHostname)
 	cmd.Flag("override-username", "Override username used by this repository connection").Hidden().StringVar(&connectUsername)
 	cmd.Flag("check-for-updates", "Periodically check for Kopia updates on GitHub").Default("true").Envar(checkForUpdatesEnvar).BoolVar(&connectCheckForUpdates)
+	cmd.Flag("readonly", "Make repository read-only to avoid accidental changes").BoolVar(&connectReadonly)
+	cmd.Flag("description", "Human-readable description of the repository").StringVar(&connectDescription)
 }
 
 func connectOptions() *repo.ConnectOptions {
@@ -47,8 +50,12 @@ func connectOptions() *repo.ConnectOptions {
 			MaxMetadataCacheSizeBytes: connectMaxMetadataCacheSizeMB << 20, //nolint:gomnd
 			MaxListCacheDurationSec:   int(connectMaxListCacheDuration.Seconds()),
 		},
-		HostnameOverride: connectHostname,
-		UsernameOverride: connectUsername,
+		ClientOptions: repo.ClientOptions{
+			Hostname:    connectHostname,
+			Username:    connectUsername,
+			ReadOnly:    connectReadonly,
+			Description: connectDescription,
+		},
 	}
 }
 
@@ -71,7 +78,7 @@ func runConnectCommandWithStorageAndPassword(ctx context.Context, st blob.Storag
 		return err
 	}
 
-	printStderr("Connected to repository.\n")
+	log(ctx).Infof("Connected to repository.")
 	maybeInitializeUpdateCheck(ctx)
 
 	return nil

@@ -2,13 +2,13 @@ package cli
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
@@ -26,17 +26,18 @@ var (
 	snapshotCreateSources                 = snapshotCreateCommand.Arg("source", "Files or directories to create snapshot(s) of.").ExistingFilesOrDirs()
 	snapshotCreateAll                     = snapshotCreateCommand.Flag("all", "Create snapshots for files or directories previously backed up by this user on this computer").Bool()
 	snapshotCreateCheckpointUploadLimitMB = snapshotCreateCommand.Flag("upload-limit-mb", "Stop the backup process after the specified amount of data (in MB) has been uploaded.").PlaceHolder("MB").Default("0").Int64()
+	snapshotCreateCheckpointInterval      = snapshotCreateCommand.Flag("checkpoint-interval", "Frequency for creating periodic checkpoint.").Duration()
 	snapshotCreateDescription             = snapshotCreateCommand.Flag("description", "Free-form snapshot description.").String()
 	snapshotCreateForceHash               = snapshotCreateCommand.Flag("force-hash", "Force hashing of source files for a given percentage of files [0..100]").Default("0").Int()
 	snapshotCreateParallelUploads         = snapshotCreateCommand.Flag("parallel", "Upload N files in parallel").PlaceHolder("N").Default("0").Int()
-	snapshotCreateHostname                = snapshotCreateCommand.Flag("hostname", "Override local hostname.").String()
-	snapshotCreateUsername                = snapshotCreateCommand.Flag("username", "Override local username.").String()
 	snapshotCreateStartTime               = snapshotCreateCommand.Flag("start-time", "Override snapshot start timestamp.").String()
 	snapshotCreateEndTime                 = snapshotCreateCommand.Flag("end-time", "Override snapshot end timestamp.").String()
 )
 
-func runBackupCommand(ctx context.Context, rep repo.Repository) error {
+func runSnapshotCommand(ctx context.Context, rep repo.Repository) error {
 	sources := *snapshotCreateSources
+
+	maybeAutoUpgradeRepository(ctx, rep)
 
 	if *snapshotCreateAll {
 		local, err := getLocalBackupPaths(ctx, rep)
@@ -48,40 +49,24 @@ func runBackupCommand(ctx context.Context, rep repo.Repository) error {
 	}
 
 	if len(sources) == 0 {
-		return errors.New("no backup sources")
+		return errors.New("no snapshot sources")
 	}
 
-	u := snapshotfs.NewUploader(rep)
-	u.MaxUploadBytes = *snapshotCreateCheckpointUploadLimitMB << 20 //nolint:gomnd
-	u.ForceHashPercentage = *snapshotCreateForceHash
-	u.ParallelUploads = *snapshotCreateParallelUploads
-	onCtrlC(u.Cancel)
-
-	u.Progress = progress
-
-	startTime, err := parseTimestamp(*snapshotCreateStartTime)
-	if err != nil {
-		return errors.Wrap(err, "could not parse start-time")
-	}
-
-	endTime, err := parseTimestamp(*snapshotCreateEndTime)
-	if err != nil {
-		return errors.Wrap(err, "could not parse end-time")
-	}
-
-	if startTimeAfterEndTime(startTime, endTime) {
-		return errors.New("start time override cannot be after the end time override")
+	if err := validateStartEndTime(*snapshotCreateStartTime, *snapshotCreateEndTime); err != nil {
+		return err
 	}
 
 	if len(*snapshotCreateDescription) > maxSnapshotDescriptionLength {
 		return errors.New("description too long")
 	}
 
+	u := setupUploader(rep)
+
 	var finalErrors []string
 
 	for _, snapshotDir := range sources {
-		if u.IsCancelled() {
-			printStderr("Upload canceled\n")
+		if u.IsCanceled() {
+			log(ctx).Infof("Upload canceled")
 			break
 		}
 
@@ -92,16 +77,8 @@ func runBackupCommand(ctx context.Context, rep repo.Repository) error {
 
 		sourceInfo := snapshot.SourceInfo{
 			Path:     filepath.Clean(dir),
-			Host:     rep.Hostname(),
-			UserName: rep.Username(),
-		}
-
-		if h := *snapshotCreateHostname; h != "" {
-			sourceInfo.Host = h
-		}
-
-		if u := *snapshotCreateUsername; u != "" {
-			sourceInfo.UserName = u
+			Host:     rep.ClientOptions().Hostname,
+			UserName: rep.ClientOptions().Username,
 		}
 
 		if err := snapshotSingleSource(ctx, rep, u, sourceInfo); err != nil {
@@ -114,6 +91,41 @@ func runBackupCommand(ctx context.Context, rep repo.Repository) error {
 	}
 
 	return errors.Errorf("encountered %v errors:\n%v", len(finalErrors), strings.Join(finalErrors, "\n"))
+}
+
+func validateStartEndTime(st, et string) error {
+	startTime, err := parseTimestamp(st)
+	if err != nil {
+		return errors.Wrap(err, "could not parse start-time")
+	}
+
+	endTime, err := parseTimestamp(et)
+	if err != nil {
+		return errors.Wrap(err, "could not parse end-time")
+	}
+
+	if startTimeAfterEndTime(startTime, endTime) {
+		return errors.New("start time override cannot be after the end time override")
+	}
+
+	return nil
+}
+
+func setupUploader(rep repo.Repository) *snapshotfs.Uploader {
+	u := snapshotfs.NewUploader(rep)
+	u.MaxUploadBytes = *snapshotCreateCheckpointUploadLimitMB << 20 //nolint:gomnd
+
+	if interval := *snapshotCreateCheckpointInterval; interval != 0 {
+		u.CheckpointInterval = interval
+	}
+
+	u.ForceHashPercentage = *snapshotCreateForceHash
+	u.ParallelUploads = *snapshotCreateParallelUploads
+	onCtrlC(u.Cancel)
+
+	u.Progress = progress
+
+	return u
 }
 
 func parseTimestamp(timestamp string) (time.Time, error) {
@@ -131,9 +143,9 @@ func startTimeAfterEndTime(startTime, endTime time.Time) bool {
 }
 
 func snapshotSingleSource(ctx context.Context, rep repo.Repository, u *snapshotfs.Uploader, sourceInfo snapshot.SourceInfo) error {
-	printStderr("Snapshotting %v ...\n", sourceInfo)
+	log(ctx).Infof("Snapshotting %v ...", sourceInfo)
 
-	t0 := time.Now()
+	t0 := clock.Now()
 
 	localEntry, err := getLocalFSEntry(ctx, sourceInfo.Path)
 	if err != nil {
@@ -202,11 +214,11 @@ func snapshotSingleSource(ctx context.Context, rep repo.Repository, u *snapshotf
 
 	if ds := manifest.RootEntry.DirSummary; ds != nil {
 		if ds.NumFailed > 0 {
-			errorColor.Fprintf(os.Stderr, "\nIgnored %v errors while snapshotting.", ds.NumFailed) //nolint:errcheck
+			log(ctx).Warningf("Ignored %v errors while snapshotting %v.", ds.NumFailed, sourceInfo)
 		}
 	}
 
-	printStderr("\nCreated%v snapshot with root %v and ID %v in %v\n", maybePartial, manifest.RootObjectID(), snapID, time.Since(t0).Truncate(time.Second))
+	log(ctx).Infof("Created%v snapshot with root %v and ID %v in %v", maybePartial, manifest.RootObjectID(), snapID, clock.Since(t0).Truncate(time.Second))
 
 	return err
 }
@@ -256,7 +268,7 @@ func findPreviousSnapshotManifest(ctx context.Context, rep repo.Repository, sour
 }
 
 func getLocalBackupPaths(ctx context.Context, rep repo.Repository) ([]string, error) {
-	log(ctx).Debugf("Looking for previous backups of '%v@%v'...", rep.Hostname(), rep.Username())
+	log(ctx).Debugf("Looking for previous backups of '%v@%v'...", rep.ClientOptions().Hostname, rep.ClientOptions().Username)
 
 	sources, err := snapshot.ListSources(ctx, rep)
 	if err != nil {
@@ -266,7 +278,7 @@ func getLocalBackupPaths(ctx context.Context, rep repo.Repository) ([]string, er
 	var result []string
 
 	for _, src := range sources {
-		if src.Host == rep.Hostname() && src.UserName == rep.Username() {
+		if src.Host == rep.ClientOptions().Hostname && src.UserName == rep.ClientOptions().Username {
 			result = append(result, src.Path)
 		}
 	}
@@ -275,5 +287,5 @@ func getLocalBackupPaths(ctx context.Context, rep repo.Repository) ([]string, er
 }
 
 func init() {
-	snapshotCreateCommand.Action(repositoryAction(runBackupCommand))
+	snapshotCreateCommand.Action(repositoryAction(runSnapshotCommand))
 }

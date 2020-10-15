@@ -9,10 +9,14 @@ import (
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/logging"
 	"github.com/kopia/kopia/repo/manifest"
+	"github.com/kopia/kopia/repo/object"
 )
 
-// ManifestType is the value of the "type" label for snapshot manifests
+// ManifestType is the value of the "type" label for snapshot manifests.
 const ManifestType = "snapshot"
+
+// ErrSnapshotNotFound is returned when a snapshot is not found.
+var ErrSnapshotNotFound = errors.Errorf("snapshot not found")
 
 const (
 	typeKey = manifest.TypeLabelKey
@@ -70,8 +74,18 @@ func ListSnapshots(ctx context.Context, rep repo.Repository, si SourceInfo) ([]*
 // LoadSnapshot loads and parses a snapshot with a given ID.
 func LoadSnapshot(ctx context.Context, rep repo.Repository, manifestID manifest.ID) (*Manifest, error) {
 	sm := &Manifest{}
-	if _, err := rep.GetManifest(ctx, manifestID, sm); err != nil {
+
+	em, err := rep.GetManifest(ctx, manifestID, sm)
+	if err != nil {
+		if errors.Is(err, manifest.ErrNotFound) {
+			return nil, ErrSnapshotNotFound
+		}
+
 		return nil, errors.Wrap(err, "unable to find manifest entries")
+	}
+
+	if em.Labels[manifest.TypeLabelKey] != ManifestType {
+		return nil, errors.Errorf("manifest is not a snapshot")
 	}
 
 	sm.ID = manifestID
@@ -156,6 +170,29 @@ func ListSnapshotManifests(ctx context.Context, rep repo.Repository, src *Source
 	}
 
 	return entryIDs(entries), nil
+}
+
+// FindSnapshotsByRootObjectID returns the list of matching snapshots for a given rootID.
+func FindSnapshotsByRootObjectID(ctx context.Context, rep repo.Repository, rootID object.ID) ([]*Manifest, error) {
+	ids, err := ListSnapshotManifests(ctx, rep, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "error listing snapshot manifests")
+	}
+
+	manifests, err := LoadSnapshots(ctx, rep, ids)
+	if err != nil {
+		return nil, errors.Wrap(err, "error loading snapshot manifests")
+	}
+
+	var result []*Manifest
+
+	for _, m := range manifests {
+		if m.RootObjectID() == rootID {
+			result = append(result, m)
+		}
+	}
+
+	return result, nil
 }
 
 func entryIDs(entries []*manifest.EntryMetadata) []manifest.ID {

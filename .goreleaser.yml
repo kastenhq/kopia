@@ -19,7 +19,7 @@ builds:
   ldflags:
   - -s -w -X "github.com/kopia/kopia/repo.BuildVersion={{.Version}}" -X "github.com/kopia/kopia/repo.BuildInfo={{.Commit}}"
 release:
-  draft: true
+  draft: false
 archives:
   - id: default
     replacements:
@@ -38,29 +38,50 @@ archives:
 checksum:
   name_template: 'checksums.txt'
 snapshot:
-  name_template: "{{ .Tag }}-next"
+  name_template: '{{ .Env.KOPIA_VERSION_NO_PREFIX }}'
 nfpms:
   - homepage: https://kopia.io
     vendor: Kopia Project
     maintainer: Kopia Project <kopia-pmc@googlegroups.com>
     description: Fast and secure open source backup.
     license: Apache 2.0
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    replacements:
+      arm: armhf
     formats:
     - deb
     - rpm
     bindir: /usr/bin
+    overrides:
+      rpm:
+        file_name_template: "{{ .ProjectName }}-{{ .Version }}.{{ .Arch }}"
+        replacements:
+          amd64: x86_64
+          arm64: aarch64
+          arm: armhfp
 brews:
   - homepage: "https://kopia.io"
-    github:
+    tap:
       owner: kopia
       name: homebrew-kopia
     description: "Fast and secure open source backup."
     install:
       bin.install "kopia"
+scoop:
+  bucket:
+    owner: kopia
+    name: scoop-bucket
+  commit_author:
+    name: Kopia Builder
+    email: builder@kopia.io
+  homepage: "https://kopia.io/"
+  description: "Fast and secure open source backup."
+  license: Apache-2.0
 signs:
-  -
+  - id: all
     artifacts: checksum
-    args: ["-a", "--output", "${signature}", "--detach-sign", "${artifact}"]
+    cmd: tools/sign.sh
+    args: ["${artifact}", "${signature}"]
 changelog:
   filters:
     exclude:

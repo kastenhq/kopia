@@ -108,7 +108,8 @@ func runMigrateCommand(ctx context.Context, destRepo repo.Repository) error {
 
 	wg.Wait()
 	progress.FinishShared()
-	printStderr("\r\nMigration finished.\n")
+	printStderr("\r\n")
+	log(ctx).Infof("Migration finished.")
 
 	return nil
 }
@@ -158,7 +159,7 @@ func migrateAllPolicies(ctx context.Context, sourceRepo, destRepo repo.Repositor
 
 func migrateSinglePolicy(ctx context.Context, sourceRepo, destRepo repo.Repository, si snapshot.SourceInfo) error {
 	pol, err := policy.GetDefinedPolicy(ctx, sourceRepo, si)
-	if err == policy.ErrPolicyNotFound {
+	if errors.Is(err, policy.ErrPolicyNotFound) {
 		return nil
 	}
 
@@ -169,15 +170,15 @@ func migrateSinglePolicy(ctx context.Context, sourceRepo, destRepo repo.Reposito
 	_, err = policy.GetDefinedPolicy(ctx, destRepo, si)
 	if err == nil {
 		if !*migrateOverwritePolicies {
-			printStderr("\rpolicy already set for %v\n", si)
+			log(ctx).Infof("policy already set for %v", si)
 			// already have destination policy
 			return nil
 		}
-	} else if err != policy.ErrPolicyNotFound {
+	} else if !errors.Is(err, policy.ErrPolicyNotFound) {
 		return errors.Wrapf(err, "unable to migrate policy for %v", si)
 	}
 
-	printStderr("\rmigrating policy for %v\n", si)
+	log(ctx).Infof("migrating policy for %v", si)
 
 	return policy.SetPolicy(ctx, destRepo, si, pol)
 }
@@ -213,7 +214,7 @@ func migrateSingleSource(ctx context.Context, uploader *snapshotfs.Uploader, sou
 	})
 
 	for _, m := range filterSnapshotsToMigrate(snapshots) {
-		if uploader.IsCancelled() {
+		if uploader.IsCanceled() {
 			break
 		}
 
@@ -231,7 +232,10 @@ func migrateSingleSourceSnapshot(ctx context.Context, uploader *snapshotfs.Uploa
 		return nil
 	}
 
-	sourceEntry := snapshotfs.DirectoryEntry(sourceRepo, m.RootObjectID(), nil)
+	sourceEntry, err := snapshotfs.SnapshotRoot(sourceRepo, m)
+	if err != nil {
+		return err
+	}
 
 	existing, err := findPreviousSnapshotManifestWithStartTime(ctx, destRepo, m.Source, m.StartTime)
 	if err != nil {
@@ -239,11 +243,11 @@ func migrateSingleSourceSnapshot(ctx context.Context, uploader *snapshotfs.Uploa
 	}
 
 	if existing != nil {
-		printStderr("\ralready migrated %v at %v\n", s, formatTimestamp(m.StartTime))
+		log(ctx).Infof("already migrated %v at %v", s, formatTimestamp(m.StartTime))
 		return nil
 	}
 
-	printStderr("\rmigrating snapshot of %v at %v\n", s, formatTimestamp(m.StartTime))
+	log(ctx).Infof("migrating snapshot of %v at %v", s, formatTimestamp(m.StartTime))
 
 	previous, err := findPreviousSnapshotManifest(ctx, destRepo, m.Source, &m.StartTime)
 	if err != nil {
@@ -283,7 +287,7 @@ func getSourcesToMigrate(ctx context.Context, rep repo.Repository) ([]snapshot.S
 		var result []snapshot.SourceInfo
 
 		for _, s := range *migrateSources {
-			si, err := snapshot.ParseSourceInfo(s, rep.Hostname(), rep.Username())
+			si, err := snapshot.ParseSourceInfo(s, rep.ClientOptions().Hostname, rep.ClientOptions().Username)
 			if err != nil {
 				return nil, err
 			}

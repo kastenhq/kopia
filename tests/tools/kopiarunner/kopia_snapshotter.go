@@ -5,8 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kopia/kopia/tests/robustness/snap"
 	"github.com/pkg/errors"
+
+	"github.com/kopia/kopia/tests/robustness/snap"
 )
 
 var _ snap.Snapshotter = &KopiaSnapshotter{}
@@ -17,21 +18,19 @@ const (
 	noCheckForUpdatesFlag   = "--no-check-for-updates"
 	noProgressFlag          = "--no-progress"
 	parallelFlag            = "--parallel"
+
+	// Flag value settings.
+	contentCacheSizeSettingMB  = 500
+	metadataCacheSizeSettingMB = 500
+	parallelSetting            = 8
 )
 
-// Flag value settings
-var (
-	contentCacheSizeSettingMB  = strconv.Itoa(500)
-	metadataCacheSizeSettingMB = strconv.Itoa(500)
-	parallelSetting            = strconv.Itoa(8)
-)
-
-// KopiaSnapshotter implements the Snapshotter interface using Kopia commands
+// KopiaSnapshotter implements the Snapshotter interface using Kopia commands.
 type KopiaSnapshotter struct {
 	Runner *Runner
 }
 
-// NewKopiaSnapshotter instantiates a new KopiaSnapshotter and returns its pointer
+// NewKopiaSnapshotter instantiates a new KopiaSnapshotter and returns its pointer.
 func NewKopiaSnapshotter(baseDir string) (*KopiaSnapshotter, error) {
 	runner, err := NewRunner(baseDir)
 	if err != nil {
@@ -43,7 +42,7 @@ func NewKopiaSnapshotter(baseDir string) (*KopiaSnapshotter, error) {
 	}, nil
 }
 
-// Cleanup cleans up the kopia Runner
+// Cleanup cleans up the kopia Runner.
 func (ks *KopiaSnapshotter) Cleanup() {
 	if ks.Runner != nil {
 		ks.Runner.Cleanup()
@@ -54,8 +53,8 @@ func (ks *KopiaSnapshotter) repoConnectCreate(op string, args ...string) error {
 	args = append([]string{"repo", op}, args...)
 
 	args = append(args,
-		contentCacheSizeMBFlag, contentCacheSizeSettingMB,
-		metadataCacheSizeMBFlag, metadataCacheSizeSettingMB,
+		contentCacheSizeMBFlag, strconv.Itoa(contentCacheSizeSettingMB),
+		metadataCacheSizeMBFlag, strconv.Itoa(metadataCacheSizeSettingMB),
 		noCheckForUpdatesFlag,
 	)
 
@@ -64,12 +63,12 @@ func (ks *KopiaSnapshotter) repoConnectCreate(op string, args ...string) error {
 	return err
 }
 
-// CreateRepo creates a kopia repository with the provided arguments
+// CreateRepo creates a kopia repository with the provided arguments.
 func (ks *KopiaSnapshotter) CreateRepo(args ...string) (err error) {
 	return ks.repoConnectCreate("create", args...)
 }
 
-// ConnectRepo connects to the repository described by the provided arguments
+// ConnectRepo connects to the repository described by the provided arguments.
 func (ks *KopiaSnapshotter) ConnectRepo(args ...string) (err error) {
 	return ks.repoConnectCreate("connect", args...)
 }
@@ -106,7 +105,7 @@ func (ks *KopiaSnapshotter) ConnectOrCreateFilesystem(repoPath string) error {
 // CreateSnapshot implements the Snapshotter interface, issues a kopia snapshot
 // create command on the provided source path.
 func (ks *KopiaSnapshotter) CreateSnapshot(source string) (snapID string, err error) {
-	_, errOut, err := ks.Runner.Run("snapshot", "create", parallelFlag, parallelSetting, noProgressFlag, source)
+	_, errOut, err := ks.Runner.Run("snapshot", "create", parallelFlag, strconv.Itoa(parallelSetting), noProgressFlag, source)
 	if err != nil {
 		return "", err
 	}
@@ -115,27 +114,27 @@ func (ks *KopiaSnapshotter) CreateSnapshot(source string) (snapID string, err er
 }
 
 // RestoreSnapshot implements the Snapshotter interface, issues a kopia snapshot
-// restore command of the provided snapshot ID to the provided restore destination
+// restore command of the provided snapshot ID to the provided restore destination.
 func (ks *KopiaSnapshotter) RestoreSnapshot(snapID, restoreDir string) (err error) {
 	_, _, err = ks.Runner.Run("snapshot", "restore", snapID, restoreDir)
 	return err
 }
 
 // DeleteSnapshot implements the Snapshotter interface, issues a kopia snapshot
-// delete of the provided snapshot ID
+// delete of the provided snapshot ID.
 func (ks *KopiaSnapshotter) DeleteSnapshot(snapID string) (err error) {
-	_, _, err = ks.Runner.Run("snapshot", "delete", snapID, "--unsafe-ignore-source")
+	_, _, err = ks.Runner.Run("snapshot", "delete", snapID, "--delete")
 	return err
 }
 
-// RunGC implements the Snapshotter interface, issues a gc command to the kopia repo
+// RunGC implements the Snapshotter interface, issues a gc command to the kopia repo.
 func (ks *KopiaSnapshotter) RunGC() (err error) {
 	_, _, err = ks.Runner.Run("snapshot", "gc")
 	return err
 }
 
 // ListSnapshots implements the Snapshotter interface, issues a kopia snapshot
-// list and parses the snapshot IDs
+// list and parses the snapshot IDs.
 func (ks *KopiaSnapshotter) ListSnapshots() ([]string, error) {
 	snapIDListMan, err := ks.snapIDsFromManifestList()
 	if err != nil {
@@ -175,13 +174,13 @@ func (ks *KopiaSnapshotter) snapIDsFromSnapListAll() ([]string, error) {
 }
 
 // Run implements the Snapshotter interface, issues an arbitrary kopia command and returns
-// the output
+// the output.
 func (ks *KopiaSnapshotter) Run(args ...string) (stdout, stderr string, err error) {
 	return ks.Runner.Run(args...)
 }
 
 func parseSnapID(lines []string) (string, error) {
-	pattern := regexp.MustCompile(`Created snapshot with root [\S]+ and ID ([\S]+)`)
+	pattern := regexp.MustCompile(`Created snapshot with root \S+ and ID (\S+)`)
 
 	for _, l := range lines {
 		match := pattern.FindAllStringSubmatch(l, 1)
@@ -202,7 +201,7 @@ func parseSnapshotListForSnapshotIDs(output string) []string {
 
 		for _, f := range fields {
 			spl := strings.Split(f, "manifest:")
-			if len(spl) == 2 {
+			if len(spl) == 2 { //nolint:gomnd
 				ret = append(ret, spl[1])
 			}
 		}

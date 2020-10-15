@@ -14,6 +14,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/blobtesting"
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/repo/blob"
@@ -32,11 +33,11 @@ func newUnderlyingStorageForContentCacheTesting(t *testing.T) blob.Storage {
 func TestCacheExpiration(t *testing.T) {
 	cacheData := blobtesting.DataMap{}
 
-	// on Windows, the time does not always move forward (sometimes time.Now() returns exactly the same value for consecutive invocations)
-	// this matters here so we return a fake time.Now() function that always moves forward.
+	// on Windows, the time does not always move forward (sometimes clock.Now() returns exactly the same value for consecutive invocations)
+	// this matters here so we return a fake clock.Now() function that always moves forward.
 	var currentTimeMutex sync.Mutex
 
-	currentTime := time.Now()
+	currentTime := clock.Now()
 
 	movingTimeFunc := func() time.Time {
 		currentTimeMutex.Lock()
@@ -50,9 +51,14 @@ func TestCacheExpiration(t *testing.T) {
 
 	underlyingStorage := newUnderlyingStorageForContentCacheTesting(t)
 
-	cache, err := newContentCacheWithCacheStorage(testlogging.Context(t), underlyingStorage, cacheStorage, 10000, CachingOptions{}, 0, 500*time.Millisecond)
+	cb, err := newContentCacheBase(testlogging.Context(t), cacheStorage, 10000, 0, 500*time.Millisecond)
 	if err != nil {
-		t.Fatalf("err: %v", err)
+		t.Fatalf("unable to create base cache: %v", err)
+	}
+
+	cache := &contentCacheForData{
+		st:        underlyingStorage,
+		cacheBase: cb,
 	}
 
 	defer cache.close()
@@ -105,10 +111,14 @@ func TestDiskContentCache(t *testing.T) {
 
 	defer os.RemoveAll(tmpDir)
 
-	cache, err := newContentCache(ctx, newUnderlyingStorageForContentCacheTesting(t), CachingOptions{
-		CacheDirectory: tmpDir,
-	}, 10000, "contents")
+	const maxBytes = 10000
 
+	cacheStorage, err := newCacheStorageOrNil(ctx, tmpDir, maxBytes, "contents")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache, err := newContentCacheForData(ctx, newUnderlyingStorageForContentCacheTesting(t), cacheStorage, maxBytes, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -118,7 +128,7 @@ func TestDiskContentCache(t *testing.T) {
 	verifyContentCache(t, cache)
 }
 
-func verifyContentCache(t *testing.T, cache *contentCache) {
+func verifyContentCache(t *testing.T, cache contentCache) {
 	ctx := testlogging.Context(t)
 
 	t.Run("GetContentContent", func(t *testing.T) {
@@ -138,8 +148,8 @@ func verifyContentCache(t *testing.T, cache *contentCache) {
 			{"xf0f0f3", "no-such-content", 0, -1, nil, blob.ErrBlobNotFound},
 			{"xf0f0f4", "no-such-content", 10, 5, nil, blob.ErrBlobNotFound},
 			{"f0f0f5", "content-1", 7, 3, []byte{8, 9, 10}, nil},
-			{"xf0f0f6", "content-1", 11, 10, nil, errors.Errorf("invalid offset")},
-			{"xf0f0f6", "content-1", -1, 5, nil, errors.Errorf("invalid offset")},
+			{"xf0f0f6", "content-1", 11, 10, nil, errors.Errorf("invalid offset: 11")},
+			{"xf0f0f6", "content-1", -1, 5, nil, errors.Errorf("invalid offset: -1")},
 		}
 
 		for _, tc := range cases {
@@ -154,12 +164,12 @@ func verifyContentCache(t *testing.T, cache *contentCache) {
 			}
 		}
 
-		verifyStorageContentList(t, cache.cacheStorage, "f0f0f1x", "f0f0f2x", "f0f0f5")
+		verifyStorageContentList(t, cache.(*contentCacheForData).cacheStorage, "f0f0f1x", "f0f0f2x", "f0f0f5")
 	})
 
 	t.Run("DataCorruption", func(t *testing.T) {
 		var cacheKey blob.ID = "f0f0f1x"
-		d, err := cache.cacheStorage.GetBlob(ctx, cacheKey, 0, -1)
+		d, err := cache.(*contentCacheForData).cacheStorage.GetBlob(ctx, cacheKey, 0, -1)
 		if err != nil {
 			t.Fatalf("unable to retrieve data from cache: %v", err)
 		}
@@ -167,7 +177,7 @@ func verifyContentCache(t *testing.T, cache *contentCache) {
 		// corrupt the data and write back
 		d[0] ^= 1
 
-		if puterr := cache.cacheStorage.PutBlob(ctx, cacheKey, gather.FromSlice(d)); puterr != nil {
+		if puterr := cache.(*contentCacheForData).cacheStorage.PutBlob(ctx, cacheKey, gather.FromSlice(d)); puterr != nil {
 			t.Fatalf("unable to write corrupted content: %v", puterr)
 		}
 
@@ -197,13 +207,13 @@ func TestCacheFailureToOpen(t *testing.T) {
 	}
 
 	// Will fail because of ListBlobs failure.
-	_, err := newContentCacheWithCacheStorage(testlogging.Context(t), underlyingStorage, faultyCache, 10000, CachingOptions{}, 0, 5*time.Hour)
+	_, err := newContentCacheForData(testlogging.Context(t), underlyingStorage, faultyCache, 10000, nil)
 	if err == nil || !strings.Contains(err.Error(), someError.Error()) {
 		t.Errorf("invalid error %v, wanted: %v", err, someError)
 	}
 
 	// ListBlobs fails only once, next time it succeeds.
-	cache, err := newContentCacheWithCacheStorage(testlogging.Context(t), underlyingStorage, faultyCache, 10000, CachingOptions{}, 0, 100*time.Millisecond)
+	cache, err := newContentCacheForData(testlogging.Context(t), underlyingStorage, faultyCache, 10000, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -221,7 +231,7 @@ func TestCacheFailureToWrite(t *testing.T) {
 		Base: cacheStorage,
 	}
 
-	cache, err := newContentCacheWithCacheStorage(testlogging.Context(t), underlyingStorage, faultyCache, 10000, CachingOptions{}, 0, 5*time.Hour)
+	cache, err := newContentCacheForData(testlogging.Context(t), underlyingStorage, faultyCache, 10000, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -264,7 +274,7 @@ func TestCacheFailureToRead(t *testing.T) {
 		Base: cacheStorage,
 	}
 
-	cache, err := newContentCacheWithCacheStorage(testlogging.Context(t), underlyingStorage, faultyCache, 10000, CachingOptions{}, 0, 5*time.Hour)
+	cache, err := newContentCacheForData(testlogging.Context(t), underlyingStorage, faultyCache, 10000, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

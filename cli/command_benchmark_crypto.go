@@ -1,15 +1,15 @@
 package cli
 
 import (
+	"context"
 	"sort"
-	"time"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/units"
+	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/encryption"
 	"github.com/kopia/kopia/repo/hashing"
-
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
@@ -19,7 +19,7 @@ var (
 	benchmarkCryptoDeprecatedAlgorithms = benchmarkCryptoCommand.Flag("deprecated", "Include deprecated algorithms").Bool()
 )
 
-func runBenchmarkCryptoAction(ctx *kingpin.ParseContext) error {
+func runBenchmarkCryptoAction(ctx context.Context, rep repo.Repository) error {
 	type benchResult struct {
 		hash       string
 		encryption string
@@ -51,21 +51,21 @@ func runBenchmarkCryptoAction(ctx *kingpin.ParseContext) error {
 				continue
 			}
 
-			printStderr("Benchmarking hash '%v' and encryption '%v'... (%v x %v bytes)\n", ha, ea, *benchmarkCryptoRepeat, len(data))
+			log(ctx).Infof("Benchmarking hash '%v' and encryption '%v'... (%v x %v bytes)", ha, ea, *benchmarkCryptoRepeat, len(data))
 
-			t0 := time.Now()
+			t0 := clock.Now()
 
 			hashCount := *benchmarkCryptoRepeat
 
 			for i := 0; i < hashCount; i++ {
 				contentID := h(hashOutput[:0], data)
 				if _, encerr := e.Encrypt(encryptOutput[:0], data, contentID); encerr != nil {
-					printStderr("encryption failed: %v\n", encerr)
+					log(ctx).Errorf("encryption failed: %v", encerr)
 					break
 				}
 			}
 
-			hashTime := time.Since(t0)
+			hashTime := clock.Since(t0)
 			bytesPerSecond := float64(len(data)) * float64(hashCount) / hashTime.Seconds()
 
 			results = append(results, benchResult{hash: ha, encryption: ea, throughput: bytesPerSecond})
@@ -86,5 +86,5 @@ func runBenchmarkCryptoAction(ctx *kingpin.ParseContext) error {
 }
 
 func init() {
-	benchmarkCryptoCommand.Action(runBenchmarkCryptoAction)
+	benchmarkCryptoCommand.Action(maybeRepositoryAction(runBenchmarkCryptoAction, false))
 }

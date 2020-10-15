@@ -11,6 +11,7 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/exp/mmap"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo/blob"
 )
 
@@ -111,7 +112,7 @@ func writeTempFileAtomic(dirname string, data []byte) (string, error) {
 	tf, err := ioutil.TempFile(dirname, "tmp")
 	if err != nil {
 		if os.IsNotExist(err) {
-			os.MkdirAll(dirname, 0700) //nolint:errcheck
+			os.MkdirAll(dirname, 0o700) //nolint:errcheck
 			tf, err = ioutil.TempFile(dirname, "tmp")
 		}
 	}
@@ -151,7 +152,7 @@ func (c *diskCommittedContentIndexCache) expireUnused(ctx context.Context, used 
 	}
 
 	for _, rem := range remaining {
-		if time.Since(rem.ModTime()) > unusedCommittedContentIndexCleanupTime { // allow:no-inject-time
+		if clock.Since(rem.ModTime()) > unusedCommittedContentIndexCleanupTime {
 			log(ctx).Debugf("removing unused %v %v", rem.Name(), rem.ModTime())
 
 			if err := os.Remove(filepath.Join(c.dirname, rem.Name())); err != nil {

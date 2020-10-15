@@ -23,7 +23,7 @@ import (
 	"github.com/kopia/kopia/repo/content"
 )
 
-const masterPassword = "foo-bar-baz-1234" // nolint:gosec
+const masterPassword = "foo-bar-baz-1234"
 
 var (
 	knownBlocks      []content.ID
@@ -35,7 +35,7 @@ func TestStressRepository(t *testing.T) {
 		t.Skip("skipping stress test during short tests")
 	}
 
-	ctx := content.UsingListCache(testlogging.Context(t), false)
+	ctx := testlogging.Context(t)
 
 	tmpPath, err := ioutil.TempDir("", "kopia")
 	if err != nil {
@@ -54,12 +54,11 @@ func TestStressRepository(t *testing.T) {
 	configFile1 := filepath.Join(tmpPath, "kopia1.config")
 	configFile2 := filepath.Join(tmpPath, "kopia2.config")
 
-	assertNoError(t, os.MkdirAll(storagePath, 0700))
+	assertNoError(t, os.MkdirAll(storagePath, 0o700))
 
 	st, err := filesystem.New(ctx, &filesystem.Options{
 		Path: storagePath,
 	})
-
 	if err != nil {
 		t.Fatalf("unable to initialize storage: %v", err)
 	}
@@ -148,7 +147,7 @@ func longLivedRepositoryTest(ctx context.Context, t *testing.T, cancel chan stru
 		go func() {
 			defer wg2.Done()
 
-			repositoryTest(ctx, t, cancel, rep)
+			repositoryTest(ctx, t, cancel, rep.(*repo.DirectRepository))
 		}()
 	}
 
@@ -220,7 +219,7 @@ func repositoryTest(ctx context.Context, t *testing.T, cancel chan struct{}, rep
 
 func writeRandomBlock(ctx context.Context, t *testing.T, r *repo.DirectRepository) error {
 	data := make([]byte, 1000)
-	cryptorand.Read(data) //nolint:errcheck
+	cryptorand.Read(data)
 
 	contentID, err := r.Content.WriteContent(ctx, data, "")
 	if err == nil {
@@ -248,7 +247,7 @@ func readKnownBlock(ctx context.Context, t *testing.T, r *repo.DirectRepository)
 	knownBlocksMutex.Unlock()
 
 	_, err := r.Content.GetContent(ctx, contentID)
-	if err == nil || err == content.ErrContentNotFound {
+	if err == nil || errors.Is(err, content.ErrContentNotFound) {
 		return nil
 	}
 
@@ -271,7 +270,7 @@ func listAndReadAllContents(ctx context.Context, t *testing.T, r *repo.DirectRep
 			cid := ci.ID
 			_, err := r.Content.GetContent(ctx, cid)
 			if err != nil {
-				if err == content.ErrContentNotFound && strings.HasPrefix(string(cid), "m") {
+				if errors.Is(err, content.ErrContentNotFound) && strings.HasPrefix(string(cid), "m") {
 					// this is ok, sometimes manifest manager will perform compaction and 'm' contents will be marked as deleted
 					return nil
 				}

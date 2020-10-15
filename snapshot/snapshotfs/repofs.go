@@ -15,6 +15,11 @@ import (
 	"github.com/kopia/kopia/snapshot"
 )
 
+// Well-known object ID prefixes.
+const (
+	objectIDPrefixDirectory = "k"
+)
+
 type repositoryEntry struct {
 	metadata *snapshot.DirEntry
 	repo     repo.Repository
@@ -30,8 +35,12 @@ func (e *repositoryEntry) Mode() os.FileMode {
 		return os.ModeDir | os.FileMode(e.metadata.Permissions)
 	case snapshot.EntryTypeSymlink:
 		return os.ModeSymlink | os.FileMode(e.metadata.Permissions)
-	default:
+	case snapshot.EntryTypeFile:
 		return os.FileMode(e.metadata.Permissions)
+	case snapshot.EntryTypeUnknown:
+		return 0
+	default:
+		return 0
 	}
 }
 
@@ -79,8 +88,23 @@ type repositorySymlink struct {
 	repositoryEntry
 }
 
-func (rd *repositoryDirectory) Summary() *fs.DirectorySummary {
-	return rd.summary
+func (rd *repositoryDirectory) Summary(ctx context.Context) (*fs.DirectorySummary, error) {
+	if rd.summary != nil {
+		return rd.summary, nil
+	}
+
+	r, err := rd.repo.OpenObject(ctx, rd.metadata.ObjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close() //nolint:errcheck
+
+	_, summ, err := readDirEntries(r)
+	if err != nil {
+		return nil, err
+	}
+
+	return summ, nil
 }
 
 func (rd *repositoryDirectory) Child(ctx context.Context, name string) (fs.Entry, error) {
@@ -159,6 +183,9 @@ func EntryFromDirEntry(r repo.Repository, md *snapshot.DirEntry) (fs.Entry, erro
 	case snapshot.EntryTypeFile:
 		return fs.File(&repositoryFile{re}), nil
 
+	case snapshot.EntryTypeUnknown:
+		return nil, errors.Errorf("not supported entry metadata type: %q", md.Type)
+
 	default:
 		return nil, errors.Errorf("not supported entry metadata type: %q", md.Type)
 	}
@@ -182,7 +209,7 @@ func withFileInfo(r object.Reader, e fs.Entry) fs.Reader {
 func DirectoryEntry(rep repo.Repository, objectID object.ID, dirSummary *fs.DirectorySummary) fs.Directory {
 	d, _ := EntryFromDirEntry(rep, &snapshot.DirEntry{
 		Name:        "/",
-		Permissions: 0555, //nolint:gomnd
+		Permissions: 0o555, //nolint:gomnd
 		Type:        snapshot.EntryTypeDirectory,
 		ObjectID:    objectID,
 		DirSummary:  dirSummary,
@@ -201,10 +228,63 @@ func SnapshotRoot(rep repo.Repository, man *snapshot.Manifest) (fs.Entry, error)
 	return EntryFromDirEntry(rep, man.RootEntry)
 }
 
-var _ fs.Directory = (*repositoryDirectory)(nil)
-var _ fs.File = (*repositoryFile)(nil)
-var _ fs.Symlink = (*repositorySymlink)(nil)
+// AutoDetectEntryFromObjectID returns fs.Entry (either file or directory) for the provided object ID.
+// It uses heuristics to determine whether object ID is possibly a directory and treats it as such.
+func AutoDetectEntryFromObjectID(ctx context.Context, rep repo.Repository, oid object.ID, maybeName string) fs.Entry {
+	if IsDirectoryID(oid) {
+		dirEntry := DirectoryEntry(rep, oid, nil)
+		if _, err := dirEntry.Readdir(ctx); err == nil {
+			log(ctx).Debugf("%v auto-detected as directory", oid)
+			return dirEntry
+		}
+	}
 
-var _ snapshot.HasDirEntry = (*repositoryDirectory)(nil)
-var _ snapshot.HasDirEntry = (*repositoryFile)(nil)
-var _ snapshot.HasDirEntry = (*repositorySymlink)(nil)
+	if maybeName == "" {
+		maybeName = "file"
+	}
+
+	var fileSize int64
+
+	r, err := rep.OpenObject(ctx, oid)
+	if err == nil {
+		fileSize = r.Length()
+		r.Close() //nolint:errcheck
+	}
+
+	log(ctx).Debugf("%v auto-detected as a file with name %v and size %v", oid, maybeName, fileSize)
+
+	f, _ := EntryFromDirEntry(rep, &snapshot.DirEntry{
+		Name:        maybeName,
+		Permissions: 0o644, //nolint:gomnd
+		Type:        snapshot.EntryTypeFile,
+		ObjectID:    oid,
+		FileSize:    fileSize,
+	})
+
+	return f
+}
+
+// IsDirectoryID determines whether given object ID represents a directory.
+func IsDirectoryID(oid object.ID) bool {
+	if ndx, ok := oid.IndexObjectID(); ok {
+		return IsDirectoryID(ndx)
+	}
+
+	if cid, _, ok := oid.ContentID(); ok {
+		return cid.Prefix() == objectIDPrefixDirectory
+	}
+
+	return false
+}
+
+var (
+	_ fs.Directory = (*repositoryDirectory)(nil)
+	_ fs.File      = (*repositoryFile)(nil)
+	_ fs.Symlink   = (*repositorySymlink)(nil)
+)
+
+var (
+	_ snapshot.HasDirEntry = (*repositoryDirectory)(nil)
+	_ snapshot.HasDirEntry = (*repositoryFile)(nil)
+	_ snapshot.HasDirEntry = (*repositorySymlink)(nil)
+)

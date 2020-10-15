@@ -1,20 +1,19 @@
 package server
 
 import (
+	"errors"
 	"net/http"
-	"strings"
 	"time"
 
+	"github.com/gorilla/mux"
+
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo/object"
+	"github.com/kopia/kopia/snapshot/snapshotfs"
 )
 
 func (s *Server) handleObjectGet(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "incompatible HTTP method", http.StatusMethodNotAllowed)
-		return
-	}
-
-	oidstr := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+	oidstr := mux.Vars(r)["objectID"]
 
 	oid, err := object.ParseID(oidstr)
 	if err != nil {
@@ -23,12 +22,12 @@ func (s *Server) handleObjectGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	obj, err := s.rep.OpenObject(r.Context(), oid)
-	if err == object.ErrObjectNotFound {
+	if errors.Is(err, object.ErrObjectNotFound) {
 		http.Error(w, "object not found", http.StatusNotFound)
 		return
 	}
 
-	if cid, _, ok := oid.ContentID(); ok && cid.Prefix() == "k" {
+	if snapshotfs.IsDirectoryID(oid) {
 		w.Header().Set("Content-Type", "application/json")
 	}
 
@@ -38,7 +37,7 @@ func (s *Server) handleObjectGet(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", "attachment; filename=\""+p+"\"")
 	}
 
-	mtime := time.Now()
+	mtime := clock.Now()
 
 	if p := r.URL.Query().Get("mtime"); p != "" {
 		if m, err := time.Parse(time.RFC3339Nano, p); err == nil {

@@ -14,7 +14,6 @@ import (
 var (
 	contentListCommand        = contentCommands.Command("list", "List contents").Alias("ls")
 	contentListLong           = contentListCommand.Flag("long", "Long output").Short('l').Bool()
-	contentListPrefix         = contentListCommand.Flag("prefix", "Prefix").String()
 	contentListIncludeDeleted = contentListCommand.Flag("deleted", "Include deleted content").Bool()
 	contentListDeletedOnly    = contentListCommand.Flag("deleted-only", "Only show deleted content").Bool()
 	contentListSummary        = contentListCommand.Flag("summary", "Summarize the list").Short('s').Bool()
@@ -27,7 +26,7 @@ func runContentListCommand(ctx context.Context, rep *repo.DirectRepository) erro
 	err := rep.Content.IterateContents(
 		ctx,
 		content.IterateOptions{
-			Prefix:         content.ID(*contentListPrefix),
+			Range:          contentIDRange(),
 			IncludeDeleted: *contentListIncludeDeleted || *contentListDeletedOnly,
 		},
 		func(b content.Info) error {
@@ -55,7 +54,6 @@ func runContentListCommand(ctx context.Context, rep *repo.DirectRepository) erro
 
 			return nil
 		})
-
 	if err != nil {
 		return errors.Wrap(err, "error iterating")
 	}
@@ -72,4 +70,5 @@ func runContentListCommand(ctx context.Context, rep *repo.DirectRepository) erro
 
 func init() {
 	contentListCommand.Action(directRepositoryAction(runContentListCommand))
+	setupContentIDRangeFlags(contentListCommand)
 }

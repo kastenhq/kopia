@@ -5,15 +5,14 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"time"
+	"testing"
 
 	"github.com/kopia/kopia/fs"
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/testlogging"
-
-	"testing"
 )
 
-//nolint:gocyclo,gocognit
+//nolint:gocyclo
 func TestFiles(t *testing.T) {
 	ctx := testlogging.Context(t)
 
@@ -30,7 +29,7 @@ func TestFiles(t *testing.T) {
 	var dir fs.Directory
 
 	// Try listing directory that does not exist.
-	_, err = Directory(fmt.Sprintf("/no-such-dir-%v", time.Now().Nanosecond()))
+	_, err = Directory(fmt.Sprintf("/no-such-dir-%v", clock.Now().Nanosecond()))
 	if err == nil {
 		t.Errorf("expected error when dir directory that does not exist.")
 	}
@@ -51,12 +50,12 @@ func TestFiles(t *testing.T) {
 	}
 
 	// Now list a directory with 3 files.
-	assertNoError(t, ioutil.WriteFile(filepath.Join(tmp, "f3"), []byte{1, 2, 3}, 0777))
-	assertNoError(t, ioutil.WriteFile(filepath.Join(tmp, "f2"), []byte{1, 2, 3, 4}, 0777))
-	assertNoError(t, ioutil.WriteFile(filepath.Join(tmp, "f1"), []byte{1, 2, 3, 4, 5}, 0777))
+	assertNoError(t, ioutil.WriteFile(filepath.Join(tmp, "f3"), []byte{1, 2, 3}, 0o777))
+	assertNoError(t, ioutil.WriteFile(filepath.Join(tmp, "f2"), []byte{1, 2, 3, 4}, 0o777))
+	assertNoError(t, ioutil.WriteFile(filepath.Join(tmp, "f1"), []byte{1, 2, 3, 4, 5}, 0o777))
 
-	assertNoError(t, os.Mkdir(filepath.Join(tmp, "z"), 0777))
-	assertNoError(t, os.Mkdir(filepath.Join(tmp, "y"), 0777))
+	assertNoError(t, os.Mkdir(filepath.Join(tmp, "z"), 0o777))
+	assertNoError(t, os.Mkdir(filepath.Join(tmp, "y"), 0o777))
 
 	dir, err = Directory(tmp)
 	if err != nil {

@@ -14,55 +14,38 @@ import (
 var (
 	contentVerifyCommand = contentCommands.Command("verify", "Verify that each content is backed by a valid blob")
 
-	contentVerifyIDs      = contentVerifyCommand.Arg("id", "IDs of blocks to show (or 'all')").Required().Strings()
-	contentVerifyParallel = contentVerifyCommand.Flag("parallel", "Parallelism").Default("16").Int()
-	contentVerifyFull     = contentVerifyCommand.Flag("full", "Full verification (including download)").Bool()
+	contentVerifyParallel       = contentVerifyCommand.Flag("parallel", "Parallelism").Default("16").Int()
+	contentVerifyFull           = contentVerifyCommand.Flag("full", "Full verification (including download)").Bool()
+	contentVerifyIncludeDeleted = contentVerifyCommand.Flag("include-deleted", "Include deleted contents").Bool()
 )
 
 func runContentVerifyCommand(ctx context.Context, rep *repo.DirectRepository) error {
 	blobMap := map[blob.ID]blob.Metadata{}
 
 	if !*contentVerifyFull {
-		printStderr("Listing blobs...\n")
+		log(ctx).Infof("Listing blobs...")
 
 		if err := rep.Blobs.ListBlobs(ctx, "", func(bm blob.Metadata) error {
 			blobMap[bm.BlobID] = bm
 			if len(blobMap)%10000 == 0 {
-				printStderr("  %v blobs...\n", len(blobMap))
+				log(ctx).Infof("  %v blobs...", len(blobMap))
 			}
 			return nil
 		}); err != nil {
 			return errors.Wrap(err, "unable to list blobs")
 		}
 
-		printStderr("Listed %v blobs.\n", len(blobMap))
+		log(ctx).Infof("Listed %v blobs.", len(blobMap))
 	}
 
-	for _, contentID := range toContentIDs(*contentVerifyIDs) {
-		if contentID == "all" {
-			return verifyAllContents(ctx, rep, blobMap)
-		}
-
-		ci, err := rep.Content.ContentInfo(ctx, contentID)
-		if err != nil {
-			return errors.Wrapf(err, "unable to get content info: %v", contentID)
-		}
-
-		if err := contentVerify(ctx, rep, &ci, blobMap); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func verifyAllContents(ctx context.Context, rep *repo.DirectRepository, blobMap map[blob.ID]blob.Metadata) error {
 	var totalCount, successCount, errorCount int32
 
-	printStderr("Verifying all contents...\n")
+	log(ctx).Infof("Verifying all contents...")
 
 	err := rep.Content.IterateContents(ctx, content.IterateOptions{
-		Parallel: *contentVerifyParallel,
+		Range:          contentIDRange(),
+		Parallel:       *contentVerifyParallel,
+		IncludeDeleted: *contentVerifyIncludeDeleted,
 	}, func(ci content.Info) error {
 		if err := contentVerify(ctx, rep, &ci, blobMap); err != nil {
 			log(ctx).Errorf("error %v", err)
@@ -72,17 +55,16 @@ func verifyAllContents(ctx context.Context, rep *repo.DirectRepository, blobMap 
 		}
 
 		if t := atomic.AddInt32(&totalCount, 1); t%100000 == 0 {
-			printStderr("  %v contents, %v errors...\n", t, atomic.LoadInt32(&errorCount))
+			log(ctx).Infof("  %v contents, %v errors...", t, atomic.LoadInt32(&errorCount))
 		}
 
 		return nil
 	})
-
 	if err != nil {
 		return errors.Wrap(err, "iterate contents")
 	}
 
-	printStderr("Finished verifying %v contents, found %v errors.\n", totalCount, errorCount)
+	log(ctx).Infof("Finished verifying %v contents, found %v errors.", totalCount, errorCount)
 
 	if errorCount == 0 {
 		return nil
@@ -114,4 +96,5 @@ func contentVerify(ctx context.Context, r *repo.DirectRepository, ci *content.In
 
 func init() {
 	contentVerifyCommand.Action(directRepositoryAction(runContentVerifyCommand))
+	setupContentIDRangeFlags(contentVerifyCommand)
 }

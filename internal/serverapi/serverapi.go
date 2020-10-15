@@ -8,6 +8,7 @@ import (
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/manifest"
+	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
@@ -15,20 +16,26 @@ import (
 
 // StatusResponse is the response of 'status' HTTP API command.
 type StatusResponse struct {
-	Connected   bool   `json:"connected"`
-	ConfigFile  string `json:"configFile,omitempty"`
-	CacheDir    string `json:"cacheDir,omitempty"`
-	Hash        string `json:"hash,omitempty"`
-	Encryption  string `json:"encryption,omitempty"`
-	Splitter    string `json:"splitter,omitempty"`
-	MaxPackSize int    `json:"maxPackSize,omitempty"`
-	Storage     string `json:"storage,omitempty"`
+	Connected    bool   `json:"connected"`
+	ConfigFile   string `json:"configFile,omitempty"`
+	CacheDir     string `json:"cacheDir,omitempty"`
+	Hash         string `json:"hash,omitempty"`
+	Encryption   string `json:"encryption,omitempty"`
+	Splitter     string `json:"splitter,omitempty"`
+	MaxPackSize  int    `json:"maxPackSize,omitempty"`
+	Storage      string `json:"storage,omitempty"`
+	APIServerURL string `json:"apiServerURL,omitempty"`
+
+	repo.ClientOptions
 }
 
 // SourcesResponse is the response of 'sources' HTTP API command.
 type SourcesResponse struct {
 	LocalUsername string `json:"localUsername"`
 	LocalHost     string `json:"localHost"`
+
+	// if set to true, current repository supports accessing data for other users.
+	MultiUser bool `json:"multiUser"`
 
 	Sources []*SourceStatus `json:"sources"`
 }
@@ -93,17 +100,24 @@ type MultipleSourceActionResponse struct {
 	Sources map[string]SourceActionResponse `json:"sources"`
 }
 
-// CreateRepositoryRequest contains request to create a repository in a given storage
+// CreateRepositoryRequest contains request to create a repository in a given storage.
 type CreateRepositoryRequest struct {
 	ConnectRepositoryRequest
 	NewRepositoryOptions repo.NewRepositoryOptions `json:"options"`
 }
 
+// CheckRepositoryExistsRequest returns success if a repository exists in a given storage, ErrorNotInitialized if not.
+type CheckRepositoryExistsRequest struct {
+	Storage blob.ConnectionInfo `json:"storage"`
+}
+
 // ConnectRepositoryRequest contains request to connect to a repository.
 type ConnectRepositoryRequest struct {
-	Storage  blob.ConnectionInfo `json:"storage"`
-	Password string              `json:"password"`
-	Token    string              `json:"token"` // when set, overrides Storage and Password
+	Storage       blob.ConnectionInfo `json:"storage"`
+	Password      string              `json:"password"`
+	Token         string              `json:"token"` // when set, overrides Storage and Password
+	APIServer     *repo.APIServerInfo `json:"apiServer"`
+	ClientOptions repo.ClientOptions  `json:"clientOptions"`
 }
 
 // SupportedAlgorithmsResponse returns the list of supported algorithms for repository creation.
@@ -146,4 +160,31 @@ type Snapshot struct {
 // SnapshotsResponse contains a list of snapshots.
 type SnapshotsResponse struct {
 	Snapshots []*Snapshot `json:"snapshots"`
+}
+
+// MountSnapshotRequest contains request to mount a snapshot.
+type MountSnapshotRequest struct {
+	Root string `json:"root"`
+}
+
+// UnmountSnapshotRequest contains request to unmount a snapshot.
+type UnmountSnapshotRequest struct {
+	Root string `json:"root"`
+}
+
+// MountedSnapshot describes single mounted snapshot.
+type MountedSnapshot struct {
+	Path string    `json:"path"`
+	Root object.ID `json:"root"`
+}
+
+// MountedSnapshots describes single mounted snapshot.
+type MountedSnapshots struct {
+	Items []*MountedSnapshot `json:"items"`
+}
+
+// CurrentUserResponse is the response of 'current-user' HTTP API command.
+type CurrentUserResponse struct {
+	Username string `json:"username"`
+	Hostname string `json:"hostname"`
 }

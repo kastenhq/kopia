@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -13,11 +14,33 @@ import (
 
 	"github.com/kopia/kopia/repo/blob"
 	loggingwrapper "github.com/kopia/kopia/repo/blob/logging"
+	"github.com/kopia/kopia/repo/blob/readonly"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/logging"
 	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/repo/object"
 )
+
+// CacheDirMarkerFile is the name of the marker file indicating a directory contains Kopia caches.
+// See https://bford.info/cachedir/
+const CacheDirMarkerFile = "CACHEDIR.TAG"
+
+// CacheDirMarkerHeader is the header signature for cache dir marker files.
+const CacheDirMarkerHeader = "Signature: 8a477f597d28d172789f06886806bc55"
+
+// refresh indexes every 15 minutes while the repository remains open.
+const backgroundRefreshInterval = 15 * time.Minute
+
+const cacheDirMarkerContents = CacheDirMarkerHeader + `
+#
+# This file is a cache directory tag created by Kopia - Fast And Secure Open-Source Backup.
+#
+# For information about Kopia, see:
+#   https://kopia.io
+#
+# For information about cache directory tags, see:
+#   http://www.brynosaurus.com/cachedir/
+`
 
 var log = logging.GetContextLoggerFunc("kopia/repo")
 
@@ -32,7 +55,7 @@ type Options struct {
 var ErrInvalidPassword = errors.Errorf("invalid repository password")
 
 // Open opens a Repository specified in the configuration file.
-func Open(ctx context.Context, configFile, password string, options *Options) (rep *DirectRepository, err error) {
+func Open(ctx context.Context, configFile, password string, options *Options) (rep Repository, err error) {
 	defer func() {
 		if err != nil {
 			log(ctx).Errorf("failed to open repository: %v", err)
@@ -53,11 +76,24 @@ func Open(ctx context.Context, configFile, password string, options *Options) (r
 		return nil, err
 	}
 
+	if lc.APIServer != nil {
+		return openAPIServer(ctx, lc.APIServer, lc.ClientOptions, password)
+	}
+
+	return openDirect(ctx, configFile, lc, password, options)
+}
+
+// openDirect opens the repository that directly manipulates blob storage..
+func openDirect(ctx context.Context, configFile string, lc *LocalConfig, password string, options *Options) (rep *DirectRepository, err error) {
 	if lc.Caching.CacheDirectory != "" && !filepath.IsAbs(lc.Caching.CacheDirectory) {
 		lc.Caching.CacheDirectory = filepath.Join(filepath.Dir(configFile), lc.Caching.CacheDirectory)
 	}
 
-	st, err := blob.NewStorage(ctx, lc.Storage)
+	if lc.Storage == nil {
+		return nil, errors.Errorf("storage not set in the configuration file")
+	}
+
+	st, err := blob.NewStorage(ctx, *lc.Storage)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot open storage")
 	}
@@ -66,34 +102,34 @@ func Open(ctx context.Context, configFile, password string, options *Options) (r
 		st = loggingwrapper.NewWrapper(st, options.TraceStorage, "[STORAGE] ")
 	}
 
+	if lc.ReadOnly {
+		st = readonly.NewWrapper(st)
+	}
+
 	r, err := OpenWithConfig(ctx, st, lc, password, options, lc.Caching)
 	if err != nil {
 		st.Close(ctx) //nolint:errcheck
 		return nil, err
 	}
 
-	r.hostname = lc.Hostname
-	r.username = lc.Username
-
-	if r.hostname == "" {
-		r.hostname = getDefaultHostName(ctx)
-	}
-
-	if r.username == "" {
-		r.username = getDefaultUserName(ctx)
-	}
-
+	r.cliOpts = lc.ClientOptions.ApplyDefaults(ctx, "Repository in "+st.DisplayName())
 	r.ConfigFile = configFile
 
 	return r, nil
 }
 
 // OpenWithConfig opens the repository with a given configuration, avoiding the need for a config file.
-func OpenWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, password string, options *Options, caching content.CachingOptions) (*DirectRepository, error) {
+func OpenWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, password string, options *Options, caching *content.CachingOptions) (*DirectRepository, error) {
+	caching = caching.CloneOrDefault()
+
 	// Read format blob, potentially from cache.
 	fb, err := readAndCacheFormatBlobBytes(ctx, st, caching.CacheDirectory)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to read format blob")
+	}
+
+	if err = writeCacheMarker(caching.CacheDirectory); err != nil {
+		return nil, errors.Wrap(err, "unable to write cache directory marker")
 	}
 
 	f, err := parseFormatBlob(fb)
@@ -145,7 +181,7 @@ func OpenWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 		return nil, errors.Wrap(err, "unable to open manifests")
 	}
 
-	return &DirectRepository{
+	dr := &DirectRepository{
 		Content:   cm,
 		Objects:   om,
 		Blobs:     st,
@@ -155,11 +191,46 @@ func OpenWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 		formatBlob: f,
 		masterKey:  masterKey,
 		timeNow:    cmOpts.TimeNow,
-	}, nil
+
+		closed: make(chan struct{}),
+	}
+
+	go dr.RefreshPeriodically(ctx, backgroundRefreshInterval)
+
+	return dr, nil
+}
+
+func writeCacheMarker(cacheDir string) error {
+	if cacheDir == "" {
+		return nil
+	}
+
+	markerFile := filepath.Join(cacheDir, CacheDirMarkerFile)
+
+	st, err := os.Stat(markerFile)
+	if err == nil && st.Size() >= int64(len(cacheDirMarkerContents)) {
+		// ok
+		return nil
+	}
+
+	if !os.IsNotExist(err) {
+		return err
+	}
+
+	f, err := os.Create(markerFile)
+	if err != nil {
+		return err
+	}
+
+	if _, err := f.WriteString(cacheDirMarkerContents); err != nil {
+		return errors.Wrap(err, "unable to write cachedir marker contents")
+	}
+
+	return f.Close()
 }
 
 // SetCachingConfig changes caching configuration for a given repository.
-func (r *DirectRepository) SetCachingConfig(ctx context.Context, opt content.CachingOptions) error {
+func (r *DirectRepository) SetCachingConfig(ctx context.Context, opt *content.CachingOptions) error {
 	lc, err := loadConfigFromFile(r.ConfigFile)
 	if err != nil {
 		return err
@@ -174,7 +245,7 @@ func (r *DirectRepository) SetCachingConfig(ctx context.Context, opt content.Cac
 		return err
 	}
 
-	if err := ioutil.WriteFile(r.ConfigFile, d, 0600); err != nil {
+	if err := ioutil.WriteFile(r.ConfigFile, d, 0o600); err != nil {
 		return nil
 	}
 
@@ -185,6 +256,10 @@ func readAndCacheFormatBlobBytes(ctx context.Context, st blob.Storage, cacheDire
 	cachedFile := filepath.Join(cacheDirectory, "kopia.repository")
 
 	if cacheDirectory != "" {
+		if err := os.MkdirAll(cacheDirectory, 0o700); err != nil && !os.IsExist(err) {
+			log(ctx).Warningf("unable to create cache directory: %v", err)
+		}
+
 		b, err := ioutil.ReadFile(cachedFile) //nolint:gosec
 		if err == nil {
 			// read from cache.

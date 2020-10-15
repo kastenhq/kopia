@@ -80,15 +80,109 @@ func (om *Manager) Open(ctx context.Context, objectID ID) (Reader, error) {
 	return om.openAndAssertLength(ctx, objectID, -1)
 }
 
+// Concatenate creates an object that's a result of concatenation of other objects. This is more efficient than reading
+// and rewriting the objects because Concatenate can efficiently merge index entries without reading the underlying
+// contents.
+//
+// This function exists primarily to facilitate efficient parallel uploads of very large files (>1GB). Due to bottleneck of
+// splitting which is inherently sequential, we can only one use CPU core for each Writer, which limits throughput.
+//
+// For example when uploading a 100 GB file it is beneficial to independently upload sections of [0..25GB),
+// [25..50GB), [50GB..75GB) and [75GB..100GB) and concatenate them together as this allows us to run four splitters
+// in parallel utilizing more CPU cores. Because some split points now start at fixed bounaries and not content-specific,
+// this causes some slight loss of deduplication at concatenation points (typically 1-2 contents, usually <10MB),
+// so this method should only be used for very large files where this overhead is relatively small.
+func (om *Manager) Concatenate(ctx context.Context, objectIDs []ID) (ID, error) {
+	if len(objectIDs) == 0 {
+		return "", errors.Errorf("empty list of objects")
+	}
+
+	if len(objectIDs) == 1 {
+		return objectIDs[0], nil
+	}
+
+	var (
+		concatenatedEntries []indirectObjectEntry
+		totalLength         int64
+		err                 error
+	)
+
+	for _, objectID := range objectIDs {
+		concatenatedEntries, totalLength, err = om.appendIndexEntriesForObject(ctx, concatenatedEntries, totalLength, objectID)
+		if err != nil {
+			return "", errors.Wrapf(err, "error appending %v", objectID)
+		}
+	}
+
+	log(ctx).Debugf("concatenated: %v total: %v", concatenatedEntries, totalLength)
+
+	w := om.NewWriter(ctx, WriterOptions{
+		Prefix:      indirectContentPrefix,
+		Description: "CONCATENATED INDEX",
+	})
+	defer w.Close() // nolint:errcheck
+
+	if werr := writeIndirectObject(w, concatenatedEntries); werr != nil {
+		return "", werr
+	}
+
+	concatID, err := w.Result()
+	if err != nil {
+		return "", errors.Wrap(err, "error writing concatenated index")
+	}
+
+	return IndirectObjectID(concatID), nil
+}
+
+func (om *Manager) appendIndexEntriesForObject(ctx context.Context, indexEntries []indirectObjectEntry, startingLength int64, objectID ID) (result []indirectObjectEntry, totalLength int64, _ error) {
+	if indexObjectID, ok := objectID.IndexObjectID(); ok {
+		ndx, err := om.loadSeekTable(ctx, indexObjectID)
+		if err != nil {
+			return nil, 0, errors.Wrapf(err, "error reading index of %v", objectID)
+		}
+
+		indexEntries, totalLength = appendIndexEntries(indexEntries, startingLength, ndx...)
+
+		return indexEntries, totalLength, nil
+	}
+
+	// non-index object - the precise length of the object cannot be determined from content due to compression and padding,
+	// so we must open the object to read its length.
+	r, err := om.Open(ctx, objectID)
+	if err != nil {
+		return nil, 0, errors.Wrapf(err, "error opening %v", objectID)
+	}
+	defer r.Close() //nolint:errcheck
+
+	indexEntries, totalLength = appendIndexEntries(indexEntries, startingLength, indirectObjectEntry{
+		Start:  0,
+		Length: r.Length(),
+		Object: objectID,
+	})
+
+	return indexEntries, totalLength, nil
+}
+
+func appendIndexEntries(indexEntries []indirectObjectEntry, startingLength int64, incoming ...indirectObjectEntry) (result []indirectObjectEntry, totalLength int64) {
+	totalLength = startingLength
+
+	for _, inc := range incoming {
+		indexEntries = append(indexEntries, indirectObjectEntry{
+			Start:  inc.Start + startingLength,
+			Length: inc.Length,
+			Object: inc.Object,
+		})
+
+		totalLength += inc.Length
+	}
+
+	return indexEntries, totalLength
+}
+
 func (om *Manager) openAndAssertLength(ctx context.Context, objectID ID, assertLength int64) (Reader, error) {
 	if indexObjectID, ok := objectID.IndexObjectID(); ok {
-		rd, err := om.Open(ctx, indexObjectID)
-		if err != nil {
-			return nil, err
-		}
-		defer rd.Close() //nolint:errcheck
-
-		seekTable, err := om.flattenListChunk(rd)
+		// recursively calls openAndAssertLength
+		seekTable, err := om.loadSeekTable(ctx, indexObjectID)
 		if err != nil {
 			return nil, err
 		}
@@ -123,13 +217,7 @@ func (om *Manager) verifyIndirectObjectInternal(ctx context.Context, indexObject
 		return errors.Wrap(err, "unable to read index")
 	}
 
-	rd, err := om.Open(ctx, indexObjectID)
-	if err != nil {
-		return err
-	}
-	defer rd.Close() //nolint:errcheck
-
-	seekTable, err := om.flattenListChunk(rd)
+	seekTable, err := om.loadSeekTable(ctx, indexObjectID)
 	if err != nil {
 		return err
 	}
@@ -224,10 +312,16 @@ type indirectObject struct {
 	Entries  []indirectObjectEntry `json:"entries"`
 }
 
-func (om *Manager) flattenListChunk(rawReader io.Reader) ([]indirectObjectEntry, error) {
+func (om *Manager) loadSeekTable(ctx context.Context, indexObjectID ID) ([]indirectObjectEntry, error) {
+	r, err := om.openAndAssertLength(ctx, indexObjectID, -1)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close() //nolint:errcheck
+
 	var ind indirectObject
 
-	if err := json.NewDecoder(rawReader).Decode(&ind); err != nil {
+	if err := json.NewDecoder(r).Decode(&ind); err != nil {
 		return nil, errors.Wrap(err, "invalid indirect object")
 	}
 
@@ -235,34 +329,35 @@ func (om *Manager) flattenListChunk(rawReader io.Reader) ([]indirectObjectEntry,
 }
 
 func (om *Manager) newRawReader(ctx context.Context, objectID ID, assertLength int64) (Reader, error) {
-	if contentID, compressed, ok := objectID.ContentID(); ok {
-		payload, err := om.contentMgr.GetContent(ctx, contentID)
-		if err == content.ErrContentNotFound {
-			return nil, ErrObjectNotFound
-		}
-
-		if err != nil {
-			return nil, errors.Wrap(err, "unexpected content error")
-		}
-
-		if compressed {
-			var b bytes.Buffer
-
-			if err = om.decompress(&b, payload); err != nil {
-				return nil, errors.Wrap(err, "decompression error")
-			}
-
-			payload = b.Bytes()
-		}
-
-		if assertLength != -1 && int64(len(payload)) != assertLength {
-			return nil, errors.Wrapf(err, "unexpected chunk length %v, expected %v", len(payload), assertLength)
-		}
-
-		return newObjectReaderWithData(payload), nil
+	contentID, compressed, ok := objectID.ContentID()
+	if !ok {
+		return nil, errors.Errorf("unsupported object ID: %v", objectID)
 	}
 
-	return nil, errors.Errorf("unsupported object ID: %v", objectID)
+	payload, err := om.contentMgr.GetContent(ctx, contentID)
+	if errors.Is(err, content.ErrContentNotFound) {
+		return nil, ErrObjectNotFound
+	}
+
+	if err != nil {
+		return nil, errors.Wrap(err, "unexpected content error")
+	}
+
+	if compressed {
+		var b bytes.Buffer
+
+		if err = om.decompress(&b, payload); err != nil {
+			return nil, errors.Wrap(err, "decompression error")
+		}
+
+		payload = b.Bytes()
+	}
+
+	if assertLength != -1 && int64(len(payload)) != assertLength {
+		return nil, errors.Wrapf(err, "unexpected chunk length %v, expected %v", len(payload), assertLength)
+	}
+
+	return newObjectReaderWithData(payload), nil
 }
 
 func (om *Manager) decompress(output *bytes.Buffer, b []byte) error {

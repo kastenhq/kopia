@@ -13,7 +13,7 @@ func TestParseSnapListAllExeTest(t *testing.T) {
 	baseDir, err := ioutil.TempDir("", t.Name())
 	testenv.AssertNoError(t, err)
 
-	defer os.RemoveAll(baseDir) //nolint:errcheck
+	defer os.RemoveAll(baseDir)
 
 	repoDir, err := ioutil.TempDir(baseDir, "repo")
 	testenv.AssertNoError(t, err)
@@ -25,6 +25,7 @@ func TestParseSnapListAllExeTest(t *testing.T) {
 	if err == ErrExeVariableNotSet {
 		t.Skip("KOPIA_EXE not set, skipping test")
 	}
+
 	testenv.AssertNoError(t, err)
 
 	err = ks.ConnectOrCreateFilesystem(repoDir)
@@ -33,6 +34,7 @@ func TestParseSnapListAllExeTest(t *testing.T) {
 	// Empty snapshot list
 	snapIDListSnap, err := ks.snapIDsFromSnapListAll()
 	testenv.AssertNoError(t, err)
+
 	if got, want := len(snapIDListSnap), 0; got != want {
 		t.Errorf("Snapshot list (len %d) should be empty", got)
 	}

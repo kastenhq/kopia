@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/tests/testenv"
 )
 
@@ -40,7 +41,6 @@ func TestAutoUpdateEnableTest(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			t.Parallel()
 			e := testenv.NewCLITest(t)
-			defer e.Cleanup(t)
 
 			// create repo
 			args := append([]string{
@@ -83,7 +83,7 @@ func TestAutoUpdateEnableTest(t *testing.T) {
 				}
 
 				// verify that initial delay is approximately wantInitialDelay from now +/- 1 minute
-				if got, want := time.Now().Add(tc.wantInitialDelay), state.NextCheckTime; absDuration(got.Sub(want)) > 1*time.Minute {
+				if got, want := clock.Now().Add(tc.wantInitialDelay), state.NextCheckTime; absDuration(got.Sub(want)) > 1*time.Minute {
 					t.Errorf("unexpected NextCheckTime: %v, want approx %v", got, want)
 				}
 			}

@@ -28,7 +28,7 @@ type FaultyStorage struct {
 	mu sync.Mutex
 }
 
-// GetBlob implements blob.Storage
+// GetBlob implements blob.Storage.
 func (s *FaultyStorage) GetBlob(ctx context.Context, id blob.ID, offset, length int64) ([]byte, error) {
 	if err := s.getNextFault(ctx, "GetBlob", id, offset, length); err != nil {
 		return nil, err
@@ -37,7 +37,16 @@ func (s *FaultyStorage) GetBlob(ctx context.Context, id blob.ID, offset, length 
 	return s.Base.GetBlob(ctx, id, offset, length)
 }
 
-// PutBlob implements blob.Storage
+// GetMetadata implements blob.Storage.
+func (s *FaultyStorage) GetMetadata(ctx context.Context, id blob.ID) (blob.Metadata, error) {
+	if err := s.getNextFault(ctx, "GetMetadata", id); err != nil {
+		return blob.Metadata{}, err
+	}
+
+	return s.Base.GetMetadata(ctx, id)
+}
+
+// PutBlob implements blob.Storage.
 func (s *FaultyStorage) PutBlob(ctx context.Context, id blob.ID, data blob.Bytes) error {
 	if err := s.getNextFault(ctx, "PutBlob", id); err != nil {
 		return err
@@ -46,7 +55,16 @@ func (s *FaultyStorage) PutBlob(ctx context.Context, id blob.ID, data blob.Bytes
 	return s.Base.PutBlob(ctx, id, data)
 }
 
-// DeleteBlob implements blob.Storage
+// SetTime implements blob.Storage.
+func (s *FaultyStorage) SetTime(ctx context.Context, id blob.ID, t time.Time) error {
+	if err := s.getNextFault(ctx, "SetTime", id); err != nil {
+		return err
+	}
+
+	return s.Base.SetTime(ctx, id, t)
+}
+
+// DeleteBlob implements blob.Storage.
 func (s *FaultyStorage) DeleteBlob(ctx context.Context, id blob.ID) error {
 	if err := s.getNextFault(ctx, "DeleteBlob", id); err != nil {
 		return err
@@ -55,7 +73,7 @@ func (s *FaultyStorage) DeleteBlob(ctx context.Context, id blob.ID) error {
 	return s.Base.DeleteBlob(ctx, id)
 }
 
-// ListBlobs implements blob.Storage
+// ListBlobs implements blob.Storage.
 func (s *FaultyStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback func(blob.Metadata) error) error {
 	if err := s.getNextFault(ctx, "ListBlobs", prefix); err != nil {
 		return err
@@ -69,7 +87,7 @@ func (s *FaultyStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback 
 	})
 }
 
-// Close implements blob.Storage
+// Close implements blob.Storage.
 func (s *FaultyStorage) Close(ctx context.Context) error {
 	if err := s.getNextFault(ctx, "Close"); err != nil {
 		return err
@@ -78,9 +96,14 @@ func (s *FaultyStorage) Close(ctx context.Context) error {
 	return s.Base.Close(ctx)
 }
 
-// ConnectionInfo implements blob.Storage
+// ConnectionInfo implements blob.Storage.
 func (s *FaultyStorage) ConnectionInfo() blob.ConnectionInfo {
 	return s.Base.ConnectionInfo()
+}
+
+// DisplayName implements blob.Storage.
+func (s *FaultyStorage) DisplayName() string {
+	return s.Base.DisplayName()
 }
 
 func (s *FaultyStorage) getNextFault(ctx context.Context, method string, args ...interface{}) error {

@@ -1,23 +1,24 @@
 package cli
 
 import (
+	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
-	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/pkg/errors"
+
+	"github.com/kopia/kopia/internal/tlsutil"
 )
 
 const oneDay = 24 * time.Hour
@@ -29,91 +30,15 @@ var (
 	serverStartTLSGenerateRSAKeySize    = serverStartCommand.Flag("tls-generate-rsa-key-size", "TLS RSA Key size (bits)").Hidden().Default("4096").Int()
 	serverStartTLSGenerateCertValidDays = serverStartCommand.Flag("tls-generate-cert-valid-days", "How long should the TLS certificate be valid").Default("3650").Hidden().Int()
 	serverStartTLSGenerateCertNames     = serverStartCommand.Flag("tls-generate-cert-name", "Host names/IP addresses to generate TLS certificate for").Default("127.0.0.1").Hidden().Strings()
+	serverStartTLSPrintFullServerCert   = serverStartCommand.Flag("tls-print-server-cert", "Print server certificate").Hidden().Bool()
 )
 
 func generateServerCertificate(ctx context.Context) (*x509.Certificate, *rsa.PrivateKey, error) {
-	log(ctx).Infof("generating new TLS certificate")
-
-	priv, err := rsa.GenerateKey(rand.Reader, *serverStartTLSGenerateRSAKeySize)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "unable to generate RSA key")
-	}
-
-	notBefore := time.Now()
-	notAfter := notBefore.Add(time.Duration(*serverStartTLSGenerateCertValidDays) * oneDay)
-
-	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "unable to generate serial number")
-	}
-
-	template := x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			Organization: []string{"Kopia"},
-		},
-		NotBefore: notBefore,
-		NotAfter:  notAfter,
-
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-	}
-
-	for _, n := range *serverStartTLSGenerateCertNames {
-		if ip := net.ParseIP(n); ip != nil {
-			log(ctx).Infof("adding alternative IP to certificate: %v", ip)
-			template.IPAddresses = append(template.IPAddresses, ip)
-		} else {
-			log(ctx).Infof("adding alternative DNS name to certificate: %v", n)
-			template.DNSNames = append(template.DNSNames, n)
-		}
-	}
-
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, priv.Public(), priv)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "failed to create certificate")
-	}
-
-	cert, err := x509.ParseCertificate(derBytes)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "failed to parse certificate")
-	}
-
-	return cert, priv, nil
-}
-
-func writePrivateKeyToFile(fname string, priv *rsa.PrivateKey) error {
-	f, err := os.Create(fname)
-	if err != nil {
-		return err
-	}
-	defer f.Close() //nolint:errcheck
-
-	privBytes, err := x509.MarshalPKCS8PrivateKey(priv)
-	if err != nil {
-		return errors.Wrap(err, "Unable to marshal private key")
-	}
-
-	if err := pem.Encode(f, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes}); err != nil {
-		return errors.Wrap(err, "Failed to write data to")
-	}
-
-	return nil
-}
-
-func writeCertificateToFile(fname string, cert *x509.Certificate) error {
-	f, err := os.Create(fname)
-	if err != nil {
-		return err
-	}
-	defer f.Close() //nolint:errcheck
-
-	if err := pem.Encode(f, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}); err != nil {
-		return errors.Wrap(err, "Failed to write data")
-	}
-
-	return nil
+	return tlsutil.GenerateServerCertificate(
+		ctx,
+		*serverStartTLSGenerateRSAKeySize,
+		time.Duration(*serverStartTLSGenerateCertValidDays)*oneDay,
+		*serverStartTLSGenerateCertNames)
 }
 
 func startServerWithOptionalTLS(ctx context.Context, httpServer *http.Server) error {
@@ -128,39 +53,53 @@ func startServerWithOptionalTLS(ctx context.Context, httpServer *http.Server) er
 	return startServerWithOptionalTLSAndListener(ctx, httpServer, l)
 }
 
+func maybeGenerateTLS(ctx context.Context) error {
+	if !*serverStartTLSGenerateCert || *serverStartTLSCertFile == "" || *serverStartTLSKeyFile == "" {
+		return nil
+	}
+
+	if _, err := os.Stat(*serverStartTLSCertFile); err == nil {
+		return errors.Errorf("TLS cert file already exists: %q", *serverStartTLSCertFile)
+	}
+
+	if _, err := os.Stat(*serverStartTLSKeyFile); err == nil {
+		return errors.Errorf("TLS key file already exists: %q", *serverStartTLSKeyFile)
+	}
+
+	cert, key, err := generateServerCertificate(ctx)
+	if err != nil {
+		return errors.Wrap(err, "unable to generate server cert")
+	}
+
+	fingerprint := sha256.Sum256(cert.Raw)
+	fmt.Fprintf(os.Stderr, "SERVER CERT SHA256: %v\n", hex.EncodeToString(fingerprint[:]))
+
+	log(ctx).Infof("writing TLS certificate to %v", *serverStartTLSCertFile)
+
+	if err := tlsutil.WriteCertificateToFile(*serverStartTLSCertFile, cert); err != nil {
+		return errors.Wrap(err, "unable to write private key")
+	}
+
+	log(ctx).Infof("writing TLS private key to %v", *serverStartTLSKeyFile)
+
+	if err := tlsutil.WritePrivateKeyToFile(*serverStartTLSKeyFile, key); err != nil {
+		return errors.Wrap(err, "unable to write private key")
+	}
+
+	return nil
+}
+
 func startServerWithOptionalTLSAndListener(ctx context.Context, httpServer *http.Server, listener net.Listener) error {
-	// generate and save to PEM files
-	if *serverStartTLSGenerateCert && *serverStartTLSCertFile != "" && *serverStartTLSKeyFile != "" {
-		if _, err := os.Stat(*serverStartTLSCertFile); err == nil {
-			return errors.Errorf("TLS cert file already exists: %q", *serverStartTLSCertFile)
-		}
-
-		if _, err := os.Stat(*serverStartTLSKeyFile); err == nil {
-			return errors.Errorf("TLS key file already exists: %q", *serverStartTLSKeyFile)
-		}
-
-		cert, key, err := generateServerCertificate(ctx)
-		if err != nil {
-			return errors.Wrap(err, "unable to generate server cert")
-		}
-
-		log(ctx).Infof("writing TLS certificate to %v", *serverStartTLSCertFile)
-
-		if err := writeCertificateToFile(*serverStartTLSCertFile, cert); err != nil {
-			return errors.Wrap(err, "unable to write private key")
-		}
-
-		log(ctx).Infof("writing TLS private key to %v", *serverStartTLSKeyFile)
-
-		if err := writePrivateKeyToFile(*serverStartTLSKeyFile, key); err != nil {
-			return errors.Wrap(err, "unable to write private key")
-		}
+	if err := maybeGenerateTLS(ctx); err != nil {
+		return err
 	}
 
 	switch {
 	case *serverStartTLSCertFile != "" && *serverStartTLSKeyFile != "":
 		// PEM files provided
 		fmt.Fprintf(os.Stderr, "SERVER ADDRESS: https://%v\n", httpServer.Addr)
+		showServerUIPrompt(ctx)
+
 		return httpServer.ServeTLS(listener, *serverStartTLSCertFile, *serverStartTLSKeyFile)
 
 	case *serverStartTLSGenerateCert:
@@ -171,6 +110,7 @@ func startServerWithOptionalTLSAndListener(ctx context.Context, httpServer *http
 		}
 
 		httpServer.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS13,
 			Certificates: []tls.Certificate{
 				{
 					Certificate: [][]byte{cert.Raw},
@@ -181,12 +121,33 @@ func startServerWithOptionalTLSAndListener(ctx context.Context, httpServer *http
 
 		fingerprint := sha256.Sum256(cert.Raw)
 		fmt.Fprintf(os.Stderr, "SERVER CERT SHA256: %v\n", hex.EncodeToString(fingerprint[:]))
+
+		if *serverStartTLSPrintFullServerCert {
+			// dump PEM-encoded server cert, only used by KopiaUI to securely connnect.
+			var b bytes.Buffer
+
+			if err := pem.Encode(&b, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}); err != nil {
+				return errors.Wrap(err, "Failed to write data")
+			}
+
+			fmt.Fprintf(os.Stderr, "SERVER CERTIFICATE: %v\n", base64.StdEncoding.EncodeToString(b.Bytes()))
+		}
+
 		fmt.Fprintf(os.Stderr, "SERVER ADDRESS: https://%v\n", httpServer.Addr)
+		showServerUIPrompt(ctx)
 
 		return httpServer.ServeTLS(listener, "", "")
 
 	default:
 		fmt.Fprintf(os.Stderr, "SERVER ADDRESS: http://%v\n", httpServer.Addr)
+		showServerUIPrompt(ctx)
+
 		return httpServer.Serve(listener)
+	}
+}
+
+func showServerUIPrompt(ctx context.Context) {
+	if *serverStartUI {
+		log(ctx).Infof("Open the address above in a web browser to use the UI.")
 	}
 }

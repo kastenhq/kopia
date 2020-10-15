@@ -7,11 +7,11 @@ import (
 	"net/url"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/Azure/azure-storage-blob-go/azblob"
 
 	"github.com/kopia/kopia/internal/blobtesting"
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/azure"
 )
@@ -72,16 +72,16 @@ func TestAzureStorage(t *testing.T) {
 	createContainer(t, container, storageAccount, storageKey)
 
 	data := make([]byte, 8)
-	rand.Read(data) //nolint:errcheck
+	rand.Read(data)
 
 	ctx := context.Background()
+
 	st, err := azure.New(ctx, &azure.Options{
 		Container:      container,
 		StorageAccount: storageAccount,
 		StorageKey:     storageKey,
-		Prefix:         fmt.Sprintf("test-%v-%x-", time.Now().Unix(), data),
+		Prefix:         fmt.Sprintf("test-%v-%x-", clock.Now().Unix(), data),
 	})
-
 	if err != nil {
 		t.Fatalf("unable to connect to Azure: %v", err)
 	}
@@ -113,12 +113,12 @@ func TestAzureStorageInvalidBlob(t *testing.T) {
 	storageKey := getEnvOrSkip(t, testStorageKeyEnv)
 
 	ctx := context.Background()
+
 	st, err := azure.New(ctx, &azure.Options{
 		Container:      container,
 		StorageAccount: storageAccount,
 		StorageKey:     storageKey,
 	})
-
 	if err != nil {
 		t.Fatalf("unable to connect to Azure container: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestAzureStorageInvalidBlob(t *testing.T) {
 }
 
 func TestAzureStorageInvalidContainer(t *testing.T) {
-	container := fmt.Sprintf("invalid-container-%v", time.Now().UnixNano())
+	container := fmt.Sprintf("invalid-container-%v", clock.Now().UnixNano())
 	storageAccount := getEnvOrSkip(t, testStorageAccountEnv)
 	storageKey := getEnvOrSkip(t, testStorageKeyEnv)
 

@@ -1,159 +1,243 @@
 const { ipcMain } = require('electron');
-const config = require('electron-json-config');
+const path = require('path');
+const https = require('https');
 
-const { appendToLog } = require('./logging');
 const { defaultServerBinary } = require('./utils');
 const { spawn } = require('child_process');
+const log = require("electron-log")
+const { configDir, isPortableConfig } = require('./config');
 
-let runningServerProcess = null;
-let runningServerCertSHA256 = "";
-let runningServerPassword = "";
-let runningServerAddress = "";
+let servers = {};
 
-function detectServerParam(data) {
-    let lines = (data + '').split('\n');
-    for (let i = 0; i < lines.length; i++) {
-        const p = lines[i].indexOf(": ");
-        if (p < 0) {
-            continue
-        }
+function newServerForRepo(repoID) {
+    let runningServerProcess = null;
+    let runningServerCertSHA256 = "";
+    let runningServerPassword = "";
+    let runningServerAddress = "";
+    let runningServerCertificate = "";
+    let runningServerStatusDetails = {
+        connecting: true,
+    };
+    let serverLog = [];
 
-        const key = lines[i].substring(0, p);
-        const value = lines[i].substring(p + 2);
-        switch (key) {
-            case "SERVER PASSWORD":
-                runningServerPassword = value;
-                break;
+    const maxLogLines = 100;
 
-            case "SERVER CERT SHA256":
-                runningServerCertSHA256 = value;
-                break;
+    return {
+        actuateServer() {
+            log.info('actuating Server', repoID);
+            this.stopServer();
+            this.startServer();
+        },
 
-            case "SERVER ADDRESS":
-                runningServerAddress = value;
-                break;
-        }
-    }
+        startServer() {
+            let kopiaPath = defaultServerBinary();
+            let args = [];
 
-    appendToLog(data);
-}
+            args.push('server', '--ui',
+                '--tls-print-server-cert',
+                '--tls-generate-cert-name=localhost',
+                '--random-password',
+                '--tls-generate-cert',
+                '--address=localhost:0');
+    
 
-function startServer() {
-    let kopiaPath = config.get('kopiaPath');
-    if (!kopiaPath) {
-        kopiaPath = defaultServerBinary();
-    }
+            args.push("--config-file", path.resolve(configDir(), repoID + ".config"));
+            if (isPortableConfig()) {
+                const cacheDir = path.resolve(configDir(), "cache", repoID);
+                const logsDir = path.resolve(configDir(), "logs", repoID);
+                args.push("--cache-directory", cacheDir);
+                args.push("--log-dir", logsDir);
+            }
 
-    let args = [];
+            log.info(`spawning ${kopiaPath} ${args.join(' ')}`);
+            runningServerProcess = spawn(kopiaPath, args, {
+            });
+            this.raiseStatusUpdatedEvent();
 
-    let configFile = config.get('configFile');
-    if (configFile) {
-        args.push("--config-file", configFile);
-    }
+            runningServerProcess.stdout.on('data', this.appendToLog.bind(this));
+            runningServerProcess.stderr.on('data', this.detectServerParam.bind(this));
 
-    args.push('server', '--ui');
+            const p = runningServerProcess;
 
-    args.push('--random-password')
-    args.push('--tls-generate-cert')
-    args.push('--address=localhost:0')
-    // args.push('--auto-shutdown=600s')
+            log.info('starting polling loop');
 
-    console.log(`spawning ${kopiaPath} ${args.join(' ')}`);
-    runningServerProcess = spawn(kopiaPath, args);
-    ipcMain.emit('server-status-updated');
+            const statusUpdated = this.raiseStatusUpdatedEvent.bind(this);
 
-    runningServerProcess.stdout.on('data', appendToLog);
-    runningServerProcess.stderr.on('data', detectServerParam);
+            function pollOnce() {
+                if (!runningServerAddress || !runningServerCertificate || !runningServerPassword) {
+                    return;
+                }
 
-    runningServerProcess.on('close', (code, signal) => {
-        appendToLog(`child process exited with code ${code} and signal ${signal}`);
-        runningServerProcess = null;
-        ipcMain.emit('server-status-updated');
-    });
-}
+                const req = https.request({
+                    ca: [runningServerCertificate],
+                    host: "localhost",
+                    port: parseInt(new URL(runningServerAddress).port),
+                    method: "GET",
+                    path: "/api/v1/repo/status",
+                    headers: {
+                        'Authorization': 'Basic ' + new Buffer("kopia" + ':' + runningServerPassword).toString('base64')
+                     }  
+                }, (resp) => {
+                    if (resp.statusCode === 200) {
+                        resp.on('data', x => { 
+                            try {
+                                const newDetails = JSON.parse(x);
+                                if (JSON.stringify(newDetails) != JSON.stringify(runningServerStatusDetails)) {
+                                    runningServerStatusDetails = newDetails;
+                                    statusUpdated();
+                                }
+                            } catch (e) {
+                                log.warn('unable to parse status JSON', e);
+                            }
+                        });
+                    } else {
+                        log.warn('error fetching status', resp.statusMessage);
+                    }
+                });
+                req.on('error', (e)=>{
+                    log.info('error fetching status', e);
+                });
+                req.end();
+            }
 
-function stopServer() {
-    if (!runningServerProcess) {
-        console.log('stopServer: server not started');
-        return;
-    }
+            const statusPollInterval = setInterval(pollOnce, 3000);
 
-    runningServerProcess.kill();
-    runningServerProcess = null;
-}
+            runningServerProcess.on('close', (code, signal) => {
+                this.appendToLog(`child process exited with code ${code} and signal ${signal}`);
+                if (runningServerProcess === p) {
+                    clearInterval(statusPollInterval);
 
-ipcMain.on('subscribe-to-status', (event, arg) => {
-    sendStatusUpdate(event.sender);
+                    runningServerAddress = "";
+                    runningServerPassword = "";
+                    runningServerCertSHA256 = "";
+                    runningServerProcess = null;
+                    this.raiseStatusUpdatedEvent();
+                }
+            });
+        },
 
-    ipcMain.addListener('status-updated-event', () => {
-        sendStatusUpdate(event.sender);
-    })
-});
+        detectServerParam(data) {
+            let lines = (data + '').split('\n');
+            for (let i = 0; i < lines.length; i++) {
+                const p = lines[i].indexOf(": ");
+                if (p < 0) {
+                    continue
+                }
 
-function getServerStatus() {
-    if (config.get('remoteServer')) {
-        return "Remote";
-    } else {
-        if (!runningServerProcess) {
-            return "Stopped";
-        }
+                const key = lines[i].substring(0, p);
+                const value = lines[i].substring(p + 2);
+                switch (key) {
+                    case "SERVER PASSWORD":
+                        runningServerPassword = value;
+                        this.raiseStatusUpdatedEvent();
+                        break;
 
-        return "Running";
-    }
+                    case "SERVER CERT SHA256":
+                        runningServerCertSHA256 = value;
+                        this.raiseStatusUpdatedEvent();
+                        break;
+
+                    case "SERVER CERTIFICATE":
+                        runningServerCertificate = new Buffer(value, 'base64').toString('ascii');
+                        this.raiseStatusUpdatedEvent();
+                        break;
+
+                    case "SERVER ADDRESS":
+                        runningServerAddress = value;
+                        this.raiseStatusUpdatedEvent();
+                        break;
+                }
+            }
+
+            this.appendToLog(data);
+        },
+
+        appendToLog(data) {
+            const l = serverLog.push(data);
+            if (l > maxLogLines) {
+                serverLog.splice(0, 1);
+            }
+
+            ipcMain.emit('logs-updated-event', {
+                repoID: repoID,
+                logs: serverLog.join(''),
+            });
+            log.info(`${data}`);
+        },
+
+        stopServer() {
+            if (!runningServerProcess) {
+                log.info('stopServer: server not started');
+                return;
+            }
+
+            runningServerProcess.kill();
+            runningServerAddress = "";
+            runningServerPassword = "";
+            runningServerCertSHA256 = "";
+            runningServerCertificate = "";
+            runningServerProcess = null;
+            this.raiseStatusUpdatedEvent();
+        },
+
+        getServerAddress() {
+            return runningServerAddress;
+        },
+
+        getServerCertSHA256() {
+            return runningServerCertSHA256;
+        },
+
+        getServerPassword() {
+            return runningServerPassword;
+        },
+
+        getServerStatusDetails() {
+            return runningServerStatusDetails;
+        },
+
+        getServerStatus() {
+            if (!runningServerProcess) {
+                return "Stopped";
+            }
+
+            if (runningServerCertSHA256 && runningServerAddress && runningServerPassword) {
+                return "Running";
+            }
+
+            return "Starting";
+        },
+
+        raiseStatusUpdatedEvent() {
+            const args = {
+                repoID: repoID,
+                status: this.getServerStatus(),
+                serverAddress: this.getServerAddress() || "<pending>",
+                serverCertSHA256: this.getServerCertSHA256() || "<pending>",
+            };
+
+            ipcMain.emit('status-updated-event', args);
+        },
+    };
 };
 
-function getActiveServerAddress() {
-    if (config.get('remoteServer')) {
-        return config.get('remoteServerAddress');
-    } else {
-        return runningServerAddress;
+ipcMain.on('status-fetch', (event, args) => {
+    const repoID = args.repoID;
+    const s = servers[repoID]
+    if (s) {
+        s.raiseStatusUpdatedEvent();
     }
-};
-
-
-function getActiveServerCertSHA256() {
-    if (config.get('remoteServer')) {
-        return config.get('remoteServerCertificateSHA256');
-    } else {
-        return runningServerCertSHA256;
-    }
-};
-
-function getActiveServerPassword() {
-    if (config.get('remoteServer')) {
-        return config.get('remoteServerPassword');
-    } else {
-        return runningServerPassword;
-    }
-};
-
-function sendStatusUpdate(sender) {
-    sender.send('status-updated', {
-        status: getServerStatus(),
-        serverAddress: getActiveServerAddress() || "<pending>",
-        serverCertSHA256: getActiveServerCertSHA256() || "<pending>",
-    });
-}
+})
 
 module.exports = {
-    actuateServer() {
-        stopServer();
-        if (!config.get('remoteServer')) {
-            startServer();
+    serverForRepo(repoID) {
+        let s = servers[repoID];
+        if (s) {
+            return s;
         }
-    },
 
-    getServerAddress() {
-        return getActiveServerAddress();
-    },
-
-    getServerCertSHA256() {
-        return getActiveServerCertSHA256();
-    },
-
-    getServerPassword() {
-        return getActiveServerPassword();
-    },
-
-    stopServer: stopServer,
+        s = newServerForRepo(repoID);
+        servers[repoID] = s;
+        return s;
+    }
 }

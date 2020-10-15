@@ -9,19 +9,23 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/natefinch/atomic"
 	"github.com/pkg/errors"
 	"golang.org/x/mod/semver"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo"
 )
 
-const checkForUpdatesEnvar = "KOPIA_CHECK_FOR_UPDATES"
+const (
+	checkForUpdatesEnvar = "KOPIA_CHECK_FOR_UPDATES"
+	githubTimeout        = 10 * time.Second
+)
 
-// hidden flags to control auto-update behavior
+// hidden flags to control auto-update behavior.
 var (
 	initialUpdateCheckDelay       = app.Flag("initial-update-check-delay", "Initial delay before first time update check").Default("24h").Hidden().Envar("KOPIA_INITIAL_UPDATE_CHECK_DELAY").Duration()
 	updateCheckInterval           = app.Flag("update-check-interval", "Interval between update checks").Default("168h").Hidden().Envar("KOPIA_UPDATE_CHECK_INTERVAL").Duration()
@@ -43,8 +47,6 @@ Visit https://github.com/kopia/kopia/releases/latest to download it.
 
 `
 )
-
-var noticeColor = color.New(color.FgCyan)
 
 // updateState is persisted in a JSON file and used to determine when to check for updates
 // and whether to notify user about updates.
@@ -80,7 +82,7 @@ func getUpdateState() (*updateState, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to open update state file")
 	}
-	defer f.Close() //nolint:errcheck
+	defer f.Close() //nolint:errcheck,gosec
 
 	us := &updateState{}
 	if err := json.NewDecoder(f).Decode(us); err != nil {
@@ -95,23 +97,31 @@ func getUpdateState() (*updateState, error) {
 func maybeInitializeUpdateCheck(ctx context.Context) {
 	if connectCheckForUpdates {
 		us := &updateState{
-			NextCheckTime:  time.Now().Add(*initialUpdateCheckDelay),
-			NextNotifyTime: time.Now().Add(*initialUpdateCheckDelay),
+			NextCheckTime:  clock.Now().Add(*initialUpdateCheckDelay),
+			NextNotifyTime: clock.Now().Add(*initialUpdateCheckDelay),
 		}
 		if err := writeUpdateState(us); err != nil {
 			log(ctx).Debugf("error initializing update state")
 			return
 		}
 
-		noticeColor.Fprintf(os.Stderr, autoUpdateNotice, updateStateFilename()) //nolint:errcheck
+		log(ctx).Noticef(autoUpdateNotice, updateStateFilename())
 	} else {
 		removeUpdateState()
 	}
 }
 
 // getLatestReleaseNameFromGitHub gets the name of the release marked 'latest' on GitHub.
-func getLatestReleaseNameFromGitHub() (string, error) {
-	resp, err := http.DefaultClient.Get(latestReleaseGitHubURL)
+func getLatestReleaseNameFromGitHub(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, githubTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", latestReleaseGitHubURL, nil)
+	if err != nil {
+		return "", errors.Wrap(err, "unable to get latest release from github")
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", errors.Wrap(err, "unable to get latest release from github")
 	}
@@ -133,10 +143,16 @@ func getLatestReleaseNameFromGitHub() (string, error) {
 }
 
 // verifyGitHubReleaseIsComplete downloads checksum file to verify that the release is complete.
-func verifyGitHubReleaseIsComplete(releaseName string) error {
-	u := fmt.Sprintf(checksumsURL, releaseName)
+func verifyGitHubReleaseIsComplete(ctx context.Context, releaseName string) error {
+	ctx, cancel := context.WithTimeout(ctx, githubTimeout)
+	defer cancel()
 
-	resp, err := http.DefaultClient.Get(u)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf(checksumsURL, releaseName), nil)
+	if err != nil {
+		return errors.Wrap(err, "unable to download releases checksum")
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return errors.Wrap(err, "unable to download releases checksum")
 	}
@@ -150,7 +166,7 @@ func verifyGitHubReleaseIsComplete(releaseName string) error {
 	return nil
 }
 
-func maybeCheckForUpdates() (string, error) {
+func maybeCheckForUpdates(ctx context.Context) (string, error) {
 	if v := os.Getenv(checkForUpdatesEnvar); v != "" {
 		// see if environment variable is set to false.
 		if b, err := strconv.ParseBool(v); err == nil && !b {
@@ -163,40 +179,19 @@ func maybeCheckForUpdates() (string, error) {
 		return "", err
 	}
 
-	if time.Now().After(us.NextCheckTime) {
-		// before we check for update, write update state file again, so if this fails
-		// we won't bother GitHub for a while
-		us.NextCheckTime = time.Now().Add(*updateCheckInterval)
-		if err = writeUpdateState(us); err != nil {
-			return "", errors.Wrap(err, "unable to write update state")
-		}
-
-		newAvailableVersion, err := getLatestReleaseNameFromGitHub()
-		if err != nil {
-			return "", errors.Wrap(err, "update to get latest release from GitHub")
-		}
-
-		// we got updated version from GitHub, write it in a state file again
-		if newAvailableVersion != us.AvailableVersion {
-			if err = verifyGitHubReleaseIsComplete(newAvailableVersion); err != nil {
-				return "", errors.Wrap(err, "unable to validate GitHub release")
-			}
-
-			us.AvailableVersion = newAvailableVersion
-
-			if err := writeUpdateState(us); err != nil {
-				return "", errors.Wrap(err, "unable to write update state")
-			}
-		}
+	if err := maybeCheckGithub(ctx, us); err != nil {
+		return "", errors.Wrap(err, "error checking github")
 	}
 
-	if us.AvailableVersion == "" || semver.Compare(repo.BuildVersion, us.AvailableVersion) >= 0 {
+	log(ctx).Debugf("build version %v, available %v", ensureVPrefix(repo.BuildVersion), ensureVPrefix(us.AvailableVersion))
+
+	if us.AvailableVersion == "" || semver.Compare(ensureVPrefix(repo.BuildVersion), ensureVPrefix(us.AvailableVersion)) >= 0 {
 		// no new version available
 		return "", nil
 	}
 
-	if time.Now().After(us.NextNotifyTime) {
-		us.NextNotifyTime = time.Now().Add(*updateAvailableNotifyInterval)
+	if clock.Now().After(us.NextNotifyTime) {
+		us.NextNotifyTime = clock.Now().Add(*updateAvailableNotifyInterval)
 		if err := writeUpdateState(us); err != nil {
 			return "", errors.Wrap(err, "unable to write update state")
 		}
@@ -208,9 +203,46 @@ func maybeCheckForUpdates() (string, error) {
 	return "", nil
 }
 
+func maybeCheckGithub(ctx context.Context, us *updateState) error {
+	if !clock.Now().After(us.NextCheckTime) {
+		return nil
+	}
+
+	log(ctx).Debugf("time for next update check has been reached")
+
+	// before we check for update, write update state file again, so if this fails
+	// we won't bother GitHub for a while
+	us.NextCheckTime = clock.Now().Add(*updateCheckInterval)
+	if err := writeUpdateState(us); err != nil {
+		return errors.Wrap(err, "unable to write update state")
+	}
+
+	newAvailableVersion, err := getLatestReleaseNameFromGitHub(ctx)
+	if err != nil {
+		return errors.Wrap(err, "update to get latest release from GitHub")
+	}
+
+	log(ctx).Debugf("latest version on github: %v previous %v", newAvailableVersion, us.AvailableVersion)
+
+	// we got updated version from GitHub, write it in a state file again
+	if newAvailableVersion != us.AvailableVersion {
+		if err = verifyGitHubReleaseIsComplete(ctx, newAvailableVersion); err != nil {
+			return errors.Wrap(err, "unable to validate GitHub release")
+		}
+
+		us.AvailableVersion = newAvailableVersion
+
+		if err := writeUpdateState(us); err != nil {
+			return errors.Wrap(err, "unable to write update state")
+		}
+	}
+
+	return nil
+}
+
 // maybePrintUpdateNotification prints notification about available version.
 func maybePrintUpdateNotification(ctx context.Context) {
-	updatedVersion, err := maybeCheckForUpdates()
+	updatedVersion, err := maybeCheckForUpdates(ctx)
 	if err != nil {
 		log(ctx).Debugf("unable to check for updates: %v", err)
 		return
@@ -221,5 +253,13 @@ func maybePrintUpdateNotification(ctx context.Context) {
 		return
 	}
 
-	noticeColor.Fprintf(os.Stderr, updateAvailableNotice, repo.BuildVersion, updatedVersion) //nolint:errcheck
+	log(ctx).Noticef(updateAvailableNotice, ensureVPrefix(repo.BuildVersion), ensureVPrefix(updatedVersion))
+}
+
+func ensureVPrefix(s string) string {
+	if strings.HasPrefix(s, "v") {
+		return s
+	}
+
+	return "v" + s
 }

@@ -3,12 +3,14 @@ package blobtesting
 import (
 	"bytes"
 	"context"
-	"errors"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
+
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo/blob"
 )
 
@@ -35,12 +37,12 @@ func (s *mapStorage) GetBlob(ctx context.Context, id blob.ID, offset, length int
 		}
 
 		if int(offset) > len(data) || offset < 0 {
-			return nil, errors.New("invalid offset")
+			return nil, errors.Errorf("invalid offset: %v", offset)
 		}
 
 		data = data[offset:]
 		if int(length) > len(data) {
-			return nil, errors.New("invalid length")
+			return nil, errors.Errorf("invalid length: %v", length)
 		}
 
 		return data[0:length], nil
@@ -49,19 +51,31 @@ func (s *mapStorage) GetBlob(ctx context.Context, id blob.ID, offset, length int
 	return nil, blob.ErrBlobNotFound
 }
 
+func (s *mapStorage) GetMetadata(ctx context.Context, id blob.ID) (blob.Metadata, error) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	data, ok := s.data[id]
+	if ok {
+		return blob.Metadata{
+			BlobID:    id,
+			Length:    int64(len(data)),
+			Timestamp: s.keyTime[id],
+		}, nil
+	}
+
+	return blob.Metadata{}, blob.ErrBlobNotFound
+}
+
 func (s *mapStorage) PutBlob(ctx context.Context, id blob.ID, data blob.Bytes) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-
-	if _, ok := s.data[id]; ok {
-		return nil
-	}
 
 	s.keyTime[id] = s.timeNow()
 
 	var b bytes.Buffer
 
-	data.WriteTo(&b) //nolint:errcheck
+	data.WriteTo(&b)
 
 	s.data[id] = b.Bytes()
 
@@ -121,6 +135,15 @@ func (s *mapStorage) Close(ctx context.Context) error {
 	return nil
 }
 
+func (s *mapStorage) SetTime(ctx context.Context, blobID blob.ID, t time.Time) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.keyTime[blobID] = t
+
+	return nil
+}
+
 func (s *mapStorage) TouchBlob(ctx context.Context, blobID blob.ID, threshold time.Duration) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -140,6 +163,10 @@ func (s *mapStorage) ConnectionInfo() blob.ConnectionInfo {
 	return blob.ConnectionInfo{}
 }
 
+func (s *mapStorage) DisplayName() string {
+	return "Map"
+}
+
 // NewMapStorage returns an implementation of Storage backed by the contents of given map.
 // Used primarily for testing.
 func NewMapStorage(data DataMap, keyTime map[blob.ID]time.Time, timeNow func() time.Time) blob.Storage {
@@ -148,7 +175,7 @@ func NewMapStorage(data DataMap, keyTime map[blob.ID]time.Time, timeNow func() t
 	}
 
 	if timeNow == nil {
-		timeNow = time.Now
+		timeNow = clock.Now
 	}
 
 	return &mapStorage{data: data, keyTime: keyTime, timeNow: timeNow}

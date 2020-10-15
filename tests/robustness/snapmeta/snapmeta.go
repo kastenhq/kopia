@@ -13,6 +13,7 @@ type Store interface {
 	Indexer
 }
 
+// Indexer describes methods surrounding categorization of keys via a named index.
 type Indexer interface {
 	AddToIndex(key, indexName string)
 	RemoveFromIndex(key, indexName string)

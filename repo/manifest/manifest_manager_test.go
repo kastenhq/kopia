@@ -16,7 +16,6 @@ import (
 	"github.com/kopia/kopia/repo/hashing"
 )
 
-//nolint:funlen
 func TestManifest(t *testing.T) {
 	ctx := testlogging.Context(t)
 	data := blobtesting.DataMap{}
@@ -114,7 +113,7 @@ func TestManifest(t *testing.T) {
 
 	if err := mgr.b.IterateContents(
 		ctx,
-		content.IterateOptions{Prefix: ContentPrefix},
+		content.IterateOptions{Range: content.PrefixRange(ContentPrefix)},
 		func(ci content.Info) error {
 			foundContents++
 			return nil
@@ -148,7 +147,7 @@ func TestManifestInitCorruptedBlock(t *testing.T) {
 	}
 
 	// write some data to storage
-	bm, err := content.NewManager(ctx, st, f, content.CachingOptions{}, content.ManagerOptions{})
+	bm, err := content.NewManager(ctx, st, f, nil, content.ManagerOptions{})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -158,7 +157,7 @@ func TestManifestInitCorruptedBlock(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	mgr.Put(ctx, map[string]string{"type": "foo"}, map[string]string{"some": "value"}) //nolint:errcheck
+	mgr.Put(ctx, map[string]string{"type": "foo"}, map[string]string{"some": "value"})
 	mgr.Flush(ctx)
 	bm.Flush(ctx)
 
@@ -174,7 +173,7 @@ func TestManifestInitCorruptedBlock(t *testing.T) {
 	}
 
 	// make a new content manager based on corrupted data.
-	bm, err = content.NewManager(ctx, st, f, content.CachingOptions{}, content.ManagerOptions{})
+	bm, err = content.NewManager(ctx, st, f, nil, content.ManagerOptions{})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -305,7 +304,7 @@ func newManagerForTesting(ctx context.Context, t *testing.T, data blobtesting.Da
 		Encryption:  encryption.DefaultAlgorithm,
 		MaxPackSize: 100000,
 		Version:     1,
-	}, content.CachingOptions{}, content.ManagerOptions{})
+	}, nil, content.ManagerOptions{})
 	if err != nil {
 		t.Fatalf("can't create content manager: %v", err)
 	}

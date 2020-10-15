@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/fatih/color"
+
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/units"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
 )
@@ -17,8 +20,10 @@ var (
 	progressUpdateInterval = app.Flag("progress-update-interval", "How ofter to update progress information").Hidden().Default("300ms").Duration()
 )
 
-const spinner = `|/-\`
-const hundredPercent = 100.0
+const (
+	spinner        = `|/-\`
+	hundredPercent = 100.0
+)
 
 type cliProgress struct {
 	snapshotfs.NullUploadProgress
@@ -42,8 +47,8 @@ type cliProgress struct {
 	spinPhase       int
 	uploadStartTime time.Time
 
-	previousFileCount int
-	previousTotalSize int64
+	estimatedFileCount  int
+	estimatedTotalBytes int64
 
 	// indicates shared instance that does not reset counters at the beginning of upload.
 	shared bool
@@ -75,7 +80,7 @@ func (p *cliProgress) HashedBytes(numBytes int64) {
 
 func (p *cliProgress) IgnoredError(path string, err error) {
 	atomic.AddInt32(&p.errorCount, 1)
-	p.output(path, err)
+	p.output(warningColor, fmt.Sprintf("Ignored error when processing \"%v\": %v\n", path, err))
 }
 
 func (p *cliProgress) CachedFile(fname string, numBytes int64) {
@@ -92,18 +97,18 @@ func (p *cliProgress) maybeOutput() {
 	var shouldOutput bool
 
 	nextOutputTimeUnixNano := atomic.LoadInt64(&p.nextOutputTimeUnixNano)
-	if nowNano := time.Now().UnixNano(); nowNano > nextOutputTimeUnixNano {
+	if nowNano := clock.Now().UnixNano(); nowNano > nextOutputTimeUnixNano {
 		if atomic.CompareAndSwapInt64(&p.nextOutputTimeUnixNano, nextOutputTimeUnixNano, nowNano+progressUpdateInterval.Nanoseconds()) {
 			shouldOutput = true
 		}
 	}
 
 	if shouldOutput {
-		p.output("", nil)
+		p.output(defaultColor, "")
 	}
 }
 
-func (p *cliProgress) output(errPath string, err error) {
+func (p *cliProgress) output(col *color.Color, msg string) {
 	p.outputMutex.Lock()
 	defer p.outputMutex.Unlock()
 
@@ -134,26 +139,42 @@ func (p *cliProgress) output(errPath string, err error) {
 		errorCount,
 	)
 
-	if err != nil {
+	if msg != "" {
 		prefix := "\n ! "
 		if !*enableProgress {
 			prefix = ""
 		}
 
-		warningColor.Fprintf(os.Stderr, "%vIgnored error when processing \"%v\": %v\n", prefix, errPath, err) //nolint:errcheck
+		col.Fprintf(os.Stderr, "%v%v", prefix, msg) // nolint:errcheck
 	}
 
 	if !*enableProgress {
 		return
 	}
 
-	if p.previousTotalSize > 0 {
-		percent := (float64(hashedBytes+cachedBytes) * hundredPercent / float64(p.previousTotalSize))
-		if percent > hundredPercent {
-			percent = hundredPercent
+	if p.estimatedTotalBytes > 0 {
+		line += fmt.Sprintf(", estimated %v", units.BytesStringBase10(p.estimatedTotalBytes))
+
+		ratio := float64(hashedBytes+cachedBytes) / float64(p.estimatedTotalBytes)
+		if ratio > 1 {
+			ratio = 1
 		}
 
-		line += fmt.Sprintf(" %.1f%%", percent)
+		timeSoFarSeconds := clock.Since(p.uploadStartTime).Seconds()
+		estimatedTotalTime := time.Second * time.Duration(timeSoFarSeconds/ratio)
+		estimatedEndTime := p.uploadStartTime.Add(estimatedTotalTime)
+
+		remaining := clock.Until(estimatedEndTime)
+		if remaining < 0 {
+			remaining = 0
+		}
+
+		remaining = remaining.Round(time.Second)
+
+		line += fmt.Sprintf(" (%.1f%%)", ratio*hundredPercent)
+		line += fmt.Sprintf(" %v left", remaining)
+	} else {
+		line += ", estimating..."
 	}
 
 	var extraSpaces string
@@ -182,28 +203,39 @@ func (p *cliProgress) spinnerCharacter() string {
 func (p *cliProgress) StartShared() {
 	*p = cliProgress{
 		uploading:       1,
-		uploadStartTime: time.Now(),
+		uploadStartTime: clock.Now(),
 		shared:          true,
 	}
 }
 
 func (p *cliProgress) FinishShared() {
 	atomic.StoreInt32(&p.uploadFinished, 1)
-	p.output("", nil)
+	p.output(defaultColor, "")
 }
 
-func (p *cliProgress) UploadStarted(previousFileCount int, previousTotalSize int64) {
+func (p *cliProgress) UploadStarted() {
 	if p.shared {
 		// do nothing
 		return
 	}
 
 	*p = cliProgress{
-		uploading:         1,
-		uploadStartTime:   time.Now(),
-		previousFileCount: previousFileCount,
-		previousTotalSize: previousTotalSize,
+		uploading:       1,
+		uploadStartTime: clock.Now(),
 	}
+}
+
+func (p *cliProgress) EstimatedDataSize(fileCount int, totalBytes int64) {
+	if p.shared {
+		// do nothing
+		return
+	}
+
+	p.outputMutex.Lock()
+	defer p.outputMutex.Unlock()
+
+	p.estimatedFileCount = fileCount
+	p.estimatedTotalBytes = totalBytes
 }
 
 func (p *cliProgress) UploadFinished() {
@@ -217,7 +249,13 @@ func (p *cliProgress) Finish() {
 	}
 
 	atomic.StoreInt32(&p.uploadFinished, 1)
-	p.output("", nil)
+	atomic.StoreInt32(&p.uploading, 0)
+
+	p.output(defaultColor, "")
+
+	if *enableProgress {
+		printStderr("\n")
+	}
 }
 
 var progress = &cliProgress{}

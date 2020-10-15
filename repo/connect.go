@@ -17,9 +17,8 @@ import (
 
 // ConnectOptions specifies options when persisting configuration to connect to a repository.
 type ConnectOptions struct {
-	PersistCredentials bool   `json:"persistCredentials"`
-	HostnameOverride   string `json:"hostnameOverride"`
-	UsernameOverride   string `json:"usernameOverride"`
+	PersistCredentials bool `json:"persistCredentials"`
+	ClientOptions
 
 	content.CachingOptions
 }
@@ -36,7 +35,7 @@ func Connect(ctx context.Context, configFile string, st blob.Storage, password s
 
 	formatBytes, err := st.GetBlob(ctx, FormatBlobID, 0, -1)
 	if err != nil {
-		if err == blob.ErrBlobNotFound {
+		if errors.Is(err, blob.ErrBlobNotFound) {
 			return ErrRepositoryNotInitialized
 		}
 
@@ -49,19 +48,12 @@ func Connect(ctx context.Context, configFile string, st blob.Storage, password s
 	}
 
 	var lc LocalConfig
-	lc.Storage = st.ConnectionInfo()
 
-	lc.Hostname = opt.HostnameOverride
-	if lc.Hostname == "" {
-		lc.Hostname = getDefaultHostName(ctx)
-	}
+	ci := st.ConnectionInfo()
+	lc.Storage = &ci
+	lc.ClientOptions = opt.ClientOptions.ApplyDefaults(ctx, "Repository in "+st.DisplayName())
 
-	lc.Username = opt.UsernameOverride
-	if lc.Username == "" {
-		lc.Username = getDefaultUserName(ctx)
-	}
-
-	if err = setupCaching(ctx, configFile, &lc, opt.CachingOptions, f.UniqueID); err != nil {
+	if err = setupCaching(ctx, configFile, &lc, &opt.CachingOptions, f.UniqueID); err != nil {
 		return errors.Wrap(err, "unable to set up caching")
 	}
 
@@ -70,14 +62,18 @@ func Connect(ctx context.Context, configFile string, st blob.Storage, password s
 		return err
 	}
 
-	if err = os.MkdirAll(filepath.Dir(configFile), 0700); err != nil {
+	if err = os.MkdirAll(filepath.Dir(configFile), 0o700); err != nil {
 		return errors.Wrap(err, "unable to create config directory")
 	}
 
-	if err = ioutil.WriteFile(configFile, d, 0600); err != nil {
+	if err = ioutil.WriteFile(configFile, d, 0o600); err != nil {
 		return errors.Wrap(err, "unable to write config file")
 	}
 
+	return verifyConnect(ctx, configFile, password, opt.PersistCredentials)
+}
+
+func verifyConnect(ctx context.Context, configFile, password string, persist bool) error {
 	// now verify that the repository can be opened with the provided config file.
 	r, err := Open(ctx, configFile, password, nil)
 	if err != nil {
@@ -90,7 +86,7 @@ func Connect(ctx context.Context, configFile string, st blob.Storage, password s
 		return err
 	}
 
-	if opt.PersistCredentials {
+	if persist {
 		if err := persistPassword(ctx, configFile, password); err != nil {
 			return errors.Wrap(err, "unable to persist password")
 		}
@@ -101,10 +97,16 @@ func Connect(ctx context.Context, configFile string, st blob.Storage, password s
 	return r.Close(ctx)
 }
 
-func setupCaching(ctx context.Context, configPath string, lc *LocalConfig, opt content.CachingOptions, uniqueID []byte) error {
+func setupCaching(ctx context.Context, configPath string, lc *LocalConfig, opt *content.CachingOptions, uniqueID []byte) error {
+	opt = opt.CloneOrDefault()
+
 	if opt.MaxCacheSizeBytes == 0 {
-		lc.Caching = content.CachingOptions{}
+		lc.Caching = &content.CachingOptions{}
 		return nil
+	}
+
+	if lc.Caching == nil {
+		lc.Caching = &content.CachingOptions{}
 	}
 
 	if opt.CacheDirectory == "" {
@@ -139,10 +141,6 @@ func setupCaching(ctx context.Context, configPath string, lc *LocalConfig, opt c
 
 	log(ctx).Debugf("Creating cache directory '%v' with max size %v", lc.Caching.CacheDirectory, lc.Caching.MaxCacheSizeBytes)
 
-	if err := os.MkdirAll(lc.Caching.CacheDirectory, 0700); err != nil {
-		log(ctx).Warningf("unablet to create cache directory: %v", err)
-	}
-
 	return nil
 }
 
@@ -155,11 +153,37 @@ func Disconnect(ctx context.Context, configFile string) error {
 
 	deletePassword(ctx, configFile)
 
-	if cfg.Caching.CacheDirectory != "" {
+	if cfg.Caching != nil && cfg.Caching.CacheDirectory != "" {
 		if err = os.RemoveAll(cfg.Caching.CacheDirectory); err != nil {
 			log(ctx).Warningf("unable to remove cache directory: %v", err)
 		}
 	}
 
+	maintenanceLock := configFile + ".mlock"
+	if err := os.RemoveAll(maintenanceLock); err != nil {
+		log(ctx).Warningf("unable to remove maintenance lock file", maintenanceLock)
+	}
+
 	return os.Remove(configFile)
+}
+
+// SetClientOptions updates client options stored in the provided configuration file.
+func SetClientOptions(ctx context.Context, configFile string, cliOpt ClientOptions) error {
+	lc, err := loadConfigFromFile(configFile)
+	if err != nil {
+		return err
+	}
+
+	lc.ClientOptions = cliOpt
+
+	d, err := json.MarshalIndent(lc, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err = ioutil.WriteFile(configFile, d, 0o600); err != nil {
+		return errors.Wrap(err, "unable to write config file")
+	}
+
+	return nil
 }

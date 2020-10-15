@@ -3,8 +3,13 @@ package parallelwork
 
 import (
 	"container/list"
+	"context"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
+
+	"github.com/kopia/kopia/internal/clock"
 )
 
 // Queue represents a work queue with multiple parallel workers.
@@ -18,23 +23,23 @@ type Queue struct {
 
 	nextReportTime time.Time
 
-	ProgressCallback func(enqueued, active, completed int64)
+	ProgressCallback func(ctx context.Context, enqueued, active, completed int64)
 }
 
-// CallbackFunc is a callback function
+// CallbackFunc is a callback function.
 type CallbackFunc func() error
 
 // EnqueueFront adds the work to the front of the queue.
-func (v *Queue) EnqueueFront(callback CallbackFunc) {
-	v.enqueue(true, callback)
+func (v *Queue) EnqueueFront(ctx context.Context, callback CallbackFunc) {
+	v.enqueue(ctx, true, callback)
 }
 
 // EnqueueBack adds the work to the back of the queue.
-func (v *Queue) EnqueueBack(callback CallbackFunc) {
-	v.enqueue(false, callback)
+func (v *Queue) EnqueueBack(ctx context.Context, callback CallbackFunc) {
+	v.enqueue(ctx, false, callback)
 }
 
-func (v *Queue) enqueue(front bool, callback CallbackFunc) {
+func (v *Queue) enqueue(ctx context.Context, front bool, callback CallbackFunc) {
 	v.monitor.L.Lock()
 	defer v.monitor.L.Unlock()
 
@@ -47,47 +52,44 @@ func (v *Queue) enqueue(front bool, callback CallbackFunc) {
 		v.queueItems.PushBack(callback)
 	}
 
-	v.maybeReportProgress()
+	v.maybeReportProgress(ctx)
 	v.monitor.Signal()
 }
 
 // Process starts N workers, which will be processing elements in the queue until the queue
-// is empty and all workers are idle.
-func (v *Queue) Process(workers int) error {
-	var wg sync.WaitGroup
-
-	errors := make(chan error, workers)
+// is empty and all workers are idle or until any of the workers returns an error.
+func (v *Queue) Process(ctx context.Context, workers int) error {
+	eg, ctx := errgroup.WithContext(context.Background())
 
 	for i := 0; i < workers; i++ {
-		wg.Add(1)
-
-		go func(_ int) {
-			defer wg.Done()
-
+		eg.Go(func() error {
 			for {
-				callback := v.dequeue()
-				if callback == nil {
-					break
-				}
+				select {
+				case <-ctx.Done():
+					// context canceled - some other worker returned an error.
+					return ctx.Err()
 
-				if err := callback(); err != nil {
-					errors <- err
-					break
-				}
+				default:
+					callback := v.dequeue(ctx)
+					if callback == nil {
+						// no more work, shut down.
+						return nil
+					}
 
-				v.completed()
+					err := callback()
+					v.completed(ctx)
+					if err != nil {
+						return err
+					}
+				}
 			}
-		}(i)
+		})
 	}
 
-	wg.Wait()
-	close(errors)
-
-	// return first error or nil
-	return <-errors
+	return eg.Wait()
 }
 
-func (v *Queue) dequeue() CallbackFunc {
+func (v *Queue) dequeue(ctx context.Context) CallbackFunc {
 	v.monitor.L.Lock()
 	defer v.monitor.L.Unlock()
 
@@ -102,7 +104,7 @@ func (v *Queue) dequeue() CallbackFunc {
 	}
 
 	v.activeWorkerCount++
-	v.maybeReportProgress()
+	v.maybeReportProgress(ctx)
 
 	front := v.queueItems.Front()
 	v.queueItems.Remove(front)
@@ -110,30 +112,48 @@ func (v *Queue) dequeue() CallbackFunc {
 	return front.Value.(CallbackFunc)
 }
 
-func (v *Queue) completed() {
+func (v *Queue) completed(ctx context.Context) {
 	v.monitor.L.Lock()
 	defer v.monitor.L.Unlock()
 
 	v.activeWorkerCount--
 	v.completedWork++
-	v.maybeReportProgress()
+	v.maybeReportProgress(ctx)
 
 	v.monitor.Broadcast()
 }
 
-func (v *Queue) maybeReportProgress() {
+func (v *Queue) maybeReportProgress(ctx context.Context) {
 	cb := v.ProgressCallback
 	if cb == nil {
 		return
 	}
 
-	if time.Now().Before(v.nextReportTime) {
+	if clock.Now().Before(v.nextReportTime) {
 		return
 	}
 
-	v.nextReportTime = time.Now().Add(1 * time.Second)
+	v.nextReportTime = clock.Now().Add(1 * time.Second)
 
-	cb(v.enqueuedWork, v.activeWorkerCount, v.completedWork)
+	cb(ctx, v.enqueuedWork, v.activeWorkerCount, v.completedWork)
+}
+
+// OnNthCompletion invokes the provided callback once the returned callback function has been invoked exactly n times.
+func OnNthCompletion(n int, callback CallbackFunc) CallbackFunc {
+	var mu sync.Mutex
+
+	return func() error {
+		mu.Lock()
+		n--
+		call := n == 0
+		mu.Unlock()
+
+		if call {
+			return callback()
+		}
+
+		return nil
+	}
 }
 
 // NewQueue returns new parallel work queue.

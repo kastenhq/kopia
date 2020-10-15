@@ -7,7 +7,7 @@ node_modules: $(npm)
 	$(npm) $(npm_flags) install
 
 electron_builder_flags:=
-electron_builder_flags+=-c.extraMetadata.version=$(KOPIA_VERSION)
+electron_builder_flags+=-c.extraMetadata.version=$(KOPIA_VERSION:v%=%)
 electron_publish_flag:=never
 
 ifeq ($(TRAVIS_PULL_REQUEST),false)
@@ -16,7 +16,7 @@ electron_publish_flag=always
 
 ifneq ($(TRAVIS_TAG),)
 # tagged release - create draft release, but don't publish
-electron_builder_flags+=-c.publish.releaseType=draft
+electron_builder_flags+=-c.publish.releaseType=release
 electron_builder_flags+=-c.publish.owner=$(REPO_OWNER)
 electron_builder_flags+=-c.publish.repo=kopia
 else

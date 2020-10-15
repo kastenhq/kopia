@@ -11,10 +11,15 @@ import (
 	"io"
 	"io/ioutil"
 	"math/rand"
+	"runtime"
 	"runtime/debug"
 	"sync"
 	"testing"
 
+	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/compression"
@@ -40,7 +45,7 @@ func (f *fakeContentManager) GetContent(ctx context.Context, contentID content.I
 
 func (f *fakeContentManager) WriteContent(ctx context.Context, data []byte, prefix content.ID) (content.ID, error) {
 	h := sha256.New()
-	h.Write(data) //nolint:errcheck
+	h.Write(data)
 	contentID := prefix + content.ID(hex.EncodeToString(h.Sum(nil)))
 
 	f.mu.Lock()
@@ -136,8 +141,8 @@ func TestWriterCompleteChunkInTwoWrites(t *testing.T) {
 
 	b := make([]byte, 100)
 	writer := om.NewWriter(ctx, WriterOptions{})
-	writer.Write(b[0:50]) //nolint:errcheck
-	writer.Write(b[0:50]) //nolint:errcheck
+	writer.Write(b[0:50])
+	writer.Write(b[0:50])
 	result, err := writer.Result()
 
 	if !objectIDsEqual(result, "cd00e292c5970d3c5e2f0ffa5171e555bc46bfc4faddfb4a418b6840b86e79a3") {
@@ -145,9 +150,158 @@ func TestWriterCompleteChunkInTwoWrites(t *testing.T) {
 	}
 }
 
+func TestCheckpointing(t *testing.T) {
+	ctx := testlogging.Context(t)
+	_, om := setupTest(t)
+
+	writer := om.NewWriter(ctx, WriterOptions{})
+
+	// write all zeroes
+	allZeroes := make([]byte, 1<<20)
+
+	// empty file, nothing flushed
+	checkpoint1, err := writer.Checkpoint()
+	verifyNoError(t, err)
+
+	// write some bytes, but not enough to flush.
+	writer.Write(allZeroes[0:50])
+	checkpoint2, err := writer.Checkpoint()
+	verifyNoError(t, err)
+
+	// write enough to flush first content.
+	writer.Write(allZeroes)
+	checkpoint3, err := writer.Checkpoint()
+	verifyNoError(t, err)
+
+	// write enough to flush second content.
+	writer.Write(allZeroes)
+	checkpoint4, err := writer.Checkpoint()
+	verifyNoError(t, err)
+
+	result, err := writer.Result()
+	verifyNoError(t, err)
+
+	if !objectIDsEqual(checkpoint1, "") {
+		t.Errorf("unexpected checkpoint1: %v err: %v", checkpoint1, err)
+	}
+
+	if !objectIDsEqual(checkpoint2, "") {
+		t.Errorf("unexpected checkpoint2: %v err: %v", checkpoint2, err)
+	}
+
+	result2, err := writer.Checkpoint()
+	verifyNoError(t, err)
+
+	if result2 != result {
+		t.Errorf("invalid checkpoint after result: %v vs %v", result2, result)
+	}
+
+	verifyFull(ctx, t, om, checkpoint3, allZeroes)
+	verifyFull(ctx, t, om, checkpoint4, make([]byte, 2<<20))
+	verifyFull(ctx, t, om, result, make([]byte, 2<<20+50))
+}
+
+func TestObjectWriterRaceBetweenCheckpointAndResult(t *testing.T) {
+	rand.Seed(clock.Now().UnixNano())
+
+	ctx := testlogging.Context(t)
+	data := map[content.ID][]byte{}
+	fcm := &fakeContentManager{
+		data: data,
+	}
+
+	om, err := NewObjectManager(testlogging.Context(t), fcm, Format{
+		Splitter: "FIXED-1M",
+	}, ManagerOptions{})
+	if err != nil {
+		t.Fatalf("can't create object manager: %v", err)
+	}
+
+	allZeroes := make([]byte, 1<<20-5)
+	repeat := 100
+
+	if runtime.GOARCH == "arm" {
+		repeat = 10
+	}
+
+	for i := 0; i < repeat; i++ {
+		w := om.NewWriter(ctx, WriterOptions{
+			AsyncWrites: 1,
+		})
+
+		w.Write(allZeroes)
+		w.Write(allZeroes)
+		w.Write(allZeroes)
+
+		var eg errgroup.Group
+
+		eg.Go(func() error {
+			_, rerr := w.Result()
+
+			return rerr
+		})
+
+		eg.Go(func() error {
+			cpID, cperr := w.Checkpoint()
+			if cperr == nil && cpID != "" {
+				ids, verr := om.VerifyObject(ctx, cpID)
+				if verr != nil {
+					return errors.Wrapf(err, "Checkpoint() returned invalid object %v", cpID)
+				}
+
+				for _, id := range ids {
+					if id == "" {
+						return errors.Errorf("checkpoint returned empty id")
+					}
+				}
+			}
+
+			return nil
+		})
+
+		if err := eg.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func verifyFull(ctx context.Context, t *testing.T, om *Manager, oid ID, want []byte) {
+	t.Helper()
+
+	r, err := om.Open(ctx, oid)
+	if err != nil {
+		t.Fatalf("unable to open %v: %v", oid, err)
+	}
+
+	defer r.Close()
+
+	data, err := ioutil.ReadAll(r)
+	if err != nil {
+		t.Fatalf("unable to read all: %v", err)
+	}
+
+	if !bytes.Equal(data, want) {
+		t.Fatalf("unexpected data read for %v", oid)
+	}
+}
+
+func verifyNoError(t *testing.T, err error) {
+	t.Helper()
+
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func verifyIndirectBlock(ctx context.Context, t *testing.T, r *Manager, oid ID) {
-	for indexBlobID, isIndirect := oid.IndexObjectID(); isIndirect; indexBlobID, isIndirect = indexBlobID.IndexObjectID() {
-		rd, err := r.Open(ctx, indexBlobID)
+	for indexContentID, isIndirect := oid.IndexObjectID(); isIndirect; indexContentID, isIndirect = indexContentID.IndexObjectID() {
+		if c, _, ok := indexContentID.ContentID(); ok {
+			if !c.HasPrefix() {
+				t.Errorf("expected base content ID to be prefixed, was %v", c)
+			}
+		}
+
+		rd, err := r.Open(ctx, indexContentID)
 		if err != nil {
 			t.Errorf("unable to open %v: %v", oid.String(), err)
 			return
@@ -237,12 +391,148 @@ func TestHMAC(t *testing.T) {
 	_, om := setupTest(t)
 
 	w := om.NewWriter(ctx, WriterOptions{})
-	w.Write(c) //nolint:errcheck
+	w.Write(c)
 	result, err := w.Result()
 
 	if result.String() != "cad29ff89951a3c085c86cb7ed22b82b51f7bdfda24f932c7f9601f51d5975ba" {
 		t.Errorf("unexpected result: %v err: %v", result.String(), err)
 	}
+}
+
+// nolint:gocyclo
+func TestConcatenate(t *testing.T) {
+	ctx := testlogging.Context(t)
+	_, om := setupTest(t)
+
+	phrase := []byte("hello world\n")
+	phraseLength := len(phrase)
+	shortRepeatCount := 17
+	longRepeatCount := 999999
+
+	emptyObject := mustWriteObject(t, om, nil, "")
+
+	// short uncompressed object - <content>
+	shortUncompressedOID := mustWriteObject(t, om, bytes.Repeat(phrase, shortRepeatCount), "")
+
+	// long uncompressed object - Ix<content>
+	longUncompressedOID := mustWriteObject(t, om, bytes.Repeat(phrase, longRepeatCount), "")
+
+	// short compressed object - Z<content>
+	shortCompressedOID := mustWriteObject(t, om, bytes.Repeat(phrase, shortRepeatCount), "pgzip")
+
+	// long compressed object - Ix<content>
+	longCompressedOID := mustWriteObject(t, om, bytes.Repeat(phrase, longRepeatCount), "pgzip")
+
+	if _, compressed, ok := shortUncompressedOID.ContentID(); !ok || compressed {
+		t.Errorf("invalid test assumption - shortUncompressedOID %v", shortUncompressedOID)
+	}
+
+	if _, isIndex := longUncompressedOID.IndexObjectID(); !isIndex {
+		t.Errorf("invalid test assumption - longUncompressedOID %v", longUncompressedOID)
+	}
+
+	if _, compressed, ok := shortCompressedOID.ContentID(); !ok || !compressed {
+		t.Errorf("invalid test assumption - shortCompressedOID %v", shortCompressedOID)
+	}
+
+	if _, isIndex := longCompressedOID.IndexObjectID(); !isIndex {
+		t.Errorf("invalid test assumption - longCompressedOID %v", longCompressedOID)
+	}
+
+	shortLength := phraseLength * shortRepeatCount
+	longLength := phraseLength * longRepeatCount
+
+	cases := []struct {
+		inputs     []ID
+		wantLength int
+	}{
+		{[]ID{emptyObject}, 0},
+		{[]ID{shortUncompressedOID}, shortLength},
+		{[]ID{longUncompressedOID}, longLength},
+		{[]ID{shortCompressedOID}, shortLength},
+		{[]ID{longCompressedOID}, longLength},
+
+		{[]ID{shortUncompressedOID, shortUncompressedOID}, 2 * shortLength},
+		{[]ID{shortUncompressedOID, shortCompressedOID}, 2 * shortLength},
+		{[]ID{emptyObject, longCompressedOID, shortCompressedOID, emptyObject, longCompressedOID, shortUncompressedOID, shortUncompressedOID, emptyObject, emptyObject}, 2*longLength + 3*shortLength},
+	}
+
+	for _, tc := range cases {
+		concatenatedOID, err := om.Concatenate(ctx, tc.inputs)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r, err := om.Open(ctx, concatenatedOID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		gotLength := int(r.Length())
+		r.Close()
+
+		if gotLength != tc.wantLength {
+			t.Errorf("invalid length for %v: %v, want %v", tc.inputs, gotLength, tc.wantLength)
+		}
+
+		b := make([]byte, len(phrase))
+
+		// read the concatenated object in buffers the size of a single phrase, each buffer should be identical.
+		for n, readerr := r.Read(b); ; n, readerr = r.Read(b) {
+			if errors.Is(readerr, io.EOF) {
+				break
+			}
+
+			if n != len(b) {
+				t.Errorf("invalid length: %v", n)
+			}
+
+			if !bytes.Equal(b, phrase) {
+				t.Errorf("invalid buffer: %v", n)
+			}
+		}
+
+		if _, err = om.VerifyObject(ctx, concatenatedOID); err != nil {
+			t.Fatalf("verify error: %v", err)
+		}
+
+		// make sure results of concatenation can be further concatenated.
+		concatenated3OID, err := om.Concatenate(ctx, []ID{concatenatedOID, concatenatedOID, concatenatedOID})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r, err = om.Open(ctx, concatenated3OID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		gotLength = int(r.Length())
+		r.Close()
+
+		if gotLength != tc.wantLength*3 {
+			t.Errorf("invalid twice-concatenated object length: %v, want %v", gotLength, tc.wantLength*3)
+		}
+	}
+}
+
+func mustWriteObject(t *testing.T, om *Manager, data []byte, compressor compression.Name) ID {
+	t.Helper()
+
+	w := om.NewWriter(testlogging.Context(t), WriterOptions{Compressor: compressor})
+	defer w.Close()
+
+	_, err := w.Write(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oid, err := w.Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return oid
 }
 
 func TestReader(t *testing.T) {
@@ -313,7 +603,7 @@ func TestEndToEndReadAndSeek(t *testing.T) {
 			for _, size := range []int{1, 199, 200, 201, 9999, 512434, 5012434} {
 				// Create some random data sample of the specified size.
 				randomData := make([]byte, size)
-				cryptorand.Read(randomData) //nolint:errcheck
+				cryptorand.Read(randomData)
 
 				writer := om.NewWriter(ctx, WriterOptions{AsyncWrites: asyncWrites})
 				if _, err := writer.Write(randomData); err != nil {
@@ -337,6 +627,13 @@ func TestEndToEndReadAndSeek(t *testing.T) {
 }
 
 func TestEndToEndReadAndSeekWithCompression(t *testing.T) {
+	sizes := []int{1, 199, 200, 201, 9999, 512434, 5012434, 15000000}
+	asyncWritesList := []int{0, 4, 8}
+
+	if runtime.GOARCH != "amd64" {
+		sizes = []int{1, 199, 200, 201, 9999, 512434}
+	}
+
 	for _, compressible := range []bool{false, true} {
 		compressible := compressible
 
@@ -347,14 +644,14 @@ func TestEndToEndReadAndSeekWithCompression(t *testing.T) {
 
 				ctx := testlogging.Context(t)
 
-				for _, asyncWrites := range []int{0, 4, 8} {
+				for _, asyncWrites := range asyncWritesList {
 					asyncWrites := asyncWrites
 					totalBytesWritten := 0
 					data, om := setupTest(t)
 
 					t.Run(fmt.Sprintf("async-%v", asyncWrites), func(t *testing.T) {
 						t.Parallel()
-						for _, size := range []int{1, 199, 200, 201, 9999, 512434, 5012434, 15000000} {
+						for _, size := range sizes {
 
 							randomData := makeMaybeCompressibleData(size, compressible)
 
@@ -417,7 +714,6 @@ func verify(ctx context.Context, t *testing.T, om *Manager, objectID ID, expecte
 		return
 	}
 
-	// nolint:dupl
 	for i := 0; i < 20; i++ {
 		sampleSize := int(rand.Int31n(300))
 		seekOffset := int(rand.Int31n(int32(len(expectedData))))
@@ -453,7 +749,7 @@ func TestSeek(t *testing.T) {
 
 	for _, size := range []int{0, 1, 500000, 15000000} {
 		randomData := make([]byte, size)
-		cryptorand.Read(randomData) //nolint:errcheck
+		cryptorand.Read(randomData)
 
 		writer := om.NewWriter(ctx, WriterOptions{})
 		if _, err := writer.Write(randomData); err != nil {

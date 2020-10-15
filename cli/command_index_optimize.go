@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/content"
 )
@@ -10,16 +11,25 @@ import (
 var (
 	optimizeCommand              = indexCommands.Command("optimize", "Optimize indexes blobs.")
 	optimizeMaxSmallBlobs        = optimizeCommand.Flag("max-small-blobs", "Maximum number of small index blobs that can be left after compaction.").Default("1").Int()
-	optimizeSkipDeletedOlderThan = optimizeCommand.Flag("skip-deleted-older-than", "Skip deleted blobs above given age").Duration()
+	optimizeDropDeletedOlderThan = optimizeCommand.Flag("drop-deleted-older-than", "Drop deleted contents above given age").Duration()
+	optimizeDropContents         = optimizeCommand.Flag("drop-contents", "Drop contents with given IDs").Strings()
 	optimizeAllIndexes           = optimizeCommand.Flag("all", "Optimize all indexes, even those above maximum size.").Bool()
 )
 
 func runOptimizeCommand(ctx context.Context, rep *repo.DirectRepository) error {
-	return rep.Content.CompactIndexes(ctx, content.CompactOptions{
-		MaxSmallBlobs:        *optimizeMaxSmallBlobs,
-		AllIndexes:           *optimizeAllIndexes,
-		SkipDeletedOlderThan: *optimizeSkipDeletedOlderThan,
-	})
+	advancedCommand(ctx)
+
+	opt := content.CompactOptions{
+		MaxSmallBlobs: *optimizeMaxSmallBlobs,
+		AllIndexes:    *optimizeAllIndexes,
+		DropContents:  toContentIDs(*optimizeDropContents),
+	}
+
+	if age := *optimizeDropDeletedOlderThan; age > 0 {
+		opt.DropDeletedBefore = clock.Now().Add(-age)
+	}
+
+	return rep.Content.CompactIndexes(ctx, opt)
 }
 
 func init() {

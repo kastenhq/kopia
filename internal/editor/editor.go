@@ -4,7 +4,6 @@ package editor
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -13,12 +12,14 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/pkg/errors"
+
 	"github.com/kopia/kopia/repo/logging"
 )
 
 var log = logging.GetContextLoggerFunc("editor")
 
-// EditLoop launches OS-specific editor (VI, notepad.exe or anoter editor configured through environment variables)
+// EditLoop launches OS-specific editor (VI, notepad.exe or another editor configured through environment variables)
 // It creates a temporary file with 'initial' contents and repeatedly invokes the editor until the provided 'parse' function
 // returns nil result indicating success. The 'parse' function is passed the contents of edited files without # line comments.
 func EditLoop(ctx context.Context, fname, initial string, parse func(updated string) error) error {
@@ -30,7 +31,7 @@ func EditLoop(ctx context.Context, fname, initial string, parse func(updated str
 	tmpFile := filepath.Join(tmpDir, fname)
 	defer os.RemoveAll(tmpDir) //nolint:errcheck
 
-	if err := ioutil.WriteFile(tmpFile, []byte(initial), 0600); err != nil {
+	if err := ioutil.WriteFile(tmpFile, []byte(initial), 0o600); err != nil {
 		return err
 	}
 
@@ -67,7 +68,7 @@ func readAndStripComments(fname string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close() //nolint:errcheck
+	defer f.Close() //nolint:errcheck,gosec
 
 	var result []string
 

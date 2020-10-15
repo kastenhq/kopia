@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"reflect"
+	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/repo/blob"
@@ -29,6 +32,10 @@ func VerifyStorage(ctx context.Context, t testingT, r blob.Storage) {
 		AssertGetBlobNotFound(ctx, t, r, b.blk)
 	}
 
+	if err := r.DeleteBlob(ctx, "no-such-blob"); err != nil && !errors.Is(err, blob.ErrBlobNotFound) {
+		t.Errorf("invalid error when deleting non-existent blob: %v", err)
+	}
+
 	// Now add blocks.
 	for _, b := range blocks {
 		if err := r.PutBlob(ctx, b.blk, gather.FromSlice(b.contents)); err != nil {
@@ -50,6 +57,23 @@ func VerifyStorage(ctx context.Context, t testingT, r blob.Storage) {
 		AssertGetBlob(ctx, t, r, b.blk, b.contents)
 	}
 
+	ts := time.Date(2020, 1, 1, 15, 30, 45, 0, time.UTC)
+
+	for _, b := range blocks {
+		if err := r.SetTime(ctx, b.blk, ts); errors.Is(err, blob.ErrSetTimeUnsupported) {
+			break
+		}
+
+		md, err := r.GetMetadata(ctx, b.blk)
+		if err != nil {
+			t.Errorf("unable to get blob metadata")
+		}
+
+		if got, want := md.Timestamp, ts; !got.Equal(want) {
+			t.Errorf("invalid time after SetTme(): %vm want %v", got, want)
+		}
+	}
+
 	if err := r.DeleteBlob(ctx, blocks[0].blk); err != nil {
 		t.Errorf("unable to delete block: %v", err)
 	}
@@ -63,7 +87,7 @@ func VerifyStorage(ctx context.Context, t testingT, r blob.Storage) {
 }
 
 // AssertConnectionInfoRoundTrips verifies that the ConnectionInfo returned by a given storage can be used to create
-// equivalent storage
+// equivalent storage.
 func AssertConnectionInfoRoundTrips(ctx context.Context, t testingT, s blob.Storage) {
 	t.Helper()
 

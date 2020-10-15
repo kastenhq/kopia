@@ -13,6 +13,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pkg/errors"
+
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/tests/robustness/snap"
 	"github.com/kopia/kopia/tests/robustness/snapmeta"
 )
@@ -23,7 +26,7 @@ const (
 )
 
 // Checker is an object that can take snapshots and restore them, performing
-// a validation for data consistency
+// a validation for data consistency.
 type Checker struct {
 	RestoreDir            string
 	snapshotIssuer        snap.Snapshotter
@@ -34,7 +37,7 @@ type Checker struct {
 }
 
 // NewChecker instantiates a new Checker, returning its pointer. A temporary
-// directory is created to mount restored data
+// directory is created to mount restored data.
 func NewChecker(snapIssuer snap.Snapshotter, snapmetaStore snapmeta.Store, validator Comparer, restoreDir string) (*Checker, error) {
 	restoreDir, err := ioutil.TempDir(restoreDir, "restore-data-")
 	if err != nil {
@@ -42,6 +45,7 @@ func NewChecker(snapIssuer snap.Snapshotter, snapmetaStore snapmeta.Store, valid
 	}
 
 	delLimitStr := os.Getenv(deleteLimitEnvKey)
+
 	delLimit, err := strconv.Atoi(delLimitStr)
 	if err != nil {
 		log.Printf("using default delete limit %d", defaultDeleteLimit)
@@ -58,19 +62,19 @@ func NewChecker(snapIssuer snap.Snapshotter, snapmetaStore snapmeta.Store, valid
 	}, nil
 }
 
-// Cleanup cleans up the Checker's temporary restore data directory
+// Cleanup cleans up the Checker's temporary restore data directory.
 func (chk *Checker) Cleanup() {
 	if chk.RestoreDir != "" {
 		os.RemoveAll(chk.RestoreDir) //nolint:errcheck
 	}
 }
 
-// GetSnapIDs gets the list of snapshot IDs being tracked by the checker's snapshot store
+// GetSnapIDs gets the list of snapshot IDs being tracked by the checker's snapshot store.
 func (chk *Checker) GetSnapIDs() []string {
 	return chk.snapshotMetadataStore.GetKeys(allSnapshotsIdxName)
 }
 
-// SnapshotMetadata holds metadata associated with a given snapshot
+// SnapshotMetadata holds metadata associated with a given snapshot.
 type SnapshotMetadata struct {
 	SnapID         string    `json:"snapID"`
 	SnapStartTime  time.Time `json:"snapStartTime"`
@@ -79,19 +83,19 @@ type SnapshotMetadata struct {
 	ValidationData []byte    `json:"validationData"`
 }
 
-// GetSnapshotMetadata gets the metadata associated with the given snapshot ID
+// GetSnapshotMetadata gets the metadata associated with the given snapshot ID.
 func (chk *Checker) GetSnapshotMetadata(snapID string) (*SnapshotMetadata, error) {
 	return chk.loadSnapshotMetadata(snapID)
 }
 
 // GetLiveSnapIDs gets the list of snapshot IDs being tracked by the checker's snapshot store
-// that do not have a deletion time associated with them
+// that do not have a deletion time associated with them.
 func (chk *Checker) GetLiveSnapIDs() []string {
 	return chk.snapshotMetadataStore.GetKeys(liveSnapshotsIdxName)
 }
 
 // IsSnapshotIDDeleted reports whether the metadata associated with the provided snapshot ID
-// has it marked as deleted
+// has it marked as deleted.
 func (chk *Checker) IsSnapshotIDDeleted(snapID string) (bool, error) {
 	md, err := chk.loadSnapshotMetadata(snapID)
 	if err != nil {
@@ -103,7 +107,7 @@ func (chk *Checker) IsSnapshotIDDeleted(snapID string) (bool, error) {
 
 // VerifySnapshotMetadata compares the list of live snapshot IDs present in
 // the Checker's metadata against a list of live snapshot IDs in the connected
-// repository
+// repository.
 func (chk *Checker) VerifySnapshotMetadata() error {
 	// Get live snapshot metadata keys
 	liveSnapsInMetadata := chk.GetLiveSnapIDs()
@@ -129,6 +133,7 @@ func (chk *Checker) VerifySnapshotMetadata() error {
 	for _, metaSnapID := range liveSnapsInMetadata {
 		if _, ok := liveMap[metaSnapID]; !ok {
 			log.Printf("Metadata present for snapID %v but not found in list of repo snapshots", metaSnapID)
+
 			if chk.RecoveryMode {
 				chk.snapshotMetadataStore.Delete(metaSnapID)
 				chk.snapshotMetadataStore.RemoveFromIndex(metaSnapID, liveSnapshotsIdxName)
@@ -141,52 +146,57 @@ func (chk *Checker) VerifySnapshotMetadata() error {
 	var liveSnapsDeleted int
 
 	for _, liveSnapID := range liveSnapsInRepo {
-		if _, ok := metadataMap[liveSnapID]; !ok {
-			log.Printf("Live snapshot present for snapID %v but not found in known metadata", liveSnapID)
-			if chk.RecoveryMode {
-				if liveSnapsDeleted >= chk.DeleteLimit {
-					log.Printf("delete limit (%v) reached", chk.DeleteLimit)
-					errCount++
-				}
+		if _, ok := metadataMap[liveSnapID]; ok {
+			// Found live snapshot ID in the metadata. No recovery handling needed.
+			continue
+		}
 
-				// Might as well delete the snapshot since we don't have metadata for it
-				log.Printf("Deleting snapshot ID %s", liveSnapID)
-				err = chk.snapshotIssuer.DeleteSnapshot(liveSnapID)
-				if err != nil {
-					log.Printf("error deleting snapshot: %s", err)
-					errCount++
-				}
+		log.Printf("Live snapshot present for snapID %v but not found in known metadata", liveSnapID)
 
-				liveSnapsDeleted++
-			} else {
+		if chk.RecoveryMode {
+			if liveSnapsDeleted >= chk.DeleteLimit {
+				log.Printf("delete limit (%v) reached", chk.DeleteLimit)
 				errCount++
 			}
+
+			// Might as well delete the snapshot since we don't have metadata for it
+			log.Printf("Deleting snapshot ID %s", liveSnapID)
+
+			err = chk.snapshotIssuer.DeleteSnapshot(liveSnapID)
+			if err != nil {
+				log.Printf("error deleting snapshot: %s", err)
+				errCount++
+			}
+
+			liveSnapsDeleted++
+		} else {
+			errCount++
 		}
 	}
 
 	if errCount > 0 {
-		return fmt.Errorf("hit %v errors verifying snapshot metadata", errCount)
+		return errors.Errorf("hit %v errors verifying snapshot metadata", errCount)
 	}
 
 	return nil
 }
 
 // TakeSnapshot gathers state information on the requested snapshot path, then
-// performs the snapshot action defined by the Checker's Snapshotter
+// performs the snapshot action defined by the Checker's Snapshotter.
 func (chk *Checker) TakeSnapshot(ctx context.Context, sourceDir string) (snapID string, err error) {
 	b, err := chk.validator.Gather(ctx, sourceDir)
 	if err != nil {
 		return "", err
 	}
 
-	ssStart := time.Now()
+	ssStart := clock.Now()
 
 	snapID, err = chk.snapshotIssuer.CreateSnapshot(sourceDir)
 	if err != nil {
 		return snapID, err
 	}
 
-	ssEnd := time.Now()
+	ssEnd := clock.Now()
 
 	ssMeta := &SnapshotMetadata{
 		SnapID:         snapID,
@@ -234,7 +244,7 @@ func (chk *Checker) RestoreSnapshotToPath(ctx context.Context, snapID, destPath 
 }
 
 // RestoreVerifySnapshot restores a snapshot and verifies its integrity against
-// the metadata provided
+// the metadata provided.
 func (chk *Checker) RestoreVerifySnapshot(ctx context.Context, snapID, destPath string, ssMeta *SnapshotMetadata, reportOut io.Writer) error {
 	err := chk.snapshotIssuer.RestoreSnapshot(snapID, destPath)
 	if err != nil {
@@ -242,12 +252,14 @@ func (chk *Checker) RestoreVerifySnapshot(ctx context.Context, snapID, destPath 
 	}
 
 	if ssMeta == nil && chk.RecoveryMode {
-		b, err := chk.validator.Gather(ctx, destPath)
+		var b []byte
+
+		b, err = chk.validator.Gather(ctx, destPath)
 		if err != nil {
 			return err
 		}
 
-		ssMeta := &SnapshotMetadata{
+		ssMeta = &SnapshotMetadata{
 			SnapID:         snapID,
 			ValidationData: b,
 		}
@@ -270,7 +282,7 @@ const (
 )
 
 // DeleteSnapshot performs the Snapshotter's DeleteSnapshot action, and
-// marks the snapshot with the given snapshot ID as deleted
+// marks the snapshot with the given snapshot ID as deleted.
 func (chk *Checker) DeleteSnapshot(ctx context.Context, snapID string) error {
 	err := chk.snapshotIssuer.DeleteSnapshot(snapID)
 	if err != nil {
@@ -318,7 +330,7 @@ func (chk *Checker) loadSnapshotMetadata(snapID string) (*SnapshotMetadata, erro
 	}
 
 	if b == nil {
-		return nil, fmt.Errorf("could not find snapID %v", snapID)
+		return nil, errors.Errorf("could not find snapID %v", snapID)
 	}
 
 	ssMeta := &SnapshotMetadata{}

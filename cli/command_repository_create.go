@@ -10,6 +10,7 @@ import (
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/encryption"
 	"github.com/kopia/kopia/repo/hashing"
+	"github.com/kopia/kopia/repo/maintenance"
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/repo/splitter"
 	"github.com/kopia/kopia/snapshot/policy"
@@ -43,12 +44,12 @@ func newRepositoryOptionsFromFlags() *repo.NewRepositoryOptions {
 }
 
 func ensureEmpty(ctx context.Context, s blob.Storage) error {
-	hasDataError := errors.New("has data")
+	hasDataError := errors.Errorf("has data")
 
 	err := s.ListBlobs(ctx, "", func(cb blob.Metadata) error {
 		return hasDataError
 	})
-	if err == hasDataError {
+	if err == hasDataError { //nolint:goerr113
 		return errors.New("found existing data in storage location")
 	}
 
@@ -68,10 +69,10 @@ func runCreateCommandWithStorage(ctx context.Context, st blob.Storage) error {
 		return errors.Wrap(err, "getting password")
 	}
 
-	printStderr("Initializing repository with:\n")
-	printStderr("  block hash:          %v\n", options.BlockFormat.Hash)
-	printStderr("  encryption:          %v\n", options.BlockFormat.Encryption)
-	printStderr("  splitter:            %v\n", options.ObjectFormat.Splitter)
+	log(ctx).Infof("Initializing repository with:")
+	log(ctx).Infof("  block hash:          %v", options.BlockFormat.Hash)
+	log(ctx).Infof("  encryption:          %v", options.BlockFormat.Encryption)
+	log(ctx).Infof("  splitter:            %v", options.ObjectFormat.Splitter)
 
 	if err := repo.Initialize(ctx, st, options, password); err != nil {
 		return errors.Wrap(err, "cannot initialize repository")
@@ -104,5 +105,5 @@ func populateRepository(ctx context.Context, password string) error {
 	printStdout("To change the policy use:\n  kopia policy set --global <options>\n")
 	printStdout("or\n  kopia policy set <dir> <options>\n")
 
-	return nil
+	return setDefaultMaintenanceParameters(ctx, rep.(maintenance.MaintainableRepository))
 }

@@ -13,7 +13,6 @@ func TestIndexRecover(t *testing.T) {
 	t.Parallel()
 
 	e := testenv.NewCLITest(t)
-	defer e.Cleanup(t)
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 
@@ -39,9 +38,13 @@ func TestIndexRecover(t *testing.T) {
 		e.RunAndExpectSuccess(t, "blob", "delete", indexFile)
 	}
 
+	// clear the cache to get rid of cache of own writes.
+	e.RunAndVerifyOutputLineCount(t, 0, "cache", "clear")
+
 	// there should be no index files at this point
 	e.RunAndVerifyOutputLineCount(t, 0, "index", "ls", "--no-list-caching")
-	// there should be no blocks, since there are no indexesto find them
+
+	// there should be no contents, since there are no indexes to find them
 	e.RunAndVerifyOutputLineCount(t, 0, "content", "ls")
 
 	// now recover index from all blocks

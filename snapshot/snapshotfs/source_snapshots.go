@@ -28,7 +28,7 @@ func (s *sourceSnapshots) Name() string {
 }
 
 func (s *sourceSnapshots) Mode() os.FileMode {
-	return 0555 | os.ModeDir
+	return 0o555 | os.ModeDir
 }
 
 func (s *sourceSnapshots) Size() int64 {
@@ -52,10 +52,6 @@ func safeName(path string) string {
 	return strings.Replace(path, "/", "_", -1)
 }
 
-func (s *sourceSnapshots) Summary() *fs.DirectorySummary {
-	return nil
-}
-
 func (s *sourceSnapshots) Child(ctx context.Context, name string) (fs.Entry, error) {
 	return fs.ReadDirAndFindChild(ctx, s, name)
 }
@@ -76,7 +72,7 @@ func (s *sourceSnapshots) Readdir(ctx context.Context) (fs.Entries, error) {
 
 		de := &snapshot.DirEntry{
 			Name:        name,
-			Permissions: 0555, //nolint:gomnd
+			Permissions: 0o555, //nolint:gomnd
 			Type:        snapshot.EntryTypeDirectory,
 			ModTime:     m.StartTime,
 			ObjectID:    m.RootObjectID(),

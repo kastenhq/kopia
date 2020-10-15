@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/kopia/kopia/repo/blob"
 )
@@ -15,7 +16,9 @@ const minShardedBlobIDLength = 20
 // Impl must be implemented by underlying provided.
 type Impl interface {
 	GetBlobFromPath(ctx context.Context, dirPath, filePath string, offset, length int64) ([]byte, error)
+	GetMetadataFromPath(ctx context.Context, dirPath, filePath string) (blob.Metadata, error)
 	PutBlobInPath(ctx context.Context, dirPath, filePath string, dataSlices blob.Bytes) error
+	SetTimeInPath(ctx context.Context, dirPath, filePath string, t time.Time) error
 	DeleteBlobInPath(ctx context.Context, dirPath, filePath string) error
 	ReadDir(ctx context.Context, path string) ([]os.FileInfo, error)
 }
@@ -29,7 +32,7 @@ type Storage struct {
 	Shards   []int
 }
 
-// GetBlob implements blob.Storage
+// GetBlob implements blob.Storage.
 func (s Storage) GetBlob(ctx context.Context, blobID blob.ID, offset, length int64) ([]byte, error) {
 	dirPath, filePath := s.GetShardedPathAndFilePath(blobID)
 	return s.Impl.GetBlobFromPath(ctx, dirPath, filePath, offset, length)
@@ -47,7 +50,7 @@ func (s Storage) makeFileName(blobID blob.ID) string {
 	return string(blobID) + s.Suffix
 }
 
-// ListBlobs implements blob.Storage
+// ListBlobs implements blob.Storage.
 func (s Storage) ListBlobs(ctx context.Context, prefix blob.ID, callback func(blob.Metadata) error) error {
 	var walkDir func(string, string) error
 
@@ -58,6 +61,7 @@ func (s Storage) ListBlobs(ctx context.Context, prefix blob.ID, callback func(bl
 		}
 
 		for _, e := range entries {
+			// nolint:nestif
 			if e.IsDir() {
 				var match bool
 
@@ -92,14 +96,31 @@ func (s Storage) ListBlobs(ctx context.Context, prefix blob.ID, callback func(bl
 	return walkDir(s.RootPath, "")
 }
 
-// PutBlob implements blob.Storage
+// GetMetadata implements blob.Storage.
+func (s Storage) GetMetadata(ctx context.Context, blobID blob.ID) (blob.Metadata, error) {
+	dirPath, filePath := s.GetShardedPathAndFilePath(blobID)
+
+	m, err := s.Impl.GetMetadataFromPath(ctx, dirPath, filePath)
+	m.BlobID = blobID
+
+	return m, err
+}
+
+// PutBlob implements blob.Storage.
 func (s Storage) PutBlob(ctx context.Context, blobID blob.ID, data blob.Bytes) error {
 	dirPath, filePath := s.GetShardedPathAndFilePath(blobID)
 
 	return s.Impl.PutBlobInPath(ctx, dirPath, filePath, data)
 }
 
-// DeleteBlob implements blob.Storage
+// SetTime implements blob.Storage.
+func (s Storage) SetTime(ctx context.Context, blobID blob.ID, n time.Time) error {
+	dirPath, filePath := s.GetShardedPathAndFilePath(blobID)
+
+	return s.Impl.SetTimeInPath(ctx, dirPath, filePath, n)
+}
+
+// DeleteBlob implements blob.Storage.
 func (s Storage) DeleteBlob(ctx context.Context, blobID blob.ID) error {
 	dirPath, filePath := s.GetShardedPathAndFilePath(blobID)
 	return s.Impl.DeleteBlobInPath(ctx, dirPath, filePath)

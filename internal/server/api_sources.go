@@ -9,17 +9,20 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/kopia/kopia/internal/ctxutil"
 	"github.com/kopia/kopia/internal/serverapi"
+	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
 )
 
-func (s *Server) handleSourcesList(ctx context.Context, r *http.Request) (interface{}, *apiError) {
+func (s *Server) handleSourcesList(ctx context.Context, r *http.Request, body []byte) (interface{}, *apiError) {
+	_, multiUser := s.rep.(*repo.DirectRepository)
+
 	resp := &serverapi.SourcesResponse{
 		Sources:       []*serverapi.SourceStatus{},
-		LocalHost:     s.rep.Hostname(),
-		LocalUsername: s.rep.Username(),
+		LocalHost:     s.rep.ClientOptions().Hostname,
+		LocalUsername: s.rep.ClientOptions().Username,
+		MultiUser:     multiUser,
 	}
 
 	for _, v := range s.sourceManagers {
@@ -37,10 +40,10 @@ func (s *Server) handleSourcesList(ctx context.Context, r *http.Request) (interf
 	return resp, nil
 }
 
-func (s *Server) handleSourcesCreate(ctx context.Context, r *http.Request) (interface{}, *apiError) {
+func (s *Server) handleSourcesCreate(ctx context.Context, r *http.Request, body []byte) (interface{}, *apiError) {
 	var req serverapi.CreateSnapshotSourceRequest
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		return nil, requestError(serverapi.ErrorMalformedRequest, "malformed request body")
 	}
 
@@ -58,8 +61,8 @@ func (s *Server) handleSourcesCreate(ctx context.Context, r *http.Request) (inte
 	}
 
 	sourceInfo := snapshot.SourceInfo{
-		UserName: s.rep.Username(),
-		Host:     s.rep.Hostname(),
+		UserName: s.rep.ClientOptions().Username,
+		Host:     s.rep.ClientOptions().Hostname,
 		Path:     req.Path,
 	}
 
@@ -100,7 +103,7 @@ func (s *Server) handleSourcesCreate(ctx context.Context, r *http.Request) (inte
 		sm := newSourceManager(sourceInfo, s)
 		s.sourceManagers[sourceInfo] = sm
 
-		go sm.run(ctxutil.Detach(ctx))
+		go sm.run(ctx)
 	}
 	s.mu.Unlock()
 	s.mu.RLock()

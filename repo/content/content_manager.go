@@ -16,6 +16,7 @@ import (
 	"go.opencensus.io/stats"
 
 	"github.com/kopia/kopia/internal/buf"
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/logging"
@@ -23,13 +24,15 @@ import (
 
 var (
 	log       = logging.GetContextLoggerFunc("kopia/content")
-	formatLog = logging.GetContextLoggerFunc("kopia/content/format")
+	formatLog = logging.GetContextLoggerFunc(FormatLogModule)
 )
 
-// Prefixes for pack blobs
+// Prefixes for pack blobs.
 const (
 	PackBlobIDPrefixRegular blob.ID = "p"
 	PackBlobIDPrefixSpecial blob.ID = "q"
+
+	FormatLogModule = "kopia/format"
 
 	maxHashSize                            = 64
 	defaultEncryptionBufferPoolSegmentSize = 8 << 20 // 8 MB
@@ -44,7 +47,7 @@ var PackBlobIDPrefixes = []blob.ID{
 const (
 	parallelFetches          = 5                // number of parallel reads goroutines
 	flushPackIndexTimeout    = 10 * time.Minute // time after which all pending indexes are flushes
-	newIndexBlobPrefix       = "n"
+	indexBlobPrefix          = "n"
 	defaultMinPreambleLength = 32
 	defaultMaxPreambleLength = 32
 	defaultPaddingUnit       = 4096
@@ -65,9 +68,8 @@ var ErrContentNotFound = errors.New("content not found")
 
 // IndexBlobInfo is an information about a single index blob managed by Manager.
 type IndexBlobInfo struct {
-	BlobID    blob.ID
-	Length    int64
-	Timestamp time.Time
+	blob.Metadata
+	Superseded []blob.Metadata
 }
 
 // Manager builds content-addressable storage with encryption, deduplication and packaging on top of BLOB store.
@@ -83,7 +85,6 @@ type Manager struct {
 
 	disableIndexFlushCount int
 	flushPackIndexesAfter  time.Time // time when those indexes should be flushed
-	closed                 chan struct{}
 
 	lockFreeManager
 }
@@ -105,7 +106,7 @@ func (bm *Manager) DeleteContent(ctx context.Context, contentID ID) error {
 	bm.lock()
 	defer bm.unlock()
 
-	log(ctx).Debugf("DeleteContent(%q)", contentID)
+	formatLog(ctx).Debugf("delete-content %v", contentID)
 
 	// remove from all pending packs
 	for _, pp := range bm.pendingPacks {
@@ -162,7 +163,7 @@ func (bm *Manager) addToPackUnlocked(ctx context.Context, contentID ID, data []b
 
 	// do not start new uploads while flushing
 	for bm.flushing {
-		formatLog(ctx).Debugf("waiting before flush completes")
+		formatLog(ctx).Debugf("wait-before-flush")
 		bm.cond.Wait()
 	}
 
@@ -308,12 +309,12 @@ func (bm *Manager) flushPackIndexesLocked(ctx context.Context) error {
 		data := b.Bytes()
 		dataCopy := append([]byte(nil), data...)
 
-		indexBlobID, err := bm.writePackIndexesNew(ctx, data)
+		indexBlobMD, err := bm.indexBlobManager.writeIndexBlob(ctx, data)
 		if err != nil {
 			return err
 		}
 
-		if err := bm.committedContents.addContent(ctx, indexBlobID, dataCopy, true); err != nil {
+		if err := bm.committedContents.addContent(ctx, indexBlobMD.BlobID, dataCopy, true); err != nil {
 			return errors.Wrap(err, "unable to add committed content")
 		}
 
@@ -379,10 +380,11 @@ func (bm *Manager) prepareAndWritePackInternal(ctx context.Context, pp *pendingP
 
 	if pp.currentPackData.Length() > 0 {
 		if err := bm.writePackFileNotLocked(ctx, pp.packBlobID, pp.currentPackData.Bytes); err != nil {
+			formatLog(ctx).Debugf("failed-pack %v %v", pp.packBlobID, err)
 			return nil, errors.Wrap(err, "can't save pack data content")
 		}
 
-		formatLog(ctx).Debugf("wrote pack file: %v (%v bytes)", pp.packBlobID, pp.currentPackData.Length())
+		formatLog(ctx).Debugf("wrote-pack %v %v", pp.packBlobID, pp.currentPackData.Length())
 	}
 
 	return packFileIndex, nil
@@ -406,9 +408,12 @@ func (bm *Manager) Close(ctx context.Context) error {
 		return errors.Wrap(err, "error flushing")
 	}
 
+	if err := bm.committedContents.close(); err != nil {
+		return errors.Wrap(err, "error closed committed content index")
+	}
+
 	bm.contentCache.close()
 	bm.metadataCache.close()
-	close(bm.closed)
 	bm.encryptionBufferPool.Close()
 
 	return nil
@@ -420,6 +425,8 @@ func (bm *Manager) Close(ctx context.Context) error {
 func (bm *Manager) Flush(ctx context.Context) error {
 	bm.lock()
 	defer bm.unlock()
+
+	formatLog(ctx).Debugf("flush")
 
 	bm.flushing = true
 
@@ -451,7 +458,7 @@ func (bm *Manager) Flush(ctx context.Context) error {
 
 // RewriteContent causes reads and re-writes a given content using the most recent format.
 func (bm *Manager) RewriteContent(ctx context.Context, contentID ID) error {
-	log(ctx).Debugf("RewriteContent(%q)", contentID)
+	formatLog(ctx).Debugf("rewrite-content %v", contentID)
 
 	pp, bi, err := bm.getContentInfo(contentID)
 	if err != nil {
@@ -464,6 +471,29 @@ func (bm *Manager) RewriteContent(ctx context.Context, contentID ID) error {
 	}
 
 	return bm.addToPackUnlocked(ctx, contentID, data, bi.Deleted)
+}
+
+// UndeleteContent rewrites the content with the given ID if the content exists
+// and is mark deleted. If the content exists and is not marked deleted, this
+// operation is a no-op.
+func (bm *Manager) UndeleteContent(ctx context.Context, contentID ID) error {
+	log(ctx).Debugf("UndeleteContent(%q)", contentID)
+
+	pp, bi, err := bm.getContentInfo(contentID)
+	if err != nil {
+		return err
+	}
+
+	if !bi.Deleted {
+		return nil
+	}
+
+	data, err := bm.getContentDataUnlocked(ctx, pp, &bi)
+	if err != nil {
+		return err
+	}
+
+	return bm.addToPackUnlocked(ctx, contentID, data, false)
 }
 
 func packPrefixForContentID(contentID ID) blob.ID {
@@ -485,6 +515,7 @@ func (bm *Manager) getOrCreatePendingPackInfoLocked(prefix blob.ID) (*pendingPac
 
 		b.Append(bm.repositoryFormatBytes)
 
+		// nolint:gosec
 		if err := writeRandomBytesToBuffer(b, rand.Intn(bm.maxPreambleLength-bm.minPreambleLength+1)+bm.minPreambleLength); err != nil {
 			return nil, errors.Wrap(err, "unable to prepare content preamble")
 		}
@@ -506,7 +537,7 @@ func (bm *Manager) WriteContent(ctx context.Context, data []byte, prefix ID) (ID
 	stats.Record(ctx, metricContentWriteContentCount.M(1))
 	stats.Record(ctx, metricContentWriteContentBytes.M(int64(len(data))))
 
-	if err := validatePrefix(prefix); err != nil {
+	if err := ValidatePrefix(prefix); err != nil {
 		return "", err
 	}
 
@@ -517,8 +548,13 @@ func (bm *Manager) WriteContent(ctx context.Context, data []byte, prefix ID) (ID
 	// content already tracked
 	if _, bi, err := bm.getContentInfo(contentID); err == nil {
 		if !bi.Deleted {
+			formatLog(ctx).Debugf("write-content %v already-exists", contentID)
 			return contentID, nil
 		}
+
+		formatLog(ctx).Debugf("write-content %v previously-deleted", contentID)
+	} else {
+		formatLog(ctx).Debugf("write-content %v new", contentID)
 	}
 
 	err := bm.addToPackUnlocked(ctx, contentID, data, false)
@@ -546,10 +582,7 @@ func (bm *Manager) GetContent(ctx context.Context, contentID ID) (v []byte, err 
 		return nil, err
 	}
 
-	if bi.Deleted {
-		return nil, ErrContentNotFound
-	}
-
+	// Return content even if it is bi.Deleted so it can be recovered during GC among others.
 	return bm.getContentDataUnlocked(ctx, pp, &bi)
 }
 
@@ -619,31 +652,47 @@ func (bm *Manager) Refresh(ctx context.Context) (bool, error) {
 
 	log(ctx).Debugf("Refresh started")
 
-	t0 := time.Now() // allow:no-inject-time
+	t0 := clock.Now()
 
 	_, updated, err := bm.loadPackIndexesUnlocked(ctx)
-	log(ctx).Debugf("Refresh completed in %v and updated=%v", time.Since(t0), updated) // allow:no-inject-time
+	log(ctx).Debugf("Refresh completed in %v and updated=%v", clock.Since(t0), updated)
 
 	return updated, err
 }
 
-// ManagerOptions are the optional parameters for manager creation
+// SyncMetadataCache synchronizes metadata cache with metadata blobs in storage.
+func (bm *Manager) SyncMetadataCache(ctx context.Context) error {
+	if cm, ok := bm.metadataCache.(*contentCacheForMetadata); ok {
+		return cm.sync(ctx)
+	}
+
+	log(ctx).Debugf("metadata cache not enabled")
+
+	return nil
+}
+
+// DecryptBlob returns the contents of an encrypted blob that can be decrypted (n,m,l).
+func (bm *Manager) DecryptBlob(ctx context.Context, blobID blob.ID) ([]byte, error) {
+	return bm.indexBlobManager.getIndexBlob(ctx, blobID)
+}
+
+// ManagerOptions are the optional parameters for manager creation.
 type ManagerOptions struct {
 	RepositoryFormatBytes []byte
 	TimeNow               func() time.Time // Time provider
 }
 
 // NewManager creates new content manager with given packing options and a formatter.
-func NewManager(ctx context.Context, st blob.Storage, f *FormattingOptions, caching CachingOptions, options ManagerOptions) (*Manager, error) {
+func NewManager(ctx context.Context, st blob.Storage, f *FormattingOptions, caching *CachingOptions, options ManagerOptions) (*Manager, error) {
 	nowFn := options.TimeNow
 	if nowFn == nil {
-		nowFn = time.Now // allow:no-inject-time
+		nowFn = clock.Now
 	}
 
 	return newManagerWithOptions(ctx, st, f, caching, nowFn, options.RepositoryFormatBytes)
 }
 
-func newManagerWithOptions(ctx context.Context, st blob.Storage, f *FormattingOptions, caching CachingOptions, timeNow func() time.Time, repositoryFormatBytes []byte) (*Manager, error) {
+func newManagerWithOptions(ctx context.Context, st blob.Storage, f *FormattingOptions, caching *CachingOptions, timeNow func() time.Time, repositoryFormatBytes []byte) (*Manager, error) {
 	if f.Version < minSupportedReadVersion || f.Version > currentWriteVersion {
 		return nil, errors.Errorf("can't handle repositories created using version %v (min supported %v, max supported %v)", f.Version, minSupportedReadVersion, maxSupportedReadVersion)
 	}
@@ -657,33 +706,11 @@ func newManagerWithOptions(ctx context.Context, st blob.Storage, f *FormattingOp
 		return nil, err
 	}
 
-	contentCache, err := newContentCache(ctx, st, caching, caching.MaxCacheSizeBytes, "contents")
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to initialize content cache")
-	}
-
-	metadataCacheSize := caching.MaxMetadataCacheSizeBytes
-	if metadataCacheSize == 0 && caching.MaxCacheSizeBytes > 0 {
-		metadataCacheSize = caching.MaxCacheSizeBytes
-	}
-
-	metadataCache, err := newContentCache(ctx, st, caching, metadataCacheSize, "metadata")
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to initialize metadata cache")
-	}
-
-	listCache, err := newListCache(st, caching)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to initialize list cache")
-	}
-
-	contentIndex := newCommittedContentIndex(caching)
-
 	mu := &sync.RWMutex{}
 	m := &Manager{
 		lockFreeManager: lockFreeManager{
+			Stats:                   new(Stats),
 			Format:                  *f,
-			CachingOptions:          caching,
 			timeNow:                 timeNow,
 			maxPackSize:             f.MaxPackSize,
 			encryptor:               encryptor,
@@ -691,14 +718,10 @@ func newManagerWithOptions(ctx context.Context, st blob.Storage, f *FormattingOp
 			minPreambleLength:       defaultMinPreambleLength,
 			maxPreambleLength:       defaultMaxPreambleLength,
 			paddingUnit:             defaultPaddingUnit,
-			contentCache:            contentCache,
-			metadataCache:           metadataCache,
-			listCache:               listCache,
 			st:                      st,
 			repositoryFormatBytes:   repositoryFormatBytes,
 			checkInvariantsOnUnlock: os.Getenv("KOPIA_VERIFY_INVARIANTS") != "",
 			writeFormatVersion:      int32(f.Version),
-			committedContents:       contentIndex,
 			encryptionBufferPool:    buf.NewPool(ctx, defaultEncryptionBufferPoolSegmentSize+encryptor.MaxOverhead(), "content-manager-encryption"),
 		},
 
@@ -708,12 +731,78 @@ func newManagerWithOptions(ctx context.Context, st blob.Storage, f *FormattingOp
 		flushPackIndexesAfter: timeNow().Add(flushPackIndexTimeout),
 		pendingPacks:          map[blob.ID]*pendingPackInfo{},
 		packIndexBuilder:      make(packIndexBuilder),
-		closed:                make(chan struct{}),
 	}
 
-	if err := m.CompactIndexes(ctx, autoCompactionOptions); err != nil {
-		return nil, errors.Wrap(err, "error initializing content manager")
+	if err := setupCaches(ctx, m, caching); err != nil {
+		return nil, errors.Wrap(err, "unable to set up caches")
+	}
+
+	if _, _, err := m.loadPackIndexesUnlocked(ctx); err != nil {
+		return nil, errors.Wrap(err, "error loading indexes")
 	}
 
 	return m, nil
+}
+
+func setupCaches(ctx context.Context, m *Manager, caching *CachingOptions) error {
+	caching = caching.CloneOrDefault()
+
+	dataCacheStorage, err := newCacheStorageOrNil(ctx, caching.CacheDirectory, caching.MaxCacheSizeBytes, "contents")
+	if err != nil {
+		return errors.Wrap(err, "unable to initialize data cache storage")
+	}
+
+	dataCache, err := newContentCacheForData(ctx, m.st, dataCacheStorage, caching.MaxCacheSizeBytes, caching.HMACSecret)
+	if err != nil {
+		return errors.Wrap(err, "unable to initialize content cache")
+	}
+
+	metadataCacheSize := caching.MaxMetadataCacheSizeBytes
+	if metadataCacheSize == 0 && caching.MaxCacheSizeBytes > 0 {
+		metadataCacheSize = caching.MaxCacheSizeBytes
+	}
+
+	metadataCacheStorage, err := newCacheStorageOrNil(ctx, caching.CacheDirectory, metadataCacheSize, "metadata")
+	if err != nil {
+		return errors.Wrap(err, "unable to initialize data cache storage")
+	}
+
+	metadataCache, err := newContentCacheForMetadata(ctx, m.st, metadataCacheStorage, metadataCacheSize)
+	if err != nil {
+		return errors.Wrap(err, "unable to initialize metadata cache")
+	}
+
+	listCache, err := newListCache(m.st, caching)
+	if err != nil {
+		return errors.Wrap(err, "unable to initialize list cache")
+	}
+
+	if caching.ownWritesCache == nil {
+		// this is test hook to allow test to specify custom cache
+		caching.ownWritesCache, err = newOwnWritesCache(ctx, caching, m.timeNow)
+		if err != nil {
+			return errors.Wrap(err, "unable to initialize own writes cache")
+		}
+	}
+
+	contentIndex := newCommittedContentIndex(caching)
+
+	// once everything is ready, set it up
+	m.CachingOptions = *caching
+	m.contentCache = dataCache
+	m.metadataCache = metadataCache
+	m.committedContents = contentIndex
+
+	m.indexBlobManager = &indexBlobManagerImpl{
+		st:                               m.st,
+		encryptor:                        m.encryptor,
+		hasher:                           m.hasher,
+		timeNow:                          m.timeNow,
+		ownWritesCache:                   caching.ownWritesCache,
+		listCache:                        listCache,
+		indexBlobCache:                   metadataCache,
+		maxEventualConsistencySettleTime: defaultEventualConsistencySettleTime,
+	}
+
+	return nil
 }

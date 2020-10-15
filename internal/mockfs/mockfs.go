@@ -13,7 +13,7 @@ import (
 	"github.com/kopia/kopia/fs"
 )
 
-// ReaderSeekerCloser implements io.Reader, io.Seeker and io.Closer
+// ReaderSeekerCloser implements io.Reader, io.Seeker and io.Closer.
 type ReaderSeekerCloser interface {
 	io.Reader
 	io.Seeker
@@ -64,17 +64,13 @@ func (e entry) Owner() fs.OwnerInfo {
 	return e.owner
 }
 
-// Directory is mock in-memory implementation of fs.Directory
+// Directory is mock in-memory implementation of fs.Directory.
 type Directory struct {
 	entry
 
 	children     fs.Entries
 	readdirError error
-}
-
-// Summary returns summary of a directory.
-func (imd *Directory) Summary() *fs.DirectorySummary {
-	return nil
+	onReaddir    func()
 }
 
 // AddFileLines adds a mock file with the specified name, text content and permissions.
@@ -173,6 +169,11 @@ func (imd *Directory) FailReaddir(err error) {
 	imd.readdirError = err
 }
 
+// OnReaddir invokes the provided function on read.
+func (imd *Directory) OnReaddir(cb func()) {
+	imd.onReaddir = cb
+}
+
 // Child gets the named child of a directory.
 func (imd *Directory) Child(ctx context.Context, name string) (fs.Entry, error) {
 	return fs.ReadDirAndFindChild(ctx, imd, name)
@@ -182,6 +183,10 @@ func (imd *Directory) Child(ctx context.Context, name string) (fs.Entry, error) 
 func (imd *Directory) Readdir(ctx context.Context) (fs.Entries, error) {
 	if imd.readdirError != nil {
 		return nil, imd.readdirError
+	}
+
+	if imd.onReaddir != nil {
+		imd.onReaddir()
 	}
 
 	return append(fs.Entries(nil), imd.children...), nil
@@ -236,7 +241,7 @@ func NewDirectory() *Directory {
 	return &Directory{
 		entry: entry{
 			name: "<root>",
-			mode: 0777 | os.ModeDir, // nolint:gomnd
+			mode: 0o777 | os.ModeDir, // nolint:gomnd
 		},
 	}
 }

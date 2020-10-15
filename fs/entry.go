@@ -9,13 +9,13 @@ import (
 	"time"
 )
 
-// Entry represents a filesystem entry, which can be Directory, File, or Symlink
+// Entry represents a filesystem entry, which can be Directory, File, or Symlink.
 type Entry interface {
 	os.FileInfo
 	Owner() OwnerInfo
 }
 
-// OwnerInfo describes owner of a filesystem entry
+// OwnerInfo describes owner of a filesystem entry.
 type OwnerInfo struct {
 	UserID  uint32
 	GroupID uint32
@@ -43,14 +43,18 @@ type Directory interface {
 	Entry
 	Child(ctx context.Context, name string) (Entry, error)
 	Readdir(ctx context.Context) (Entries, error)
-	Summary() *DirectorySummary
+}
+
+// DirectoryWithSummary is optionally implemented by Directory that provide summary.
+type DirectoryWithSummary interface {
+	Summary(ctx context.Context) (*DirectorySummary, error)
 }
 
 // ErrEntryNotFound is returned when an entry is not found.
 var ErrEntryNotFound = errors.New("entry not found")
 
 // ReadDirAndFindChild reads all entries from a directory and returns one by name.
-// This is a convenience function that may be helpful in implementations of Directory.Child()
+// This is a convenience function that may be helpful in implementations of Directory.Child().
 func ReadDirAndFindChild(ctx context.Context, d Directory, name string) (Entry, error) {
 	children, err := d.Readdir(ctx)
 	if err != nil {
@@ -68,7 +72,7 @@ func ReadDirAndFindChild(ctx context.Context, d Directory, name string) (Entry, 
 // MaxFailedEntriesPerDirectorySummary is the maximum number of failed entries per directory summary.
 const MaxFailedEntriesPerDirectorySummary = 10
 
-// EntryWithError describes error encountered when processing an entry
+// EntryWithError describes error encountered when processing an entry.
 type EntryWithError struct {
 	EntryPath string `json:"path"`
 	Error     string `json:"error"`
@@ -76,17 +80,27 @@ type EntryWithError struct {
 
 // DirectorySummary represents summary information about a directory.
 type DirectorySummary struct {
-	TotalFileSize    int64     `json:"size"`
-	TotalFileCount   int64     `json:"files"`
-	TotalDirCount    int64     `json:"dirs"`
-	MaxModTime       time.Time `json:"maxTime"`
-	IncompleteReason string    `json:"incomplete,omitempty"`
+	TotalFileSize     int64     `json:"size"`
+	TotalFileCount    int64     `json:"files"`
+	TotalSymlinkCount int64     `json:"symlinks"`
+	TotalDirCount     int64     `json:"dirs"`
+	MaxModTime        time.Time `json:"maxTime"`
+	IncompleteReason  string    `json:"incomplete,omitempty"`
 
 	// number of failed files
 	NumFailed int `json:"numFailed"`
 
 	// first 10 failed entries
 	FailedEntries []*EntryWithError `json:"errors,omitempty"`
+}
+
+// Clone clones given directory summary.
+func (s *DirectorySummary) Clone() DirectorySummary {
+	res := *s
+
+	res.FailedEntries = append([]*EntryWithError(nil), s.FailedEntries...)
+
+	return res
 }
 
 // Symlink represents a symbolic link entry.

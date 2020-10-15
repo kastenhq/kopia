@@ -1,15 +1,20 @@
+// +build darwin,amd64 linux,amd64
+
 package robustness
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"path"
 	"testing"
 	"time"
 
 	"github.com/kopia/kopia/tests/robustness/engine"
+	"github.com/kopia/kopia/tests/tools/fio"
 	"github.com/kopia/kopia/tests/tools/kopiarunner"
 )
 
@@ -32,8 +37,9 @@ func TestMain(m *testing.M) {
 	var err error
 
 	eng, err = engine.NewEngine("")
+
 	switch {
-	case err == kopiarunner.ErrExeVariableNotSet:
+	case err == kopiarunner.ErrExeVariableNotSet || errors.Is(err, fio.ErrEnvNotSet):
 		fmt.Println("Skipping robustness tests if KOPIA_EXE is not set")
 		os.Exit(0)
 	case err != nil:
@@ -60,7 +66,7 @@ func TestMain(m *testing.M) {
 	// Restore a random snapshot into the data directory
 	_, err = eng.ExecAction(engine.RestoreIntoDataDirectoryActionKey, nil)
 	if err != nil && err != engine.ErrNoOp {
-		eng.Cleanup() //nolint:errcheck
+		eng.Cleanup()
 		fmt.Printf("error restoring into the data directory: %s\n", err.Error())
 		os.Exit(1)
 	}
@@ -69,7 +75,8 @@ func TestMain(m *testing.M) {
 
 	err = eng.Cleanup()
 	if err != nil {
-		panic(err)
+		log.Printf("error cleaning up the engine: %s\n", err.Error())
+		os.Exit(2)
 	}
 
 	os.Exit(result)

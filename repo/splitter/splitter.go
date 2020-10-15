@@ -10,9 +10,12 @@ const (
 )
 
 // Splitter determines when to split a given object.
-// It must return true if the object should be split after byte b is processed.
 type Splitter interface {
-	ShouldSplit(b byte) bool
+	// NextSplitPoint() determines the location of the next split point in the given slice of bytes.
+	// It returns value `n` between 1..len(b) if a split point happens AFTER byte n and the splitter
+	// has consumed `n` bytes.
+	// If there is no split point, the splitter returns -1 and consumes all bytes from the slice.
+	NextSplitPoint(b []byte) int
 	MaxSegmentSize() int
 	Reset()
 	Close()
@@ -31,22 +34,22 @@ func SupportedAlgorithms() []string {
 	return supportedSplitters
 }
 
-// Factory creates instances of Splitter
+// Factory creates instances of Splitter.
 type Factory func() Splitter
 
 // splitterFactories is a map of registered splitter factories.
 var splitterFactories = map[string]Factory{
-	"FIXED-1M": Fixed(megabytes(1)), //nolint:gomnd
+	"FIXED-1M": Fixed(megabytes(1)),
 	"FIXED-2M": Fixed(megabytes(2)), //nolint:gomnd
 	"FIXED-4M": Fixed(megabytes(4)), //nolint:gomnd
 	"FIXED-8M": Fixed(megabytes(8)), //nolint:gomnd
 
-	"DYNAMIC-1M-BUZHASH": newBuzHash32SplitterFactory(megabytes(1)), //nolint:gomnd
+	"DYNAMIC-1M-BUZHASH": newBuzHash32SplitterFactory(megabytes(1)),
 	"DYNAMIC-2M-BUZHASH": newBuzHash32SplitterFactory(megabytes(2)), //nolint:gomnd
 	"DYNAMIC-4M-BUZHASH": newBuzHash32SplitterFactory(megabytes(4)), //nolint:gomnd
 	"DYNAMIC-8M-BUZHASH": newBuzHash32SplitterFactory(megabytes(8)), //nolint:gomnd
 
-	"DYNAMIC-1M-RABINKARP": newRabinKarp64SplitterFactory(megabytes(1)), //nolint:gomnd
+	"DYNAMIC-1M-RABINKARP": newRabinKarp64SplitterFactory(megabytes(1)),
 	"DYNAMIC-2M-RABINKARP": newRabinKarp64SplitterFactory(megabytes(2)), //nolint:gomnd
 	"DYNAMIC-4M-RABINKARP": newRabinKarp64SplitterFactory(megabytes(4)), //nolint:gomnd
 	"DYNAMIC-8M-RABINKARP": newRabinKarp64SplitterFactory(megabytes(8)), //nolint:gomnd

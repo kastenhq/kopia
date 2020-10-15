@@ -6,6 +6,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/manifest"
@@ -23,8 +24,8 @@ type Repository interface {
 	FindManifests(ctx context.Context, labels map[string]string) ([]*manifest.EntryMetadata, error)
 	DeleteManifest(ctx context.Context, id manifest.ID) error
 
-	Hostname() string
-	Username() string
+	ClientOptions() ClientOptions
+	UpdateDescription(d string)
 
 	Time() time.Time
 
@@ -43,21 +44,47 @@ type DirectRepository struct {
 
 	ConfigFile string
 
-	hostname string // connected (localhost) hostname
-	username string // connected username
+	cliOpts ClientOptions
 
 	timeNow    func() time.Time
 	formatBlob *formatBlob
 	masterKey  []byte
+
+	closed chan struct{}
+}
+
+// DeriveKey derives encryption key of the provided length from the master key.
+func (r *DirectRepository) DeriveKey(purpose []byte, keyLength int) []byte {
+	return deriveKeyFromMasterKey(r.masterKey, r.UniqueID, purpose, keyLength)
+}
+
+// ClientOptions returns client options.
+func (r *DirectRepository) ClientOptions() ClientOptions {
+	return r.cliOpts
 }
 
 // Hostname returns the hostname that connected to the repository.
-func (r *DirectRepository) Hostname() string { return r.hostname }
+func (r *DirectRepository) Hostname() string { return r.cliOpts.Hostname }
 
 // Username returns the username that's connect to the repository.
-func (r *DirectRepository) Username() string { return r.username }
+func (r *DirectRepository) Username() string { return r.cliOpts.Username }
 
-// OpenObject opens the reader for a given object, returns object.ErrNotFound
+// BlobStorage returns the blob storage.
+func (r *DirectRepository) BlobStorage() blob.Storage {
+	return r.Blobs
+}
+
+// ContentManager returns the content manager.
+func (r *DirectRepository) ContentManager() *content.Manager {
+	return r.Content
+}
+
+// ConfigFilename returns the name of the configuration file.
+func (r *DirectRepository) ConfigFilename() string {
+	return r.ConfigFile
+}
+
+// OpenObject opens the reader for a given object, returns object.ErrNotFound.
 func (r *DirectRepository) OpenObject(ctx context.Context, id object.ID) (object.Reader, error) {
 	return r.Objects.Open(ctx, id)
 }
@@ -92,8 +119,21 @@ func (r *DirectRepository) DeleteManifest(ctx context.Context, id manifest.ID) e
 	return r.Manifests.Delete(ctx, id)
 }
 
+// UpdateDescription updates the description of a connected repository.
+func (r *DirectRepository) UpdateDescription(d string) {
+	r.cliOpts.Description = d
+}
+
 // Close closes the repository and releases all resources.
 func (r *DirectRepository) Close(ctx context.Context) error {
+	select {
+	case <-r.closed:
+		// already closed
+		return nil
+
+	default:
+	}
+
 	if err := r.Flush(ctx); err != nil {
 		return errors.Wrap(err, "error flushing")
 	}
@@ -109,6 +149,8 @@ func (r *DirectRepository) Close(ctx context.Context) error {
 	if err := r.Blobs.Close(ctx); err != nil {
 		return errors.Wrap(err, "error closing blob storage")
 	}
+
+	close(r.closed)
 
 	return nil
 }
@@ -148,6 +190,10 @@ func (r *DirectRepository) Refresh(ctx context.Context) error {
 func (r *DirectRepository) RefreshPeriodically(ctx context.Context, interval time.Duration) {
 	for {
 		select {
+		case <-r.closed:
+			// stop background refresh when repository is closed
+			return
+
 		case <-ctx.Done():
 			return
 
@@ -159,7 +205,7 @@ func (r *DirectRepository) RefreshPeriodically(ctx context.Context, interval tim
 	}
 }
 
-// Time returns the current local time for the repo
+// Time returns the current local time for the repo.
 func (r *DirectRepository) Time() time.Time {
 	return defaultTime(r.timeNow)()
 }
@@ -169,5 +215,5 @@ func defaultTime(f func() time.Time) func() time.Time {
 		return f
 	}
 
-	return time.Now // allow:no-inject-time
+	return clock.Now
 }

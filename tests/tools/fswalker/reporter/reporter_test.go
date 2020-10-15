@@ -1,4 +1,4 @@
-// +build linux
+// +build darwin,amd64 linux,amd64
 
 package reporter
 
@@ -28,7 +28,7 @@ func TestReporterWithFiles(t *testing.T) {
 			Info: &fspb.FileInfo{
 				Name: "this_is_a.file",
 				Size: 11235,
-				Mode: 0700,
+				Mode: 0o700,
 				Modified: &timestamp.Timestamp{
 					Seconds: 12,
 					Nanos:   0,

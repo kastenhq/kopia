@@ -1,14 +1,10 @@
 package endtoend_test
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/pkg/errors"
@@ -69,27 +65,9 @@ func oneTimeSetup() error {
 	return nil
 }
 
-func randomString(n int) string {
-	b := make([]byte, n)
-	io.ReadFull(rand.Reader, b) //nolint:errcheck
-
-	return hex.EncodeToString(b)
-}
-
-func makeScratchDir(t *testing.T) string {
-	baseTestName := strings.Split(t.Name(), "/")[0]
-	d := filepath.Join(sharedTestDataDirBase, baseTestName, randomString(4))
-
-	if err := os.MkdirAll(d, 0700); err != nil {
-		t.Fatalf("unable to make scratch dir: %v", err)
-	}
-
-	return d
-}
-
 func oneTimeCleanup() {
 	if sharedTestDataDirBase != "" {
-		os.RemoveAll(sharedTestDataDirBase) //nolint:errcheck
+		os.RemoveAll(sharedTestDataDirBase)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/logging"
 )
@@ -25,11 +26,13 @@ var log = logging.GetContextLoggerFunc("kopia/manifest")
 // ErrNotFound is returned when the metadata item is not found.
 var ErrNotFound = errors.New("not found")
 
-// ContentPrefix is the prefix of the content id for manifests
-const ContentPrefix = "m"
-const autoCompactionContentCount = 16
+// ContentPrefix is the prefix of the content id for manifests.
+const (
+	ContentPrefix              = "m"
+	autoCompactionContentCount = 16
+)
 
-// TypeLabelKey is the label key for manifest type
+// TypeLabelKey is the label key for manifest type.
 const TypeLabelKey = "type"
 
 type contentManager interface {
@@ -45,7 +48,7 @@ type contentManager interface {
 // ID is a unique identifier of a single manifest.
 type ID string
 
-// Manager organizes JSON manifests of various kinds, including snapshot manifests
+// Manager organizes JSON manifests of various kinds, including snapshot manifests.
 type Manager struct {
 	mu sync.Mutex
 	b  contentManager
@@ -293,7 +296,7 @@ func (m *Manager) loadCommittedContentsLocked(ctx context.Context) error {
 		manifests = map[content.ID]manifest{}
 
 		err := m.b.IterateContents(ctx, content.IterateOptions{
-			Prefix:   ContentPrefix,
+			Range:    content.PrefixRange(ContentPrefix),
 			Parallel: manifestLoadParallelism,
 		}, func(ci content.Info) error {
 			man, err := m.loadManifestContent(ctx, ci.ID)
@@ -310,7 +313,7 @@ func (m *Manager) loadCommittedContentsLocked(ctx context.Context) error {
 			break
 		}
 
-		if err == content.ErrContentNotFound {
+		if errors.Is(err, content.ErrContentNotFound) {
 			// try again, lost a race with another manifest manager which just did compaction
 			continue
 		}
@@ -473,7 +476,7 @@ func copyLabels(m map[string]string) map[string]string {
 	return r
 }
 
-// ManagerOptions are optional parameters for Manager creation
+// ManagerOptions are optional parameters for Manager creation.
 type ManagerOptions struct {
 	TimeNow func() time.Time // Time provider
 }
@@ -482,7 +485,7 @@ type ManagerOptions struct {
 func NewManager(ctx context.Context, b contentManager, options ManagerOptions) (*Manager, error) {
 	timeNow := options.TimeNow
 	if timeNow == nil {
-		timeNow = time.Now // allow:no-inject-time
+		timeNow = clock.Now
 	}
 
 	m := &Manager{

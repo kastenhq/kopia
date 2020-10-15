@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/efarrer/iothrottler"
 	minio "github.com/minio/minio-go/v6"
@@ -113,6 +114,23 @@ func translateError(err error) error {
 	return err
 }
 
+func (s *s3Storage) GetMetadata(ctx context.Context, b blob.ID) (blob.Metadata, error) {
+	v, err := retry.WithExponentialBackoff(ctx, fmt.Sprintf("GetMetadata(%v)", b), func() (interface{}, error) {
+		oi, err := s.cli.StatObject(s.BucketName, s.getObjectNameString(b), minio.StatObjectOptions{})
+		if err != nil {
+			return blob.Metadata{}, err
+		}
+
+		return blob.Metadata{
+			BlobID:    b,
+			Length:    oi.Size,
+			Timestamp: oi.LastModified,
+		}, nil
+	}, isRetriableError)
+
+	return v.(blob.Metadata), translateError(err)
+}
+
 func (s *s3Storage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes) error {
 	return translateError(retry.WithExponentialBackoffNoValue(ctx, fmt.Sprintf("PutBlob(%v)", b), func() error {
 		throttled, err := s.uploadThrottler.AddReader(ioutil.NopCloser(data.Reader()))
@@ -142,6 +160,10 @@ func (s *s3Storage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes) err
 
 		return err
 	}, isRetriableError))
+}
+
+func (s *s3Storage) SetTime(ctx context.Context, b blob.ID, t time.Time) error {
+	return blob.ErrSetTimeUnsupported
 }
 
 func (s *s3Storage) DeleteBlob(ctx context.Context, b blob.ID) error {
@@ -192,6 +214,10 @@ func (s *s3Storage) Close(ctx context.Context) error {
 
 func (s *s3Storage) String() string {
 	return fmt.Sprintf("s3://%v/%v", s.BucketName, s.Prefix)
+}
+
+func (s *s3Storage) DisplayName() string {
+	return fmt.Sprintf("S3: %v %v", s.Endpoint, s.BucketName)
 }
 
 type progressReader struct {

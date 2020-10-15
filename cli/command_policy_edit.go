@@ -66,11 +66,11 @@ func editPolicy(ctx context.Context, rep repo.Repository) error {
 
 	for _, target := range targets {
 		original, err := policy.GetDefinedPolicy(ctx, rep, target)
-		if err == policy.ErrPolicyNotFound {
+		if errors.Is(err, policy.ErrPolicyNotFound) {
 			original = &policy.Policy{}
 		}
 
-		printStderr("Editing policy for %v using external editor...\n", target)
+		log(ctx).Infof("Editing policy for %v using external editor...", target)
 
 		s := policyEditHelpText + prettyJSON(original)
 		s = insertHelpText(s, `  "retention": {`, policyEditRetentionHelpText)
@@ -89,17 +89,17 @@ func editPolicy(ctx context.Context, rep repo.Repository) error {
 		}
 
 		if jsonEqual(updated, original) {
-			printStderr("Policy for %v unchanged\n", target)
+			log(ctx).Infof("Policy for %v unchanged", target)
 			continue
 		}
 
-		printStderr("Updated policy for %v\n%v\n", target, prettyJSON(updated))
+		log(ctx).Infof("Updated policy for %v\n%v", target, prettyJSON(updated))
 
 		fmt.Print("Save updated policy? (y/N) ")
 
 		var shouldSave string
 
-		fmt.Scanf("%v", &shouldSave) //nolint:errcheck
+		fmt.Scanf("%v", &shouldSave)
 
 		if strings.HasPrefix(strings.ToLower(shouldSave), "y") {
 			if err := policy.SetPolicy(ctx, rep, target, updated); err != nil {

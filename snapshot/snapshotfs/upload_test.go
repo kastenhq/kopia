@@ -7,11 +7,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/kylelemons/godebug/pretty"
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/fs"
+	"github.com/kopia/kopia/internal/clock"
+	"github.com/kopia/kopia/internal/faketime"
 	"github.com/kopia/kopia/internal/mockfs"
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/repo"
@@ -23,13 +26,14 @@ import (
 
 const (
 	masterPassword     = "foofoofoofoofoofoofoofoo"
-	defaultPermissions = 0777
+	defaultPermissions = 0o777
 )
 
 type uploadTestHarness struct {
 	sourceDir *mockfs.Directory
 	repoDir   string
 	repo      repo.Repository
+	ft        *faketime.TimeAdvance
 }
 
 var errTest = errors.New("test error")
@@ -47,7 +51,6 @@ func newUploadTestHarness(ctx context.Context) *uploadTestHarness {
 	storage, err := filesystem.New(ctx, &filesystem.Options{
 		Path: repoDir,
 	})
-
 	if err != nil {
 		panic("cannot create storage directory: " + err.Error())
 	}
@@ -63,7 +66,11 @@ func newUploadTestHarness(ctx context.Context) *uploadTestHarness {
 		panic("unable to connect to repository: " + conerr.Error())
 	}
 
-	rep, err := repo.Open(ctx, configFile, masterPassword, &repo.Options{})
+	ft := faketime.NewTimeAdvance(time.Date(2018, time.February, 6, 0, 0, 0, 0, time.UTC), 0)
+
+	rep, err := repo.Open(ctx, configFile, masterPassword, &repo.Options{
+		TimeNowFunc: ft.NowFunc(),
+	})
 	if err != nil {
 		panic("unable to open repository: " + err.Error())
 	}
@@ -92,6 +99,7 @@ func newUploadTestHarness(ctx context.Context) *uploadTestHarness {
 		sourceDir: sourceDir,
 		repoDir:   repoDir,
 		repo:      rep,
+		ft:        ft,
 	}
 
 	return th
@@ -271,5 +279,69 @@ func TestUpload_SubDirectoryReadFailureIgnoreFailures(t *testing.T) {
 
 	if diff := pretty.Compare(man.RootEntry.DirSummary.FailedEntries, wantErrors); diff != "" {
 		t.Errorf("unexpected directory tree, diff(-got,+want): %v\n", diff)
+	}
+}
+
+func TestUploadWithCheckpointing(t *testing.T) {
+	ctx := testlogging.Context(t)
+	th := newUploadTestHarness(ctx)
+
+	defer th.cleanup()
+
+	u := NewUploader(th.repo)
+
+	fakeTicker := make(chan time.Time)
+
+	// inject fake ticker that we can control externally instead of through time passage.
+	u.getTicker = func(d time.Duration) <-chan time.Time {
+		return fakeTicker
+	}
+
+	// create a channel that will be sent to whenever checkpoint completes.
+	u.checkpointFinished = make(chan struct{})
+	u.disableEstimation = true
+
+	policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
+
+	si := snapshot.SourceInfo{
+		UserName: "user",
+		Host:     "host",
+		Path:     "path",
+	}
+
+	// inject a hook into mock filesystem to trigger and wait for checkpoints at few places.
+	// the places are not important, what's important that those are 3 separate points in time.
+	dirsToCheckpointAt := []*mockfs.Directory{
+		th.sourceDir.Subdir("d1"),
+		th.sourceDir.Subdir("d2"),
+		th.sourceDir.Subdir("d1").Subdir("d2"),
+	}
+
+	for _, d := range dirsToCheckpointAt {
+		d.OnReaddir(func() {
+			// trigger checkpoint
+			fakeTicker <- clock.Now()
+			// wait for checkpoint
+			<-u.checkpointFinished
+		})
+	}
+
+	if _, err := u.Upload(ctx, th.sourceDir, policyTree, si); err != nil {
+		t.Errorf("Upload error: %v", err)
+	}
+
+	snapshots, err := snapshot.ListSnapshots(ctx, th.repo, si)
+	if err != nil {
+		t.Fatalf("error listing snapshots: %v", err)
+	}
+
+	if got, want := len(snapshots), len(dirsToCheckpointAt); got != want {
+		t.Fatalf("unexpected number of snapshots: %v, want %v", got, want)
+	}
+
+	for _, sn := range snapshots {
+		if got, want := sn.IncompleteReason, IncompleteReasonCheckpoint; got != want {
+			t.Errorf("unexpected incompleteReason %q, want %q", got, want)
+		}
 	}
 }

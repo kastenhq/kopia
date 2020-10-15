@@ -1,3 +1,5 @@
+// +build darwin,amd64 linux,amd64
+
 package robustness
 
 import (
@@ -80,30 +82,6 @@ func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
 	testenv.AssertNoError(t, err)
 }
 
-// func TestRandomized(t *testing.T) {
-// 	st := time.Now()
-
-// 	opts := engine.ActionOpts{
-// 		engine.ActionControlActionKey: map[string]string{
-// 			string(engine.SnapshotRootDirActionKey):          strconv.Itoa(2),
-// 			string(engine.RestoreRandomSnapshotActionKey):    strconv.Itoa(2),
-// 			string(engine.DeleteRandomSnapshotActionKey):     strconv.Itoa(1),
-// 			string(engine.WriteRandomFilesActionKey):         strconv.Itoa(8),
-// 			string(engine.DeleteRandomSubdirectoryActionKey): strconv.Itoa(1),
-// 		},
-// 		engine.WriteRandomFilesActionKey: map[string]string{
-// 			engine.IOLimitPerWriteAction: fmt.Sprintf("%d", 1*1024*1024*1024),
-// 		},
-// 	}
-
-// 	// Perform actions until the timer expires, at least until one action
-// 	// has been performed
-// 	for time.Since(st) <= *randomizedTestDur || eng.RunStats.ActionCounter == 0 {
-// 		err := eng.RandomAction(opts)
-// 		testenv.AssertNoError(t, err)
-// 	}
-// }
-
 func TestRandomizedSmall(t *testing.T) {
 	st := time.Now()
 
@@ -127,8 +105,10 @@ func TestRandomizedSmall(t *testing.T) {
 		err := eng.RandomAction(opts)
 		if err == engine.ErrNoOp {
 			t.Log("Random action resulted in no-op")
+
 			err = nil
 		}
+
 		testenv.AssertNoError(t, err)
 	}
 }

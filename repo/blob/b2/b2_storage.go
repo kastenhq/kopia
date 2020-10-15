@@ -10,7 +10,7 @@ import (
 
 	"github.com/efarrer/iothrottler"
 	"github.com/pkg/errors"
-	"gopkg.in/kothar/go-backblaze.v0"
+	backblaze "gopkg.in/kothar/go-backblaze.v0"
 
 	"github.com/kopia/kopia/internal/retry"
 	"github.com/kopia/kopia/repo/blob"
@@ -80,6 +80,50 @@ func (s *b2Storage) GetBlob(ctx context.Context, id blob.ID, offset, length int6
 	return v.([]byte), nil
 }
 
+func (s *b2Storage) resolveFileID(fileName string) (string, error) {
+	resp, err := s.bucket.ListFileVersions(fileName, "", 1)
+	if err != nil {
+		return "", err
+	}
+
+	if len(resp.Files) > 0 {
+		if resp.Files[0].Name == fileName && resp.Files[0].Action == backblaze.Upload {
+			return resp.Files[0].ID, nil
+		}
+	}
+
+	return "", nil
+}
+
+func (s *b2Storage) GetMetadata(ctx context.Context, id blob.ID) (blob.Metadata, error) {
+	fileName := s.getObjectNameString(id)
+
+	attempt := func() (interface{}, error) {
+		fileID, err := s.resolveFileID(fileName)
+		if err != nil {
+			return nil, err
+		}
+
+		fi, err := s.bucket.GetFileInfo(fileID)
+		if err != nil {
+			return nil, err
+		}
+
+		return blob.Metadata{
+			BlobID:    id,
+			Length:    fi.ContentLength,
+			Timestamp: time.Unix(0, fi.UploadTimestamp*1e6),
+		}, nil
+	}
+
+	v, err := exponentialBackoff(ctx, fmt.Sprintf("GetMetadata(%q)", id), attempt)
+	if err != nil {
+		return blob.Metadata{}, translateError(err)
+	}
+
+	return v.(blob.Metadata), nil
+}
+
 func translateError(err error) error {
 	if b2err, ok := err.(*backblaze.B2Error); ok {
 		if b2err.Status == http.StatusNotFound {
@@ -87,7 +131,7 @@ func translateError(err error) error {
 			return blob.ErrBlobNotFound
 		}
 
-		if b2err.Status == http.StatusBadRequest && b2err.Code == "already_hidden" {
+		if b2err.Status == http.StatusBadRequest && (b2err.Code == "already_hidden" || b2err.Code == "no_such_file") {
 			// Special case when hiding a file that is already hidden. It's basically
 			// not found.
 			return blob.ErrBlobNotFound
@@ -121,34 +165,50 @@ func isRetriableError(err error) bool {
 }
 
 func (s *b2Storage) PutBlob(ctx context.Context, id blob.ID, data blob.Bytes) error {
-	throttled, err := s.uploadThrottler.AddReader(ioutil.NopCloser(data.Reader()))
-	if err != nil {
-		return err
-	}
-
 	progressCallback := blob.ProgressCallback(ctx)
 	if progressCallback != nil {
 		progressCallback(string(id), 0, int64(data.Length()))
 		defer progressCallback(string(id), int64(data.Length()), int64(data.Length()))
 	}
 
-	fileName := s.getObjectNameString(id)
-	_, err = s.bucket.UploadFile(fileName, nil, throttled)
+	attempt := func() (interface{}, error) {
+		throttled, err := s.uploadThrottler.AddReader(ioutil.NopCloser(data.Reader()))
+		if err != nil {
+			return nil, err
+		}
 
-	return translateError(err)
+		fileName := s.getObjectNameString(id)
+		_, err = s.bucket.UploadFile(fileName, nil, throttled)
+
+		return nil, err
+	}
+
+	if _, err := exponentialBackoff(ctx, fmt.Sprintf("PutBlob(%q)", id), attempt); err != nil {
+		return translateError(err)
+	}
+
+	return nil
+}
+
+func (s *b2Storage) SetTime(ctx context.Context, b blob.ID, t time.Time) error {
+	return blob.ErrSetTimeUnsupported
 }
 
 func (s *b2Storage) DeleteBlob(ctx context.Context, id blob.ID) error {
-	fileName := s.getObjectNameString(id)
-	_, err := s.bucket.HideFile(fileName)
-	err = translateError(err)
-
-	if err == blob.ErrBlobNotFound {
-		// Deleting failed because it already is deleted? Fine.
-		return nil
+	attempt := func() (interface{}, error) {
+		fileName := s.getObjectNameString(id)
+		return s.bucket.HideFile(fileName)
 	}
 
-	return err
+	if _, err := exponentialBackoff(ctx, fmt.Sprintf("DeleteBlob(%q)", id), attempt); err != nil {
+		err = translateError(err)
+		if errors.Is(err, blob.ErrBlobNotFound) {
+			// Deleting failed because it already is deleted? Fine.
+			return nil
+		}
+	}
+
+	return nil
 }
 
 func (s *b2Storage) getObjectNameString(id blob.ID) string {
@@ -197,6 +257,10 @@ func (s *b2Storage) ConnectionInfo() blob.ConnectionInfo {
 	}
 }
 
+func (s *b2Storage) DisplayName() string {
+	return fmt.Sprintf("B2: %v", s.BucketName)
+}
+
 func (s *b2Storage) Close(ctx context.Context) error {
 	return nil
 }
@@ -213,7 +277,7 @@ func toBandwidth(bytesPerSecond int) iothrottler.Bandwidth {
 	return iothrottler.Bandwidth(bytesPerSecond) * iothrottler.BytesPerSecond
 }
 
-// New creates new B2-backed storage with specified options:
+// New creates new B2-backed storage with specified options.
 func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 	if opt.BucketName == "" {
 		return nil, errors.New("bucket name must be specified")
@@ -233,7 +297,7 @@ func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 	}
 
 	if bucket == nil {
-		return nil, fmt.Errorf("bucket not found: %s", opt.BucketName)
+		return nil, errors.Errorf("bucket not found: %s", opt.BucketName)
 	}
 
 	return &b2Storage{

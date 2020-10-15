@@ -9,10 +9,12 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/retry"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/sharded"
@@ -25,8 +27,8 @@ const (
 	fsStorageType        = "filesystem"
 	fsStorageChunkSuffix = ".f"
 
-	fsDefaultFileMode os.FileMode = 0600
-	fsDefaultDirMode  os.FileMode = 0700
+	fsDefaultFileMode os.FileMode = 0o600
+	fsDefaultDirMode  os.FileMode = 0o700
 )
 
 var fsDefaultShards = []int{3, 3}
@@ -38,6 +40,8 @@ type fsStorage struct {
 type fsImpl struct {
 	Options
 }
+
+var errRetriableInvalidLength = errors.Errorf("invalid length (retriable)")
 
 func isRetriable(err error) bool {
 	if err == nil {
@@ -54,13 +58,56 @@ func isRetriable(err error) bool {
 		return false
 	}
 
-	return true
+	// retry errors during file operations
+	if _, ok := err.(*os.PathError); ok {
+		return true
+	}
+
+	// retry errors during rename
+	if _, ok := err.(*os.LinkError); ok {
+		return true
+	}
+
+	return errors.Is(err, errRetriableInvalidLength)
 }
 
 func (fs *fsImpl) GetBlobFromPath(ctx context.Context, dirPath, path string, offset, length int64) ([]byte, error) {
 	val, err := retry.WithExponentialBackoff(ctx, "GetBlobFromPath:"+path, func() (interface{}, error) {
 		f, err := os.Open(path) //nolint:gosec
-		return f, err
+		if err != nil {
+			return nil, err
+		}
+
+		defer f.Close() //nolint:errcheck,gosec
+
+		if length < 0 {
+			return ioutil.ReadAll(f)
+		}
+
+		if _, err = f.Seek(offset, io.SeekStart); err != nil {
+			// do not wrap seek error, we don't want to retry on it.
+			return nil, errors.Errorf("seek error: %v", err)
+		}
+
+		b, err := ioutil.ReadAll(io.LimitReader(f, length))
+		if err != nil {
+			return nil, err
+		}
+
+		if int64(len(b)) != length && length > 0 {
+			if runtime.GOOS == "darwin" {
+				if st, err := f.Stat(); err == nil && st.Size() == 0 {
+					// this sometimes fails on macOS for unknown reasons, likely a bug in the filesystem
+					// retry deals with this transient state.
+					// see see https://github.com/kopia/kopia/issues/299
+					return nil, errRetriableInvalidLength
+				}
+			}
+
+			return nil, errors.Errorf("invalid length")
+		}
+
+		return b, nil
 	}, isRetriable)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -70,31 +117,27 @@ func (fs *fsImpl) GetBlobFromPath(ctx context.Context, dirPath, path string, off
 		return nil, err
 	}
 
-	f := val.(*os.File)
+	return val.([]byte), nil
+}
+
+func (fs *fsImpl) GetMetadataFromPath(ctx context.Context, dirPath, path string) (blob.Metadata, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return blob.Metadata{}, err
+	}
 
 	if err != nil {
-		return nil, err
-	}
-	defer f.Close() //nolint:errcheck
+		if os.IsNotExist(err) {
+			return blob.Metadata{}, blob.ErrBlobNotFound
+		}
 
-	if length < 0 {
-		return ioutil.ReadAll(f)
-	}
-
-	if _, err = f.Seek(offset, io.SeekStart); err != nil {
-		return nil, err
+		return blob.Metadata{}, err
 	}
 
-	b, err := ioutil.ReadAll(io.LimitReader(f, length))
-	if err != nil {
-		return nil, err
-	}
-
-	if int64(len(b)) != length {
-		return nil, errors.Errorf("invalid length")
-	}
-
-	return b, nil
+	return blob.Metadata{
+		Length:    fi.Size(),
+		Timestamp: fi.ModTime(),
+	}, nil
 }
 
 func (fs *fsImpl) PutBlobInPath(ctx context.Context, dirPath, path string, data blob.Bytes) error {
@@ -150,13 +193,13 @@ func (fs *fsImpl) PutBlobInPath(ctx context.Context, dirPath, path string, data 
 func (fs *fsImpl) createTempFileAndDir(tempFile string) (*os.File, error) {
 	flags := os.O_CREATE | os.O_WRONLY | os.O_EXCL
 
-	f, err := os.OpenFile(tempFile, flags, fs.fileMode())
+	f, err := os.OpenFile(tempFile, flags, fs.fileMode()) //nolint:gosec
 	if os.IsNotExist(err) {
 		if err = os.MkdirAll(filepath.Dir(tempFile), fs.dirMode()); err != nil {
 			return nil, errors.Wrap(err, "cannot create directory")
 		}
 
-		return os.OpenFile(tempFile, flags, fs.fileMode())
+		return os.OpenFile(tempFile, flags, fs.fileMode()) //nolint:gosec
 	}
 
 	return f, err
@@ -178,12 +221,18 @@ func (fs *fsImpl) ReadDir(ctx context.Context, dirname string) ([]os.FileInfo, e
 		v, err := ioutil.ReadDir(dirname)
 		return v, err
 	}, isRetriable)
-
 	if err != nil {
 		return nil, err
 	}
 
 	return v.([]os.FileInfo), nil
+}
+
+// SetTime updates file modification time to the provided time.
+func (fs *fsImpl) SetTimeInPath(ctx context.Context, dirPath, filePath string, n time.Time) error {
+	log(ctx).Debugf("updating timestamp on %v to %v", filePath, n)
+
+	return os.Chtimes(filePath, n, n)
 }
 
 // TouchBlob updates file modification time to current time if it's sufficiently old.
@@ -195,7 +244,7 @@ func (fs *fsStorage) TouchBlob(ctx context.Context, blobID blob.ID, threshold ti
 		return err
 	}
 
-	n := time.Now() // allow:no-inject-time
+	n := clock.Now()
 
 	age := n.Sub(st.ModTime())
 	if age < threshold {
@@ -212,6 +261,10 @@ func (fs *fsStorage) ConnectionInfo() blob.ConnectionInfo {
 		Type:   fsStorageType,
 		Config: &fs.Impl.(*fsImpl).Options,
 	}
+}
+
+func (fs *fsStorage) DisplayName() string {
+	return fmt.Sprintf("Filesystem: %v", fs.RootPath)
 }
 
 func (fs *fsStorage) Close(ctx context.Context) error {

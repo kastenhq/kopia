@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -20,11 +19,14 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/iocopy"
 )
 
 const (
-	repoPassword        = "qWQPJ2hiiLgWRRCr" // nolint:gosec
+	// TestRepoPassword is a password for repositories created in tests.
+	TestRepoPassword = "qWQPJ2hiiLgWRRCr"
+
 	maxOutputLinesToLog = 40
 )
 
@@ -38,6 +40,12 @@ type CLITest struct {
 
 	fixedArgs   []string
 	Environment []string
+
+	DefaultRepositoryCreateFlags []string
+
+	PassthroughStderr bool
+
+	LogsDir string
 }
 
 // SourceInfo reprents a single source (user@host:/path) with its snapshots.
@@ -55,7 +63,7 @@ type SnapshotInfo struct {
 	Time       time.Time
 }
 
-// NewCLITest creates a new instance of *CLITest
+// NewCLITest creates a new instance of *CLITest.
 func NewCLITest(t *testing.T) *CLITest {
 	exe := os.Getenv("KOPIA_EXE")
 	if exe == "" {
@@ -63,19 +71,27 @@ func NewCLITest(t *testing.T) *CLITest {
 		t.Skip()
 	}
 
-	RepoDir, err := ioutil.TempDir("", "kopia-repo")
-	if err != nil {
-		t.Fatalf("can't create temp directory: %v", err)
-	}
+	configDir := t.TempDir()
 
-	ConfigDir, err := ioutil.TempDir("", "kopia-config")
-	if err != nil {
-		t.Fatalf("can't create temp directory: %v", err)
-	}
+	cleanName := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(
+		t.Name(),
+		"/", "_"), "\\", "_"), ":", "_")
+
+	logsDir := filepath.Join(os.TempDir(), "kopia-logs", cleanName+"."+clock.Now().Local().Format("20060102150405"))
+
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("logs are available in %v", logsDir)
+			return
+		}
+
+		os.RemoveAll(logsDir)
+	})
 
 	fixedArgs := []string{
 		// use per-test config file, to avoid clobbering current user's setup.
-		"--config-file", filepath.Join(ConfigDir, ".kopia.config"),
+		"--config-file", filepath.Join(configDir, ".kopia.config"),
+		"--log-dir", logsDir,
 	}
 
 	// disable the use of keyring
@@ -88,29 +104,28 @@ func NewCLITest(t *testing.T) *CLITest {
 		fixedArgs = append(fixedArgs, "--no-use-keyring")
 	}
 
+	var formatFlags []string
+
+	switch runtime.GOARCH {
+	case "arm64", "arm":
+		formatFlags = []string{
+			"--encryption", "CHACHA20-POLY1305-HMAC-SHA256",
+			"--block-hash", "BLAKE2S-256",
+		}
+	}
+
 	return &CLITest{
-		startTime:   time.Now(),
-		RepoDir:     RepoDir,
-		ConfigDir:   ConfigDir,
-		Exe:         filepath.FromSlash(exe),
-		fixedArgs:   fixedArgs,
-		Environment: []string{"KOPIA_PASSWORD=" + repoPassword},
-	}
-}
-
-// Cleanup cleans up the test Environment unless the test has failed.
-func (e *CLITest) Cleanup(t *testing.T) {
-	if t.Failed() {
-		t.Logf("skipped cleanup for failed test, examine repository: %v", e.RepoDir)
-		return
-	}
-
-	if e.RepoDir != "" {
-		os.RemoveAll(e.RepoDir) //nolint:errcheck
-	}
-
-	if e.ConfigDir != "" {
-		os.RemoveAll(e.ConfigDir) //nolint:errcheck
+		startTime:                    clock.Now(),
+		RepoDir:                      t.TempDir(),
+		ConfigDir:                    configDir,
+		Exe:                          filepath.FromSlash(exe),
+		fixedArgs:                    fixedArgs,
+		DefaultRepositoryCreateFlags: formatFlags,
+		LogsDir:                      logsDir,
+		Environment: []string{
+			"KOPIA_PASSWORD=" + TestRepoPassword,
+			"KOPIA_ADVANCED_COMMANDS=enabled",
+		},
 	}
 }
 
@@ -118,7 +133,7 @@ func (e *CLITest) Cleanup(t *testing.T) {
 func (e *CLITest) RunAndExpectSuccess(t *testing.T, args ...string) []string {
 	t.Helper()
 
-	stdout, _, err := e.Run(t, args...)
+	stdout, _, err := e.Run(t, false, args...)
 	if err != nil {
 		t.Fatalf("'kopia %v' failed with %v", strings.Join(args, " "), err)
 	}
@@ -130,12 +145,9 @@ func (e *CLITest) RunAndExpectSuccess(t *testing.T, args ...string) []string {
 func (e *CLITest) RunAndProcessStderr(t *testing.T, callback func(line string) bool, args ...string) *exec.Cmd {
 	t.Helper()
 
-	t.Logf("running 'kopia %v'", strings.Join(args, " "))
-	cmdArgs := append(append([]string(nil), e.fixedArgs...), args...)
-
-	// nolint:gosec
-	c := exec.Command(e.Exe, cmdArgs...)
+	c := exec.Command(e.Exe, e.cmdArgs(args)...)
 	c.Env = append(os.Environ(), e.Environment...)
+	t.Logf("running '%v %v'", c.Path, c.Args)
 
 	stderrPipe, err := c.StderrPipe()
 	if err != nil {
@@ -166,7 +178,7 @@ func (e *CLITest) RunAndProcessStderr(t *testing.T, callback func(line string) b
 func (e *CLITest) RunAndExpectSuccessWithErrOut(t *testing.T, args ...string) (stdout, stderr []string) {
 	t.Helper()
 
-	stdout, stderr, err := e.Run(t, args...)
+	stdout, stderr, err := e.Run(t, false, args...)
 	if err != nil {
 		t.Fatalf("'kopia %v' failed with %v", strings.Join(args, " "), err)
 	}
@@ -178,7 +190,7 @@ func (e *CLITest) RunAndExpectSuccessWithErrOut(t *testing.T, args ...string) (s
 func (e *CLITest) RunAndExpectFailure(t *testing.T, args ...string) []string {
 	t.Helper()
 
-	stdout, _, err := e.Run(t, args...)
+	stdout, _, err := e.Run(t, true, args...)
 	if err == nil {
 		t.Fatalf("'kopia %v' succeeded, but expected failure", strings.Join(args, " "))
 	}
@@ -198,23 +210,39 @@ func (e *CLITest) RunAndVerifyOutputLineCount(t *testing.T, wantLines int, args 
 	return lines
 }
 
-// Run executes kopia with given arguments and returns the output lines.
-func (e *CLITest) Run(t *testing.T, args ...string) (stdout, stderr []string, err error) {
-	t.Helper()
-	t.Logf("running '%v %v'", e.Exe, strings.Join(args, " "))
-	// nolint:gosec
-	cmdArgs := append(append([]string(nil), e.fixedArgs...), args...)
+func (e *CLITest) cmdArgs(args []string) []string {
+	var suffix []string
 
-	// nolint:gosec
-	c := exec.Command(e.Exe, cmdArgs...)
+	// detect repository creation and override DefaultRepositoryCreateFlags for best
+	// performance on the current platform.
+	if len(args) >= 2 && (args[0] == "repo" && args[1] == "create") {
+		suffix = e.DefaultRepositoryCreateFlags
+	}
+
+	return append(append(append([]string(nil), e.fixedArgs...), args...), suffix...)
+}
+
+// Run executes kopia with given arguments and returns the output lines.
+func (e *CLITest) Run(t *testing.T, expectedError bool, args ...string) (stdout, stderr []string, err error) {
+	t.Helper()
+
+	c := exec.Command(e.Exe, e.cmdArgs(args)...)
 	c.Env = append(os.Environ(), e.Environment...)
+
+	t.Logf("running '%v %v'", c.Path, c.Args)
 
 	errOut := &bytes.Buffer{}
 	c.Stderr = errOut
 
+	if e.PassthroughStderr {
+		c.Stderr = os.Stderr
+	}
+
 	o, err := c.Output()
 
-	t.Logf("finished 'kopia %v' with err=%v and output:\n%v\nstderr:\n%v\n", strings.Join(args, " "), err, trimOutput(string(o)), trimOutput(errOut.String()))
+	if err != nil && !expectedError {
+		t.Logf("finished 'kopia %v' with err=%v (expected=%v) and output:\n%v\nstderr:\n%v\n", strings.Join(args, " "), err, expectedError, trimOutput(string(o)), trimOutput(errOut.String()))
+	}
 
 	return splitLines(string(o)), splitLines(errOut.String()), err
 }
@@ -265,20 +293,23 @@ func mustParseDirectoryEntries(lines []string) []DirEntry {
 	return result
 }
 
-// DirectoryTreeOptions lists options for CreateDirectoryTree
+// DirectoryTreeOptions lists options for CreateDirectoryTree.
 type DirectoryTreeOptions struct {
-	Depth                  int
-	MaxSubdirsPerDirectory int
-	MaxFilesPerDirectory   int
-	MaxFileSize            int
-	MinNameLength          int
-	MaxNameLength          int
+	Depth                              int
+	MaxSubdirsPerDirectory             int
+	MaxFilesPerDirectory               int
+	MaxSymlinksPerDirectory            int
+	MaxFileSize                        int
+	MinNameLength                      int
+	MaxNameLength                      int
+	NonExistingSymlinkTargetPercentage int // 0..100
 }
 
-// DirectoryTreeCounters stores stats about files and directories created by CreateDirectoryTree
+// DirectoryTreeCounters stores stats about files and directories created by CreateDirectoryTree.
 type DirectoryTreeCounters struct {
 	Files         int
 	Directories   int
+	Symlinks      int
 	TotalFileSize int64
 	MaxFileSize   int64
 }
@@ -289,8 +320,10 @@ func MustCreateDirectoryTree(t *testing.T, dirname string, options DirectoryTree
 
 	var counters DirectoryTreeCounters
 	if err := createDirectoryTreeInternal(dirname, options, &counters); err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
+
+	t.Logf("created directory tree %#v", counters)
 }
 
 // CreateDirectoryTree creates a directory tree of a given depth with random files.
@@ -306,11 +339,11 @@ func CreateDirectoryTree(dirname string, options DirectoryTreeOptions, counters 
 // It will fail with a test error if the creation does not succeed.
 func MustCreateRandomFile(t *testing.T, filePath string, options DirectoryTreeOptions, counters *DirectoryTreeCounters) {
 	if err := CreateRandomFile(filePath, options, counters); err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 }
 
-// CreateRandomFile creates a new file at the provided path with randomized contents
+// CreateRandomFile creates a new file at the provided path with randomized contents.
 func CreateRandomFile(filePath string, options DirectoryTreeOptions, counters *DirectoryTreeCounters) error {
 	if counters == nil {
 		counters = &DirectoryTreeCounters{}
@@ -321,7 +354,7 @@ func CreateRandomFile(filePath string, options DirectoryTreeOptions, counters *D
 
 // createDirectoryTreeInternal creates a directory tree of a given depth with random files.
 func createDirectoryTreeInternal(dirname string, options DirectoryTreeOptions, counters *DirectoryTreeCounters) error {
-	if err := os.MkdirAll(dirname, 0700); err != nil {
+	if err := os.MkdirAll(dirname, 0o700); err != nil {
 		return errors.Wrapf(err, "unable to create directory %v", dirname)
 	}
 
@@ -341,6 +374,8 @@ func createDirectoryTreeInternal(dirname string, options DirectoryTreeOptions, c
 		}
 	}
 
+	var fileNames []string
+
 	if options.MaxFilesPerDirectory > 0 {
 		numFiles := rand.Intn(options.MaxFilesPerDirectory) + 1
 		for i := 0; i < numFiles; i++ {
@@ -349,23 +384,37 @@ func createDirectoryTreeInternal(dirname string, options DirectoryTreeOptions, c
 			if err := createRandomFile(filepath.Join(dirname, fileName), options, counters); err != nil {
 				return errors.Wrap(err, "unable to create random file")
 			}
+
+			fileNames = append(fileNames, fileName)
+		}
+	}
+
+	if options.MaxSymlinksPerDirectory > 0 {
+		numSymlinks := rand.Intn(options.MaxSymlinksPerDirectory) + 1
+		for i := 0; i < numSymlinks; i++ {
+			fileName := randomName(options)
+
+			if err := createRandomSymlink(filepath.Join(dirname, fileName), fileNames, options, counters); err != nil {
+				return errors.Wrap(err, "unable to create random symlink")
+			}
 		}
 	}
 
 	return nil
 }
+
 func createRandomFile(filename string, options DirectoryTreeOptions, counters *DirectoryTreeCounters) error {
 	f, err := os.Create(filename)
 	if err != nil {
 		return errors.Wrap(err, "unable to create random file")
 	}
-	defer f.Close() //nolint:errcheck
+	defer f.Close()
 
 	maxFileSize := int64(intOrDefault(options.MaxFileSize, 100000))
 
 	length := rand.Int63n(maxFileSize)
 
-	_, err = iocopy.Copy(f, io.LimitReader(rand.New(rand.NewSource(time.Now().UnixNano())), length))
+	_, err = iocopy.Copy(f, io.LimitReader(rand.New(rand.NewSource(clock.Now().UnixNano())), length))
 	if err != nil {
 		return errors.Wrap(err, "file create error")
 	}
@@ -378,6 +427,16 @@ func createRandomFile(filename string, options DirectoryTreeOptions, counters *D
 	}
 
 	return nil
+}
+
+func createRandomSymlink(filename string, existingFiles []string, options DirectoryTreeOptions, counters *DirectoryTreeCounters) error {
+	counters.Symlinks++
+
+	if len(existingFiles) == 0 || rand.Intn(100) < options.NonExistingSymlinkTargetPercentage {
+		return os.Symlink(randomName(options), filename)
+	}
+
+	return os.Symlink(existingFiles[rand.Intn(len(existingFiles))], filename)
 }
 
 func mustParseSnapshots(t *testing.T, lines []string) []SourceInfo {
@@ -414,9 +473,9 @@ func randomName(opt DirectoryTreeOptions) string {
 	minNameLength := intOrDefault(opt.MinNameLength, 3)
 
 	l := rand.Intn(maxNameLength-minNameLength+1) + minNameLength
-	b := make([]byte, (l+1)/2) // nolint:gomnd
+	b := make([]byte, (l+1)/2)
 
-	cryptorand.Read(b) // nolint:errcheck
+	cryptorand.Read(b)
 
 	return hex.EncodeToString(b)[:l]
 }

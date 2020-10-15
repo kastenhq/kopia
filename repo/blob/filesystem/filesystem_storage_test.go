@@ -4,16 +4,14 @@ import (
 	"io/ioutil"
 	"os"
 	"reflect"
-	"runtime"
 	"sort"
 	"testing"
 	"time"
 
-	"github.com/kopia/kopia/repo/blob"
-
 	"github.com/kopia/kopia/internal/blobtesting"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/testlogging"
+	"github.com/kopia/kopia/repo/blob"
 )
 
 func TestFileStorage(t *testing.T) {
@@ -76,33 +74,31 @@ func TestFileStorageTouch(t *testing.T) {
 
 	fs := r.(*fsStorage)
 	assertNoError(t, fs.PutBlob(ctx, t1, gather.FromSlice([]byte{1})))
-	time.Sleep(1 * time.Second) // sleep a bit to accommodate Apple filesystems with low timestamp resolution
+	time.Sleep(2 * time.Second) // sleep a bit to accommodate Apple filesystems with low timestamp resolution
 	assertNoError(t, fs.PutBlob(ctx, t2, gather.FromSlice([]byte{1})))
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 	assertNoError(t, fs.PutBlob(ctx, t3, gather.FromSlice([]byte{1})))
+	time.Sleep(2 * time.Second) // sleep a bit to accommodate Apple filesystems with low timestamp resolution
 
 	verifyBlobTimestampOrder(t, fs, t1, t2, t3)
 
 	assertNoError(t, fs.TouchBlob(ctx, t2, 1*time.Hour)) // has no effect, all timestamps are very new
 	verifyBlobTimestampOrder(t, fs, t1, t2, t3)
+	time.Sleep(2 * time.Second) // sleep a bit to accommodate Apple filesystems with low timestamp resolution
 
 	assertNoError(t, fs.TouchBlob(ctx, t1, 0)) // moves t1 to the top of the pile
 	verifyBlobTimestampOrder(t, fs, t2, t3, t1)
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second) // sleep a bit to accommodate Apple filesystems with low timestamp resolution
 
 	assertNoError(t, fs.TouchBlob(ctx, t2, 0)) // moves t2 to the top of the pile
 	verifyBlobTimestampOrder(t, fs, t3, t1, t2)
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second) // sleep a bit to accommodate Apple filesystems with low timestamp resolution
 
 	assertNoError(t, fs.TouchBlob(ctx, t1, 0)) // moves t1 to the top of the pile
 	verifyBlobTimestampOrder(t, fs, t3, t2, t1)
 }
 
 func TestFileStorageConcurrency(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("does not work on macOS, see https://github.com/kopia/kopia/issues/299")
-	}
-
 	path, _ := ioutil.TempDir("", "fs-concurrency")
 	defer os.RemoveAll(path)
 
@@ -111,7 +107,6 @@ func TestFileStorageConcurrency(t *testing.T) {
 	st, err := New(ctx, &Options{
 		Path: path,
 	})
-
 	if err != nil {
 		t.Fatal(err)
 	}
