@@ -105,7 +105,7 @@ travis-release:
 else
 
 #	$(MAKE) goreleaser
-travis-release:
+travis-release: gotestsum
 	$(MAKE) lint vet test-with-coverage
 	$(retry) $(MAKE) layering-test
 	$(retry) $(MAKE) integration-tests
