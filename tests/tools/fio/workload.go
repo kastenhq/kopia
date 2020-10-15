@@ -37,8 +37,8 @@ func (fr *Runner) writeFiles(fullPath string, opt Options) error {
 				Options{
 					"readwrite":       RandWriteFio,
 					"filename_format": "file_$filenum",
-					"gid":             "1001",
-					"uid":             "1001",
+					"gid":             "1000",
+					"uid":             "1000",
 				}.WithDirectory(absWritePath),
 			),
 		},
