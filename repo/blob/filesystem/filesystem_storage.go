@@ -180,7 +180,9 @@ func (fs *fsImpl) PutBlobInPath(ctx context.Context, dirPath, path string, data 
 			return err
 		}
 
+		fmt.Println("AAAAAAAAAAAAAAAAAAAAAAAAAA", fs.FileUID, fs.FileGID, os.Geteuid())
 		if fs.FileUID != nil && fs.FileGID != nil && os.Geteuid() == 0 {
+			fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!")
 			if chownErr := os.Chown(path, *fs.FileUID, *fs.FileGID); chownErr != nil {
 				log(ctx).Warningf("can't change file permissions: %v", chownErr)
 			}
