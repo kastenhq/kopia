@@ -74,10 +74,15 @@ func NewEngine(workingDir string) (*Engine, error) {
 		},
 	}
 
+	defer func() {
+		if err != nil {
+			e.CleanComponents()
+		}
+	}()
+
 	// Fill the file writer
 	e.FileWriter, err = fio.NewRunner()
 	if err != nil {
-		e.CleanComponents()
 		return nil, err
 	}
 
@@ -86,7 +91,6 @@ func NewEngine(workingDir string) (*Engine, error) {
 	// Fill Snapshotter interface
 	kopiaSnapper, err := kopiarunner.NewKopiaSnapshotter(baseDirPath)
 	if err != nil {
-		e.CleanComponents()
 		return nil, err
 	}
 
@@ -96,17 +100,14 @@ func NewEngine(workingDir string) (*Engine, error) {
 	// Fill the snapshot store interface
 	snapStore, err := snapmeta.New(baseDirPath)
 	if err != nil {
-		e.CleanComponents()
 		return nil, err
 	}
 
 	e.cleanupRoutines = append(e.cleanupRoutines, snapStore.Cleanup)
-
 	e.MetaStore = snapStore
 
 	err = e.setupLogging()
 	if err != nil {
-		e.CleanComponents()
 		return nil, err
 	}
 
@@ -115,7 +116,6 @@ func NewEngine(workingDir string) (*Engine, error) {
 	e.cleanupRoutines = append(e.cleanupRoutines, chk.Cleanup)
 
 	if err != nil {
-		e.CleanComponents()
 		return nil, err
 	}
 
