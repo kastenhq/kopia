@@ -18,6 +18,8 @@ const (
 	metadataCacheSizeMBFlag    = "--metadata-cache-size-mb"
 	noCheckForUpdatesFlag      = "--no-check-for-updates"
 	noProgressFlag             = "--no-progress"
+	overrideHostFlag           = "--override-hostname=robustness"
+	overrideUserFlag           = "--override-username=u"
 	parallelFlag               = "--parallel"
 
 	// Flag value settings.
@@ -56,7 +58,7 @@ func (ks *KopiaSnapshotter) repoConnectCreate(op string, args ...string) error {
 	args = append(args,
 		contentCacheSizeMBFlag, strconv.Itoa(contentCacheSizeSettingMB),
 		metadataCacheSizeMBFlag, strconv.Itoa(metadataCacheSizeSettingMB),
-		noCheckForUpdatesFlag,
+		noCheckForUpdatesFlag, overrideUserFlag, overrideHostFlag,
 	)
 
 	_, _, err := ks.Runner.Run(args...)
