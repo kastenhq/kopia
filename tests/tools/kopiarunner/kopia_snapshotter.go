@@ -13,11 +13,12 @@ import (
 var _ snap.Snapshotter = &KopiaSnapshotter{}
 
 const (
-	contentCacheSizeMBFlag  = "--content-cache-size-mb"
-	metadataCacheSizeMBFlag = "--metadata-cache-size-mb"
-	noCheckForUpdatesFlag   = "--no-check-for-updates"
-	noProgressFlag          = "--no-progress"
-	parallelFlag            = "--parallel"
+	consoleLogLevelWarningFlag = "--log-level=warning"
+	contentCacheSizeMBFlag     = "--content-cache-size-mb"
+	metadataCacheSizeMBFlag    = "--metadata-cache-size-mb"
+	noCheckForUpdatesFlag      = "--no-check-for-updates"
+	noProgressFlag             = "--no-progress"
+	parallelFlag               = "--parallel"
 
 	// Flag value settings.
 	contentCacheSizeSettingMB  = 500
@@ -116,7 +117,7 @@ func (ks *KopiaSnapshotter) CreateSnapshot(source string) (snapID string, err er
 // RestoreSnapshot implements the Snapshotter interface, issues a kopia snapshot
 // restore command of the provided snapshot ID to the provided restore destination.
 func (ks *KopiaSnapshotter) RestoreSnapshot(snapID, restoreDir string) (err error) {
-	_, _, err = ks.Runner.Run("snapshot", "restore", snapID, restoreDir)
+	_, _, err = ks.Runner.Run("snapshot", "restore", noProgressFlag, consoleLogLevelWarningFlag, snapID, restoreDir)
 	return err
 }
 
