@@ -14,7 +14,7 @@ import (
 
 func TestManySmallFiles(t *testing.T) {
 	fileSize := 4096
-	numFiles := 10000
+	numFiles := 2
 
 	fileWriteOpts := map[string]string{
 		engine.MaxDirDepthField:         strconv.Itoa(1),
@@ -35,7 +35,7 @@ func TestManySmallFiles(t *testing.T) {
 }
 
 func TestOneLargeFile(t *testing.T) {
-	fileSize := 40 * 1024 * 1024
+	fileSize := 1 * 1024 * 1024
 	numFiles := 1
 
 	fileWriteOpts := map[string]string{
@@ -59,8 +59,8 @@ func TestOneLargeFile(t *testing.T) {
 func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
 	// TODO: Test takes too long - need to address performance issues with fio writes
 	fileSize := 4096
-	numFiles := 1000
-	filesPerWrite := 10
+	numFiles := 6
+	filesPerWrite := 3
 	actionRepeats := numFiles / filesPerWrite
 
 	fileWriteOpts := map[string]string{
