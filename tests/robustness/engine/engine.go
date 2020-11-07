@@ -154,18 +154,26 @@ func (e *Engine) Cleanup() error {
 	defer e.CleanComponents()
 
 	if e.MetaStore != nil {
+		log.Println("Saving logs ...")
+
 		err := e.SaveLog()
 		if err != nil {
 			return err
 		}
+
+		log.Println("Saving stats ...")
 
 		err = e.SaveStats()
 		if err != nil {
 			return err
 		}
 
+		log.Println("Flushing metadata ...")
+
 		return e.MetaStore.FlushMetadata()
 	}
+
+	log.Println("No store for metadata")
 
 	return nil
 }
