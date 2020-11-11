@@ -108,12 +108,12 @@ else
 travis-release: gotestsum
 	$(MAKE) lint vet test-with-coverage
 	$(retry) $(MAKE) layering-test
-	$(retry) $(MAKE) integration-tests
+#	$(retry) $(MAKE) integration-tests
 ifeq ($(TRAVIS_OS_NAME),linux)
-	$(MAKE) publish-packages
+#	$(MAKE) publish-packages
 	$(MAKE) robustness-tool-tests
-	$(MAKE) stress-test
-	$(MAKE) travis-create-long-term-repository
+#	$(MAKE) stress-test
+#	$(MAKE) travis-create-long-term-repository
 endif
 
 endif
