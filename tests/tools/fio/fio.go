@@ -127,7 +127,6 @@ func NewRunner() (fr *Runner, err error) {
 					"create_fsync":      "0",
 					"create_serialize":  "1",
 					"file_service_type": "sequential",
-					"ioengine":          "libaio",
 					"direct":            "1",
 					"iodepth":           "32",
 					"blocksize":         "1m",
