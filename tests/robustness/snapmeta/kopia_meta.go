@@ -3,6 +3,7 @@ package snapmeta
 import (
 	"encoding/json"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -129,15 +130,21 @@ func (store *kopiaMetadata) FlushMetadata() error {
 		os.Remove(metadataPath) //nolint:errcheck
 	}()
 
+	log.Println("Encoding metadata ...")
+
 	err = json.NewEncoder(f).Encode(store.Simple)
 	if err != nil {
 		return err
 	}
 
+	log.Println("Uploading metadata (creating metadata snashot) ...")
+
 	_, err = store.snap.CreateSnapshot(store.persistenceDir)
 	if err != nil {
 		return err
 	}
+
+	log.Println("Create metadata snashot")
 
 	return nil
 }
