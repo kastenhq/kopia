@@ -4,6 +4,7 @@ package engine
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
@@ -11,8 +12,11 @@ import (
 // Log keeps track of the actions taken by the engine.
 type Log struct {
 	runOffset int
-	Log       []*LogEntry
+	Log       LogEntries
 }
+
+// LogEntries is a sequence of action log entries.
+type LogEntries []*LogEntry
 
 // LogEntry is an entry for the engine log.
 type LogEntry struct {
@@ -27,11 +31,18 @@ type LogEntry struct {
 }
 
 func (l *LogEntry) String() string {
-	b := &strings.Builder{}
+	var b strings.Builder
 
+	l.WriteTo(&b) // nolint:errcheck
+
+	return b.String()
+}
+
+// WriteTo implements io.WriterTo.
+func (l *LogEntry) WriteTo(w io.Writer) (int64, error) {
 	const timeResol = 100 * time.Millisecond
 
-	fmt.Fprintf(b, "%4v t=%ds %s (%s): %v -> error=%s\n",
+	n, err := fmt.Fprintf(w, "%4v t=%ds %s (%s): %v -> error=%s",
 		l.Idx,
 		l.EngineTimestamp,
 		formatTime(l.StartTime),
@@ -40,36 +51,51 @@ func (l *LogEntry) String() string {
 		l.Error,
 	)
 
-	return b.String()
+	return int64(n), err
 }
 
 func formatTime(tm time.Time) string {
 	return tm.Format("2006/01/02 15:04:05 MST")
 }
 
+// WriteTo implements io.WriterTo.
+func (l LogEntries) WriteTo(w io.Writer) (int64, error) {
+	var t int64
+
+	for _, e := range l {
+		n, err := e.WriteTo(w)
+		t += n
+
+		if err != nil {
+			return t, err
+		}
+
+		m, err := io.WriteString(w, "\n")
+		t += int64(m)
+
+		if err != nil {
+			return t, err
+		}
+	}
+
+	return t, nil
+}
+
 // StringThisRun returns a string of only the log entries generated
 // by actions in this run of the engine.
 func (elog *Log) StringThisRun() string {
-	b := &strings.Builder{}
+	var b strings.Builder
 
-	for i, l := range elog.Log {
-		if i >= elog.runOffset {
-			fmt.Fprint(b, l.String())
-		}
-	}
+	elog.Log[elog.runOffset:].WriteTo(&b) // nolint:errcheck
 
 	return b.String()
 }
 
 func (elog *Log) String() string {
-	b := &strings.Builder{}
+	var b strings.Builder
 
-	fmt.Fprintf(b, "Log size:    %10v\n", len(elog.Log))
-	fmt.Fprintf(b, "========\n")
-
-	for _, l := range elog.Log {
-		fmt.Fprint(b, l.String())
-	}
+	fmt.Fprintf(&b, "Log size:    %10v\n========\n", len(elog.Log))
+	elog.Log.WriteTo(&b) // nolint:errcheck
 
 	return b.String()
 }
