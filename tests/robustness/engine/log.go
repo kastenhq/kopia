@@ -30,25 +30,25 @@ type LogEntry struct {
 	CmdOpts         map[string]string
 }
 
-func (l *LogEntry) String() string {
+func (e *LogEntry) String() string {
 	var b strings.Builder
 
-	l.WriteTo(&b) // nolint:errcheck
+	e.WriteTo(&b) // nolint:errcheck
 
 	return b.String()
 }
 
 // WriteTo implements io.WriterTo.
-func (l *LogEntry) WriteTo(w io.Writer) (int64, error) {
+func (e *LogEntry) WriteTo(w io.Writer) (int64, error) {
 	const timeResol = 100 * time.Millisecond
 
 	n, err := fmt.Fprintf(w, "%4v t=%ds %s (%s): %v -> error=%s",
-		l.Idx,
-		l.EngineTimestamp,
-		formatTime(l.StartTime),
-		l.EndTime.Sub(l.StartTime).Round(timeResol),
-		l.Action,
-		l.Error,
+		e.Idx,
+		e.EngineTimestamp,
+		formatTime(e.StartTime),
+		e.EndTime.Sub(e.StartTime).Round(timeResol),
+		e.Action,
+		e.Error,
 	)
 
 	return int64(n), err
@@ -83,58 +83,58 @@ func (l LogEntries) WriteTo(w io.Writer) (int64, error) {
 
 // StringThisRun returns a string of only the log entries generated
 // by actions in this run of the engine.
-func (elog *Log) StringThisRun() string {
+func (l *Log) StringThisRun() string {
 	var b strings.Builder
 
-	elog.Log[elog.runOffset:].WriteTo(&b) // nolint:errcheck
+	l.Log[l.runOffset:].WriteTo(&b) // nolint:errcheck
 
 	return b.String()
 }
 
-func (elog *Log) String() string {
+func (l *Log) String() string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "Log size:    %10v\n========\n", len(elog.Log))
-	elog.Log.WriteTo(&b) // nolint:errcheck
+	fmt.Fprintf(&b, "Log size:    %10v\n========\n", len(l.Log))
+	l.Log.WriteTo(&b) // nolint:errcheck
 
 	return b.String()
 }
 
 // AddEntry adds a LogEntry to the Log.
-func (elog *Log) AddEntry(l *LogEntry) {
-	l.Idx = int64(len(elog.Log))
-	elog.Log = append(elog.Log, l)
+func (l *Log) AddEntry(e *LogEntry) {
+	e.Idx = int64(len(l.Log))
+	l.Log = append(l.Log, e)
 }
 
 // AddCompleted finalizes a log entry at the time it is called
 // and with the provided error, before adding it to the Log.
-func (elog *Log) AddCompleted(logEntry *LogEntry, err error) {
-	logEntry.EndTime = time.Now()
+func (l *Log) AddCompleted(e *LogEntry, err error) {
+	e.EndTime = time.Now()
 	if err != nil {
-		logEntry.Error = err.Error()
+		e.Error = err.Error()
 	}
 
-	elog.AddEntry(logEntry)
+	l.AddEntry(e)
 
-	if len(elog.Log) == 0 {
+	if len(l.Log) == 0 {
 		panic("Did not get added")
 	}
 }
 
 // FindLast finds the most recent log entry with the provided ActionKey.
-func (elog *Log) FindLast(actionKey ActionKey) *LogEntry {
-	return elog.findLastUntilIdx(actionKey, 0)
+func (l *Log) FindLast(actionKey ActionKey) *LogEntry {
+	return l.findLastUntilIdx(actionKey, 0)
 }
 
 // FindLastThisRun finds the most recent log entry with the provided ActionKey,
 // limited to the current run only.
-func (elog *Log) FindLastThisRun(actionKey ActionKey) (found *LogEntry) {
-	return elog.findLastUntilIdx(actionKey, elog.runOffset)
+func (l *Log) FindLastThisRun(actionKey ActionKey) (found *LogEntry) {
+	return l.findLastUntilIdx(actionKey, l.runOffset)
 }
 
-func (elog *Log) findLastUntilIdx(actionKey ActionKey, limitIdx int) *LogEntry {
-	for i := len(elog.Log) - 1; i >= limitIdx; i-- {
-		entry := elog.Log[i]
+func (l *Log) findLastUntilIdx(actionKey ActionKey, limitIdx int) *LogEntry {
+	for i := len(l.Log) - 1; i >= limitIdx; i-- {
+		entry := l.Log[i]
 		if entry != nil && entry.Action == actionKey {
 			return entry
 		}
@@ -143,10 +143,10 @@ func (elog *Log) findLastUntilIdx(actionKey ActionKey, limitIdx int) *LogEntry {
 	return nil
 }
 
-func setLogEntryCmdOpts(l *LogEntry, opts map[string]string) {
-	if l == nil {
+func setLogEntryCmdOpts(e *LogEntry, opts map[string]string) {
+	if e == nil {
 		return
 	}
 
-	l.CmdOpts = opts
+	e.CmdOpts = opts
 }
