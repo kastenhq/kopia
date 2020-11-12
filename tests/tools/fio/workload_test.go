@@ -10,7 +10,7 @@ import (
 )
 
 func TestWriteFiles(t *testing.T) {
-	r, err := NewRunner()
+	r, err := NewRunner(t.TempDir())
 	testenv.AssertNoError(t, err)
 
 	defer r.Cleanup()
@@ -45,7 +45,7 @@ func TestWriteFiles(t *testing.T) {
 }
 
 func TestWriteFilesAtDepth(t *testing.T) {
-	r, err := NewRunner()
+	r, err := NewRunner(t.TempDir())
 	testenv.AssertNoError(t, err)
 
 	defer r.Cleanup()
@@ -134,7 +134,7 @@ func testWriteAtDepth(t *testing.T, r *Runner, depth, expFileCount int) {
 }
 
 func TestDeleteFilesAtDepth(t *testing.T) {
-	r, err := NewRunner()
+	r, err := NewRunner(t.TempDir())
 	testenv.AssertNoError(t, err)
 
 	defer r.Cleanup()
@@ -273,7 +273,7 @@ func TestDeleteContentsAtDepth(t *testing.T) {
 }
 
 func testDeleteContentsAtDepth(t *testing.T, prob float32, checker func(t *testing.T, fileCount int)) {
-	r, err := NewRunner()
+	r, err := NewRunner(t.TempDir())
 	testenv.AssertNoError(t, err)
 
 	defer r.Cleanup()

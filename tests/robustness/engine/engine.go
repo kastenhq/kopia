@@ -80,8 +80,19 @@ func NewEngine(workingDir string) (*Engine, error) {
 		}
 	}()
 
-	// Fill the file writer
-	e.FileWriter, err = fio.NewRunner()
+	dataPath := os.Getenv(fio.LocalFioDataPathEnvKey)
+	if dataPath == "" {
+		dataPath = os.TempDir()
+	}
+
+	dataPath = filepath.Join(dataPath, "fio-data")
+
+	err = os.MkdirAll(dataPath, 0o755) // nolint:gosec
+	if err != nil {
+		return nil, err
+	}
+
+	e.FileWriter, err = fio.NewRunner(dataPath)
 	if err != nil {
 		return nil, err
 	}

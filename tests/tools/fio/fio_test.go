@@ -9,7 +9,7 @@ import (
 )
 
 func TestFIORun(t *testing.T) {
-	r, err := NewRunner()
+	r, err := NewRunner(t.TempDir())
 	testenv.AssertNoError(t, err)
 
 	defer r.Cleanup()
@@ -30,7 +30,7 @@ func TestFIORun(t *testing.T) {
 }
 
 func TestFIORunConfig(t *testing.T) {
-	r, err := NewRunner()
+	r, err := NewRunner(t.TempDir())
 	testenv.AssertNoError(t, err)
 
 	defer r.Cleanup()
@@ -58,7 +58,7 @@ func TestFIORunConfig(t *testing.T) {
 }
 
 func TestFIOGlobalConfigOverride(t *testing.T) {
-	r, err := NewRunner()
+	r, err := NewRunner(t.TempDir())
 	testenv.AssertNoError(t, err)
 
 	defer r.Cleanup()
@@ -101,7 +101,7 @@ func TestFIODockerRunner(t *testing.T) {
 	err := os.Unsetenv(FioExeEnvKey)
 	testenv.AssertNoError(t, err)
 
-	r, err := NewRunner()
+	r, err := NewRunner(t.TempDir())
 	testenv.AssertNoError(t, err)
 
 	defer r.Cleanup()

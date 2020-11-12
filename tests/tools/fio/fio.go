@@ -65,21 +65,15 @@ type Runner struct {
 }
 
 // NewRunner creates a new fio runner.
-func NewRunner() (fr *Runner, err error) {
+func NewRunner(dataDir string) (fr *Runner, err error) {
 	exeStr := os.Getenv(FioExeEnvKey)
 	imgStr := os.Getenv(FioDockerImageEnvKey)
-	localDataPath := os.Getenv(LocalFioDataPathEnvKey)
 
 	var exeArgs []string
 
 	var fioWriteBaseDir string
 
 	var Exe string
-
-	dataDir, err := ioutil.TempDir(localDataPath, "fio-data-")
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to create temp directory for fio runner")
-	}
 
 	switch {
 	case exeStr != "":
@@ -143,7 +137,7 @@ func NewRunner() (fr *Runner, err error) {
 		log.Printf("   Set %s (=%q)to the fio executable\n", FioExeEnvKey, exeStr)
 		log.Printf("   - OR -\n")
 		log.Printf("   Set %s (=%q) to the fio docker image", FioDockerImageEnvKey, imgStr)
-		log.Printf("   Set %s (=%q) to the path where fio data will be used locally", LocalFioDataPathEnvKey, localDataPath)
+		log.Printf("   Set %s (=%q) to the path where fio data will be used locally", LocalFioDataPathEnvKey, dataDir)
 		log.Printf("   Set %s (=%q) to the fio data path on the docker host (defaults to %v, if not running in a dev container)", HostFioDataPathEnvKey, os.Getenv(HostFioDataPathEnvKey), LocalFioDataPathEnvKey)
 
 		return nil, errors.Wrap(err, "fio setup could not be validated")
