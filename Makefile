@@ -191,7 +191,8 @@ test: $(gotestsum)
 vtest: $(gotestsum)
 	$(GO_TEST) -count=1 -short -v -timeout $(UNIT_TESTS_TIMEOUT) ./...
 
-#build-integration-test-binary:
+build-integration-test-binary: $(KOPIA_INTEGRATION_EXE)
+
 $(KOPIA_INTEGRATION_EXE):
 	go build -o $(KOPIA_INTEGRATION_EXE) -tags testing github.com/kopia/kopia
 
@@ -204,7 +205,7 @@ endurance-tests: build-integration-test-binary $(gotestsum)
 	 $(GO_TEST) $(TEST_FLAGS) -count=1 -parallel $(PARALLEL) -timeout 3600s github.com/kopia/kopia/tests/endurance_test
 
 robustness-tests: export KOPIA_EXE ?= $(KOPIA_INTEGRATION_EXE)
-robustness-tests: $(KOPIA_INTEGRATION_EXE) $(gotestsum)
+robustness-tests: build-integration-test-binary $(gotestsum)
 	FIO_DOCKER_IMAGE=$(FIO_DOCKER_TAG) \
 	$(GO_TEST) -count=1 github.com/kopia/kopia/tests/robustness/robustness_test $(TEST_FLAGS)
 
