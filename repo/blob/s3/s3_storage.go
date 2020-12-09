@@ -97,6 +97,11 @@ func isRetriableError(err error) bool {
 		return true
 	}
 
+	if strings.Contains(strings.ToLower(err.Error()), "tcp") {
+		// retry tcp transport errors, such as "connection reset"
+		return true
+	}
+
 	return false
 }
 
