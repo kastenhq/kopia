@@ -189,10 +189,6 @@ func TestSnapshotRestore(t *testing.T) {
 	e.RunAndExpectSuccess(t, "snapshot", "restore", rootID+"/subdir1", restoreByOIDSubdir)
 	verifyFileMode(t, restoreByOIDSubdir, os.ModeDir|os.FileMode(overriddenDirPermissions))
 
-	// Check restore idempotency. Repeat the restore into the already-restored directory.
-	e.RunAndExpectSuccess(t, "snapshot", "restore", rootID+"/subdir1", restoreByOIDSubdir)
-	verifyFileMode(t, restoreByOIDSubdir, os.ModeDir|os.FileMode(overriddenDirPermissions))
-
 	restoreByOIDSubdir2 := t.TempDir()
 
 	originalDirInfo, err := os.Stat(restoreByOIDSubdir2)
@@ -232,6 +228,12 @@ func TestSnapshotRestore(t *testing.T) {
 	e.RunAndExpectSuccess(t, "snapshot", "restore", snapID, restoreDir)
 
 	// Restored contents should match source
+	compareDirs(t, source, restoreDir)
+
+	// Check restore idempotency. Repeat the restore into the already-restored directory.
+	e.RunAndExpectSuccess(t, "snapshot", "restore", snapID, restoreDir)
+
+	// Restored contents should still match source
 	compareDirs(t, source, restoreDir)
 
 	cases := []struct {
@@ -274,19 +276,23 @@ func TestSnapshotRestore(t *testing.T) {
 		t.Fatalf("unexpected stat() results on output.zip directory %v %v", st, err)
 	}
 
-	restoreFailDir := t.TempDir()
+	// restoreFailDir := t.TempDir()
 
 	// Attempt to restore snapshot with an already-existing target directory
 	// It should fail because the directory is not empty
-	_ = os.MkdirAll(restoreFailDir, 0o700)
+	// _ = os.MkdirAll(restoreFailDir, 0o700)
 
 	e.RunAndExpectFailure(t, "snapshot", "restore", "--no-overwrite-directories", snapID, restoreDir)
 
 	// Attempt to restore snapshot with an already-existing target directory
 	// It should fail because target files already exist
-	_ = os.MkdirAll(restoreFailDir, 0o700)
+	// _ = os.MkdirAll(restoreFailDir, 0o700)
 
 	e.RunAndExpectFailure(t, "snapshot", "restore", "--no-overwrite-files", snapID, restoreDir)
+
+	// Attempt to restore snapshot with an already-existing target directory
+	// It should fail because target symlinks already exist
+	e.RunAndExpectFailure(t, "snapshot", "restore", "--no-overwrite-symlinks", snapID, restoreDir)
 }
 
 func TestRestoreSymlinkWithoutTarget(t *testing.T) {
