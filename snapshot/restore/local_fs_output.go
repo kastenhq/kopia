@@ -110,7 +110,7 @@ func (o *FilesystemOutput) CreateSymlink(ctx context.Context, relativePath strin
 	case os.IsNotExist(err): // Proceed to symlink creation
 	case err != nil:
 		return errors.Wrap(err, "lstat error at symlink path")
-	case stat.Mode() == os.ModeSymlink:
+	case fileIsSymlink(stat):
 		// Throw error if we are not overwriting symlinks
 		if !o.OverwriteSymlinks {
 			return errors.Errorf("will not overwrite existing symlink")
@@ -133,6 +133,10 @@ func (o *FilesystemOutput) CreateSymlink(ctx context.Context, relativePath strin
 	}
 
 	return nil
+}
+
+func fileIsSymlink(stat os.FileInfo) bool {
+	return stat.Mode()&os.ModeSymlink != 0
 }
 
 // set permission, modification time and user/group ids on targetPath.
