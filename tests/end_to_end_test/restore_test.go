@@ -189,6 +189,10 @@ func TestSnapshotRestore(t *testing.T) {
 	e.RunAndExpectSuccess(t, "snapshot", "restore", rootID+"/subdir1", restoreByOIDSubdir)
 	verifyFileMode(t, restoreByOIDSubdir, os.ModeDir|os.FileMode(overriddenDirPermissions))
 
+	// Check restore idempotency. Repeat the restore
+	e.RunAndExpectSuccess(t, "snapshot", "restore", rootID+"/subdir1", restoreByOIDSubdir)
+	verifyFileMode(t, restoreByOIDSubdir, os.ModeDir|os.FileMode(overriddenDirPermissions))
+
 	restoreByOIDSubdir2 := t.TempDir()
 
 	originalDirInfo, err := os.Stat(restoreByOIDSubdir2)
