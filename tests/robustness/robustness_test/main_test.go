@@ -54,7 +54,7 @@ func TestMain(m *testing.M) {
 	metadataRepoPath := path.Join(*repoPathPrefix, metadataSubPath)
 
 	// Try to reconcile metadata if it is out of sync with the repo state
-	for i := 0; i < engine.DefaultRunnerCount; i++ {
+	for i := 0; i < eng.RunnerCount; i++ {
 		eng.Checker[i].RecoveryMode = true
 	}
 
