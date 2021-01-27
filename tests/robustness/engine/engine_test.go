@@ -45,6 +45,9 @@ var (
 )
 
 func TestEngineWritefilesBasicFS(t *testing.T) {
+	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
+	os.Setenv(snapmeta.S3BucketNameEnvKey, "")
+
 	eng, err := NewEngine("")
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
@@ -60,7 +63,7 @@ func TestEngineWritefilesBasicFS(t *testing.T) {
 	}()
 
 	ctx := context.TODO()
-	err = eng.InitFilesystem(ctx, fsDataRepoPath, fsMetadataRepoPath)
+	err = eng.Init(ctx, fsDataRepoPath, fsMetadataRepoPath)
 	testenv.AssertNoError(t, err)
 
 	fileSize := int64(256 * 1024)
@@ -157,6 +160,9 @@ func TestWriteFilesBasicS3(t *testing.T) {
 	bucketName, cleanupCB := makeTempS3Bucket(t)
 	defer cleanupCB()
 
+	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
+	os.Setenv(snapmeta.S3BucketNameEnvKey, bucketName)
+
 	eng, err := NewEngine("")
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
@@ -170,7 +176,7 @@ func TestWriteFilesBasicS3(t *testing.T) {
 	}()
 
 	ctx := context.TODO()
-	err = eng.InitS3(ctx, bucketName, s3DataRepoPath, s3MetadataRepoPath)
+	err = eng.Init(ctx, s3DataRepoPath, s3MetadataRepoPath)
 	testenv.AssertNoError(t, err)
 
 	fileSize := int64(256 * 1024)
@@ -199,6 +205,9 @@ func TestDeleteSnapshotS3(t *testing.T) {
 	bucketName, cleanupCB := makeTempS3Bucket(t)
 	defer cleanupCB()
 
+	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
+	os.Setenv(snapmeta.S3BucketNameEnvKey, bucketName)
+
 	eng, err := NewEngine("")
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
@@ -212,7 +221,7 @@ func TestDeleteSnapshotS3(t *testing.T) {
 	}()
 
 	ctx := context.TODO()
-	err = eng.InitS3(ctx, bucketName, s3DataRepoPath, s3MetadataRepoPath)
+	err = eng.Init(ctx, s3DataRepoPath, s3MetadataRepoPath)
 	testenv.AssertNoError(t, err)
 
 	fileSize := int64(256 * 1024)
@@ -242,6 +251,9 @@ func TestSnapshotVerificationFail(t *testing.T) {
 	bucketName, cleanupCB := makeTempS3Bucket(t)
 	defer cleanupCB()
 
+	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
+	os.Setenv(snapmeta.S3BucketNameEnvKey, bucketName)
+
 	eng, err := NewEngine("")
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
@@ -255,7 +267,7 @@ func TestSnapshotVerificationFail(t *testing.T) {
 	}()
 
 	ctx := context.TODO()
-	err = eng.InitS3(ctx, bucketName, s3DataRepoPath, s3MetadataRepoPath)
+	err = eng.Init(ctx, s3DataRepoPath, s3MetadataRepoPath)
 	testenv.AssertNoError(t, err)
 
 	// Perform writes
@@ -303,6 +315,9 @@ func TestSnapshotVerificationFail(t *testing.T) {
 }
 
 func TestDataPersistency(t *testing.T) {
+	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
+	os.Setenv(snapmeta.S3BucketNameEnvKey, "")
+
 	tempDir, err := ioutil.TempDir("", "")
 	testenv.AssertNoError(t, err)
 
@@ -324,7 +339,7 @@ func TestDataPersistency(t *testing.T) {
 	metadataRepoPath := filepath.Join(tempDir, "metadata-repo-")
 
 	ctx := context.TODO()
-	err = eng.InitFilesystem(ctx, dataRepoPath, metadataRepoPath)
+	err = eng.Init(ctx, dataRepoPath, metadataRepoPath)
 	testenv.AssertNoError(t, err)
 
 	// Perform writes
@@ -358,7 +373,7 @@ func TestDataPersistency(t *testing.T) {
 	// expect that the snapshot taken above will be found in metadata,
 	// and the data will be chosen to be restored to this engine's DataDir
 	// as a starting point.
-	err = eng2.InitFilesystem(ctx, dataRepoPath, metadataRepoPath)
+	err = eng2.Init(ctx, dataRepoPath, metadataRepoPath)
 	testenv.AssertNoError(t, err)
 
 	fioRunner2 := engineFioRunner(t, eng2)
@@ -466,6 +481,9 @@ func TestPickActionWeighted(t *testing.T) {
 }
 
 func TestActionsFilesystem(t *testing.T) {
+	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
+	os.Setenv(snapmeta.S3BucketNameEnvKey, "")
+
 	eng, err := NewEngine("")
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
@@ -481,7 +499,7 @@ func TestActionsFilesystem(t *testing.T) {
 	}()
 
 	ctx := context.TODO()
-	err = eng.InitFilesystem(ctx, fsDataRepoPath, fsMetadataRepoPath)
+	err = eng.Init(ctx, fsDataRepoPath, fsMetadataRepoPath)
 	testenv.AssertNoError(t, err)
 
 	actionOpts := ActionOpts{
@@ -511,6 +529,9 @@ func TestActionsS3(t *testing.T) {
 	bucketName, cleanupCB := makeTempS3Bucket(t)
 	defer cleanupCB()
 
+	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
+	os.Setenv(snapmeta.S3BucketNameEnvKey, bucketName)
+
 	eng, err := NewEngine("")
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
@@ -524,7 +545,7 @@ func TestActionsS3(t *testing.T) {
 	}()
 
 	ctx := context.TODO()
-	err = eng.InitS3(ctx, bucketName, s3DataRepoPath, s3MetadataRepoPath)
+	err = eng.Init(ctx, s3DataRepoPath, s3MetadataRepoPath)
 	testenv.AssertNoError(t, err)
 
 	actionOpts := ActionOpts{
@@ -558,6 +579,9 @@ func TestIOLimitPerWriteAction(t *testing.T) {
 	// set to 1 MB.
 	const timeout = 10 * time.Second
 
+	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
+	os.Setenv(snapmeta.S3BucketNameEnvKey, "")
+
 	eng, err := NewEngine("")
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
@@ -573,7 +597,7 @@ func TestIOLimitPerWriteAction(t *testing.T) {
 	}()
 
 	ctx := context.TODO()
-	err = eng.InitFilesystem(ctx, fsDataRepoPath, fsMetadataRepoPath)
+	err = eng.Init(ctx, fsDataRepoPath, fsMetadataRepoPath)
 	testenv.AssertNoError(t, err)
 
 	actionOpts := ActionOpts{
@@ -613,7 +637,7 @@ func TestStatsPersist(t *testing.T) {
 
 	defer os.RemoveAll(tmpDir)
 
-	snapStore, err := snapmeta.New(tmpDir)
+	snapStore, err := snapmeta.NewPersister(tmpDir)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) {
 		t.Skip(err)
 	}
@@ -644,13 +668,13 @@ func TestStatsPersist(t *testing.T) {
 		},
 	}
 
-	err = eng.SaveStats()
+	err = eng.saveStats()
 	testenv.AssertNoError(t, err)
 
 	err = eng.MetaStore.FlushMetadata()
 	testenv.AssertNoError(t, err)
 
-	snapStoreNew, err := snapmeta.New(tmpDir)
+	snapStoreNew, err := snapmeta.NewPersister(tmpDir)
 	testenv.AssertNoError(t, err)
 
 	// Connect to the same metadata store
@@ -664,7 +688,7 @@ func TestStatsPersist(t *testing.T) {
 		MetaStore: snapStoreNew,
 	}
 
-	err = engNew.LoadStats()
+	err = engNew.loadStats()
 	testenv.AssertNoError(t, err)
 
 	if got, want := engNew.Stats(), eng.Stats(); got != want {
@@ -681,7 +705,7 @@ func TestLogsPersist(t *testing.T) {
 
 	defer os.RemoveAll(tmpDir)
 
-	snapStore, err := snapmeta.New(tmpDir)
+	snapStore, err := snapmeta.NewPersister(tmpDir)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) {
 		t.Skip(err)
 	}
@@ -714,13 +738,13 @@ func TestLogsPersist(t *testing.T) {
 		EngineLog: log,
 	}
 
-	err = eng.SaveLog()
+	err = eng.saveLog()
 	testenv.AssertNoError(t, err)
 
 	err = eng.MetaStore.FlushMetadata()
 	testenv.AssertNoError(t, err)
 
-	snapStoreNew, err := snapmeta.New(tmpDir)
+	snapStoreNew, err := snapmeta.NewPersister(tmpDir)
 	testenv.AssertNoError(t, err)
 
 	// Connect to the same metadata store
@@ -734,7 +758,7 @@ func TestLogsPersist(t *testing.T) {
 		MetaStore: snapStoreNew,
 	}
 
-	err = engNew.LoadLog()
+	err = engNew.loadLog()
 	testenv.AssertNoError(t, err)
 
 	if got, want := engNew.EngineLog.String(), eng.EngineLog.String(); got != want {

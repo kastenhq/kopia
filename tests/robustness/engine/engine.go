@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -22,25 +21,11 @@ import (
 	"github.com/kopia/kopia/tests/robustness/fiofilewriter"
 	"github.com/kopia/kopia/tests/robustness/snapmeta"
 	"github.com/kopia/kopia/tests/tools/fswalker"
-	"github.com/kopia/kopia/tests/tools/kopiarunner"
-)
-
-const (
-	// S3BucketNameEnvKey is the environment variable required to connect to a repo on S3.
-	S3BucketNameEnvKey = "S3_BUCKET_NAME"
-	// EngineModeEnvKey is the environment variable required to switch between basic and server/client model.
-	EngineModeEnvKey = "ENGINE_MODE"
-	// EngineModeBasic is a constant used to check the engineMode.
-	EngineModeBasic = "BASIC"
-	// EngineModeServer is a constant used to check the engineMode.
-	EngineModeServer = "SERVER"
-	// defaultAddr is used for setting the address of Kopia Server.
-	defaultAddr = "localhost:51515"
 )
 
 var (
-	// ErrS3BucketNameEnvUnset is the error returned when the S3BucketNameEnvKey environment variable is not set.
-	ErrS3BucketNameEnvUnset = fmt.Errorf("environment variable required: %v", S3BucketNameEnvKey)
+	errNotAKopiaPersister   = fmt.Errorf("error: MetaStore is not a KopiaPersister")
+	errNotAKopiaSnapshotter = fmt.Errorf("error: TestRepo is not a KopiaSnapshotter")
 	noSpaceOnDeviceMatchStr = "no space left on device"
 )
 
@@ -90,7 +75,7 @@ func NewEngine(workingDir string) (*Engine, error) {
 	e.cleanupRoutines = append(e.cleanupRoutines, e.FileWriter.Cleanup)
 
 	// Fill Snapshotter interface
-	kopiaSnapper, err := kopiarunner.NewKopiaSnapshotter(baseDirPath)
+	kopiaSnapper, err := snapmeta.NewSnapshotter(baseDirPath)
 	if err != nil {
 		e.CleanComponents()
 		return nil, err
@@ -100,7 +85,7 @@ func NewEngine(workingDir string) (*Engine, error) {
 	e.TestRepo = kopiaSnapper
 
 	// Fill the snapshot store interface
-	snapStore, err := snapmeta.New(baseDirPath)
+	snapStore, err := snapmeta.NewPersister(baseDirPath)
 	if err != nil {
 		e.CleanComponents()
 		return nil, err
@@ -162,12 +147,12 @@ func (e *Engine) Cleanup() error {
 	defer e.CleanComponents()
 
 	if e.MetaStore != nil {
-		err := e.SaveLog()
+		err := e.saveLog()
 		if err != nil {
 			return err
 		}
 
-		err = e.SaveStats()
+		err = e.saveStats()
 		if err != nil {
 			return err
 		}
@@ -215,116 +200,44 @@ func (e *Engine) CleanComponents() {
 // - If S3_BUCKET_NAME is set, initialize S3
 // - Else initialize filesystem.
 func (e *Engine) Init(ctx context.Context, testRepoPath, metaRepoPath string) error {
-	bucketName := os.Getenv(S3BucketNameEnvKey)
-	engineMode := os.Getenv(EngineModeEnvKey)
-
-	switch {
-	case bucketName != "" && engineMode == EngineModeBasic:
-		return e.InitS3(ctx, bucketName, testRepoPath, metaRepoPath)
-
-	case bucketName != "" && engineMode == EngineModeServer:
-		return e.InitS3WithServer(ctx, bucketName, testRepoPath, metaRepoPath, defaultAddr)
-
-	case bucketName == "" && engineMode == EngineModeServer:
-		return e.InitFilesystemWithServer(ctx, testRepoPath, metaRepoPath, defaultAddr)
-
-	default:
-		return e.InitFilesystem(ctx, testRepoPath, metaRepoPath)
+	kp, ok := e.MetaStore.(*snapmeta.KopiaPersister)
+	if !ok {
+		return errNotAKopiaPersister
 	}
-}
 
-// InitS3 attempts to connect to a test repo and metadata repo on S3. If connection
-// is successful, the engine is populated with the metadata associated with the
-// snapshot in that repo. A new repo will be created if one does not already
-// exist.
-func (e *Engine) InitS3(ctx context.Context, bucketName, testRepoPath, metaRepoPath string) error {
-	err := e.MetaStore.ConnectOrCreateS3(bucketName, metaRepoPath)
-	if err != nil {
+	if err := kp.ConnectOrCreateRepo(metaRepoPath); err != nil {
 		return err
 	}
 
-	err = e.TestRepo.ConnectOrCreateS3(bucketName, testRepoPath)
-	if err != nil {
+	ks, ok := e.TestRepo.(*snapmeta.KopiaSnapshotter)
+	if !ok {
+		return errNotAKopiaSnapshotter
+	}
+
+	if err := ks.ConnectOrCreateRepo(testRepoPath); err != nil {
 		return err
 	}
 
-	return e.init(ctx)
-}
+	e.serverCmd = ks.ServerCmd()
 
-// InitFilesystem attempts to connect to a test repo and metadata repo on the local
-// filesystem. If connection is successful, the engine is populated with the
-// metadata associated with the snapshot in that repo. A new repo will be created if
-// one does not already exist.
-func (e *Engine) InitFilesystem(ctx context.Context, testRepoPath, metaRepoPath string) error {
-	err := e.MetaStore.ConnectOrCreateFilesystem(metaRepoPath)
-	if err != nil {
-		return err
-	}
-
-	err = e.TestRepo.ConnectOrCreateFilesystem(testRepoPath)
-	if err != nil {
-		return err
-	}
-
-	return e.init(ctx)
-}
-
-func (e *Engine) init(ctx context.Context) error {
 	err := e.MetaStore.LoadMetadata()
 	if err != nil {
 		return err
 	}
 
-	err = e.LoadStats()
+	err = e.loadStats()
 	if err != nil {
 		return err
 	}
 
 	e.CumulativeStats.RunCounter++
 
-	err = e.LoadLog()
-	if err != nil {
-		return err
-	}
-
-	_, _, err = e.TestRepo.Run("policy", "set", "--global", "--keep-latest", strconv.Itoa(1<<31-1), "--compression", "s2-default")
+	err = e.loadLog()
 	if err != nil {
 		return err
 	}
 
 	return e.Checker.VerifySnapshotMetadata()
-}
-
-// InitS3WithServer initializes the Engine with InitS3 for use with the server/client model.
-func (e *Engine) InitS3WithServer(ctx context.Context, bucketName, testRepoPath, metaRepoPath, addr string) error {
-	if err := e.MetaStore.ConnectOrCreateS3(bucketName, metaRepoPath); err != nil {
-		return err
-	}
-
-	cmd, err := e.TestRepo.ConnectOrCreateS3WithServer(addr, bucketName, testRepoPath)
-	if err != nil {
-		return err
-	}
-
-	e.serverCmd = cmd
-
-	return e.init(ctx)
-}
-
-// InitFilesystemWithServer initializes the Engine for testing the server/client model with a local filesystem repository.
-func (e *Engine) InitFilesystemWithServer(ctx context.Context, testRepoPath, metaRepoPath, addr string) error {
-	if err := e.MetaStore.ConnectOrCreateFilesystem(metaRepoPath); err != nil {
-		return err
-	}
-
-	cmd, err := e.TestRepo.ConnectOrCreateFilesystemWithServer(addr, testRepoPath)
-	if err != nil {
-		return err
-	}
-
-	e.serverCmd = cmd
-
-	return e.init(ctx)
 }
 
 // cleanUpServer cleans up the server process.
