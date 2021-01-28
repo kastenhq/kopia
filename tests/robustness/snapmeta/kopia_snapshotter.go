@@ -43,22 +43,22 @@ func (ks *KopiaSnapshotter) ServerCmd() *exec.Cmd {
 }
 
 // CreateSnapshot is part of Snapshotter.
-func (ks *KopiaSnapshotter) CreateSnapshot(sourceDir string) (snapID string, err error) {
+func (ks *KopiaSnapshotter) CreateSnapshot(sourceDir string, opts map[string]string) (snapID string, err error) {
 	return ks.snap.CreateSnapshot(sourceDir)
 }
 
 // RestoreSnapshot is part of Snapshotter.
-func (ks *KopiaSnapshotter) RestoreSnapshot(snapID, restoreDir string) error {
+func (ks *KopiaSnapshotter) RestoreSnapshot(snapID, restoreDir string, opts map[string]string) error {
 	return ks.snap.RestoreSnapshot(snapID, restoreDir)
 }
 
 // DeleteSnapshot is part of Snapshotter.
-func (ks *KopiaSnapshotter) DeleteSnapshot(snapID string) error {
+func (ks *KopiaSnapshotter) DeleteSnapshot(snapID string, opts map[string]string) error {
 	return ks.snap.DeleteSnapshot(snapID)
 }
 
 // RunGC is part of Snapshotter.
-func (ks *KopiaSnapshotter) RunGC() error {
+func (ks *KopiaSnapshotter) RunGC(opts map[string]string) error {
 	return ks.snap.RunGC()
 }
 

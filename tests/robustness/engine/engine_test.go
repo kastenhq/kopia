@@ -62,6 +62,7 @@ func TestEngineWritefilesBasicFS(t *testing.T) {
 		os.RemoveAll(fsRepoBaseDirPath)
 	}()
 
+	opts := map[string]string{}
 	ctx := context.TODO()
 	err = eng.Init(ctx, fsDataRepoPath, fsMetadataRepoPath)
 	testenv.AssertNoError(t, err)
@@ -76,14 +77,14 @@ func TestEngineWritefilesBasicFS(t *testing.T) {
 
 	snapIDs := eng.Checker.GetSnapIDs()
 
-	snapID, err := eng.Checker.TakeSnapshot(ctx, fioRunner.LocalDataDir)
+	snapID, err := eng.Checker.TakeSnapshot(ctx, fioRunner.LocalDataDir, opts)
 	testenv.AssertNoError(t, err)
 
-	err = eng.Checker.RestoreSnapshot(ctx, snapID, os.Stdout)
+	err = eng.Checker.RestoreSnapshot(ctx, snapID, os.Stdout, opts)
 	testenv.AssertNoError(t, err)
 
 	for _, sID := range snapIDs {
-		err = eng.Checker.RestoreSnapshot(ctx, sID, os.Stdout)
+		err = eng.Checker.RestoreSnapshot(ctx, sID, os.Stdout, opts)
 		testenv.AssertNoError(t, err)
 	}
 }
@@ -175,6 +176,7 @@ func TestWriteFilesBasicS3(t *testing.T) {
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
+	opts := map[string]string{}
 	ctx := context.TODO()
 	err = eng.Init(ctx, s3DataRepoPath, s3MetadataRepoPath)
 	testenv.AssertNoError(t, err)
@@ -189,14 +191,14 @@ func TestWriteFilesBasicS3(t *testing.T) {
 
 	snapIDs := eng.Checker.GetLiveSnapIDs()
 
-	snapID, err := eng.Checker.TakeSnapshot(ctx, fioRunner.LocalDataDir)
+	snapID, err := eng.Checker.TakeSnapshot(ctx, fioRunner.LocalDataDir, opts)
 	testenv.AssertNoError(t, err)
 
-	err = eng.Checker.RestoreSnapshot(ctx, snapID, os.Stdout)
+	err = eng.Checker.RestoreSnapshot(ctx, snapID, os.Stdout, opts)
 	testenv.AssertNoError(t, err)
 
 	for _, sID := range snapIDs {
-		err = eng.Checker.RestoreSnapshot(ctx, sID, os.Stdout)
+		err = eng.Checker.RestoreSnapshot(ctx, sID, os.Stdout, opts)
 		testenv.AssertNoError(t, err)
 	}
 }
@@ -220,6 +222,7 @@ func TestDeleteSnapshotS3(t *testing.T) {
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
+	opts := map[string]string{}
 	ctx := context.TODO()
 	err = eng.Init(ctx, s3DataRepoPath, s3MetadataRepoPath)
 	testenv.AssertNoError(t, err)
@@ -232,16 +235,16 @@ func TestDeleteSnapshotS3(t *testing.T) {
 	err = fioRunner.WriteFiles("", fioOpts)
 	testenv.AssertNoError(t, err)
 
-	snapID, err := eng.Checker.TakeSnapshot(ctx, fioRunner.LocalDataDir)
+	snapID, err := eng.Checker.TakeSnapshot(ctx, fioRunner.LocalDataDir, opts)
 	testenv.AssertNoError(t, err)
 
-	err = eng.Checker.RestoreSnapshot(ctx, snapID, os.Stdout)
+	err = eng.Checker.RestoreSnapshot(ctx, snapID, os.Stdout, opts)
 	testenv.AssertNoError(t, err)
 
-	err = eng.Checker.DeleteSnapshot(ctx, snapID)
+	err = eng.Checker.DeleteSnapshot(ctx, snapID, opts)
 	testenv.AssertNoError(t, err)
 
-	err = eng.Checker.RestoreSnapshot(ctx, snapID, os.Stdout)
+	err = eng.Checker.RestoreSnapshot(ctx, snapID, os.Stdout, opts)
 	if err == nil {
 		t.Fatalf("Expected an error when trying to restore a deleted snapshot")
 	}
@@ -266,6 +269,7 @@ func TestSnapshotVerificationFail(t *testing.T) {
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
+	opts := map[string]string{}
 	ctx := context.TODO()
 	err = eng.Init(ctx, s3DataRepoPath, s3MetadataRepoPath)
 	testenv.AssertNoError(t, err)
@@ -280,7 +284,7 @@ func TestSnapshotVerificationFail(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	// Take a first snapshot
-	snapID1, err := eng.Checker.TakeSnapshot(ctx, fioRunner.LocalDataDir)
+	snapID1, err := eng.Checker.TakeSnapshot(ctx, fioRunner.LocalDataDir, opts)
 	testenv.AssertNoError(t, err)
 
 	// Get the metadata collected on that snapshot
@@ -292,7 +296,7 @@ func TestSnapshotVerificationFail(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	// Take a second snapshot
-	snapID2, err := eng.Checker.TakeSnapshot(ctx, fioRunner.LocalDataDir)
+	snapID2, err := eng.Checker.TakeSnapshot(ctx, fioRunner.LocalDataDir, opts)
 	testenv.AssertNoError(t, err)
 
 	// Get the second snapshot's metadata
@@ -308,7 +312,7 @@ func TestSnapshotVerificationFail(t *testing.T) {
 	defer os.RemoveAll(restoreDir)
 
 	// Restore snapshot ID 1 with snapshot 2's validation data in metadata, expect error
-	err = eng.Checker.RestoreVerifySnapshot(ctx, snapID1, restoreDir, ssMeta1, os.Stdout)
+	err = eng.Checker.RestoreVerifySnapshot(ctx, snapID1, restoreDir, ssMeta1, os.Stdout, opts)
 	if err == nil {
 		t.Fatalf("Expected an integrity error when trying to restore a snapshot with incorrect metadata")
 	}
@@ -338,6 +342,7 @@ func TestDataPersistency(t *testing.T) {
 	dataRepoPath := filepath.Join(tempDir, "data-repo-")
 	metadataRepoPath := filepath.Join(tempDir, "metadata-repo-")
 
+	opts := map[string]string{}
 	ctx := context.TODO()
 	err = eng.Init(ctx, dataRepoPath, metadataRepoPath)
 	testenv.AssertNoError(t, err)
@@ -352,7 +357,7 @@ func TestDataPersistency(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	// Take a snapshot
-	snapID, err := eng.Checker.TakeSnapshot(ctx, fioRunner.LocalDataDir)
+	snapID, err := eng.Checker.TakeSnapshot(ctx, fioRunner.LocalDataDir, opts)
 	testenv.AssertNoError(t, err)
 
 	// Get the walk data associated with the snapshot that was taken
@@ -377,12 +382,12 @@ func TestDataPersistency(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	fioRunner2 := engineFioRunner(t, eng2)
-	err = eng2.Checker.RestoreSnapshotToPath(ctx, snapID, fioRunner2.LocalDataDir, os.Stdout)
+	err = eng2.Checker.RestoreSnapshotToPath(ctx, snapID, fioRunner2.LocalDataDir, os.Stdout, opts)
 	testenv.AssertNoError(t, err)
 
 	// Compare the data directory of the second engine with the fingerprint
 	// of the snapshot taken earlier. They should match.
-	err = fswalker.NewWalkCompare().Compare(ctx, fioRunner2.LocalDataDir, dataDirWalk.ValidationData, os.Stdout)
+	err = fswalker.NewWalkCompare().Compare(ctx, fioRunner2.LocalDataDir, dataDirWalk.ValidationData, os.Stdout, opts)
 	testenv.AssertNoError(t, err)
 }
 

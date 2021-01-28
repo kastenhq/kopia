@@ -7,9 +7,9 @@ package robustness
 // for taking, restoring, deleting snapshots, and
 // tracking them by a string snapshot ID.
 type Snapshotter interface {
-	CreateSnapshot(sourceDir string) (snapID string, err error)
-	RestoreSnapshot(snapID string, restoreDir string) error
-	DeleteSnapshot(snapID string) error
-	RunGC() error
+	CreateSnapshot(sourceDir string, opts map[string]string) (snapID string, err error)
+	RestoreSnapshot(snapID string, restoreDir string, opts map[string]string) error
+	DeleteSnapshot(snapID string, opts map[string]string) error
+	RunGC(opts map[string]string) error
 	ListSnapshots() ([]string, error)
 }
