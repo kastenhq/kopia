@@ -23,5 +23,4 @@ type Persister interface {
 	LoadMetadata() error
 	FlushMetadata() error
 	GetPersistDir() string
-	Cleanup()
 }

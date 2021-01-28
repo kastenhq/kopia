@@ -11,10 +11,12 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
@@ -48,7 +50,7 @@ func TestEngineWritefilesBasicFS(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, "")
 
-	eng, err := NewEngine("")
+	th, eng, err := newTestHarness(t, fsDataRepoPath, fsMetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
@@ -56,7 +58,7 @@ func TestEngineWritefilesBasicFS(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := eng.Cleanup()
+		cleanupErr := th.Cleanup()
 		testenv.AssertNoError(t, cleanupErr)
 
 		os.RemoveAll(fsRepoBaseDirPath)
@@ -64,14 +66,14 @@ func TestEngineWritefilesBasicFS(t *testing.T) {
 
 	opts := map[string]string{}
 	ctx := context.TODO()
-	err = eng.Init(ctx, fsDataRepoPath, fsMetadataRepoPath)
+	err = eng.Init(ctx)
 	testenv.AssertNoError(t, err)
 
 	fileSize := int64(256 * 1024)
 	numFiles := 10
 
 	fioOpts := fio.Options{}.WithFileSize(fileSize).WithNumFiles(numFiles)
-	fioRunner := engineFioRunner(t, eng)
+	fioRunner := th.FioRunner()
 	err = fioRunner.WriteFiles("", fioOpts)
 	testenv.AssertNoError(t, err)
 
@@ -164,7 +166,7 @@ func TestWriteFilesBasicS3(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, bucketName)
 
-	eng, err := NewEngine("")
+	th, eng, err := newTestHarness(t, s3DataRepoPath, s3MetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
@@ -172,20 +174,20 @@ func TestWriteFilesBasicS3(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := eng.Cleanup()
+		cleanupErr := th.Cleanup()
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
 	opts := map[string]string{}
 	ctx := context.TODO()
-	err = eng.Init(ctx, s3DataRepoPath, s3MetadataRepoPath)
+	err = eng.Init(ctx)
 	testenv.AssertNoError(t, err)
 
 	fileSize := int64(256 * 1024)
 	numFiles := 10
 
 	fioOpts := fio.Options{}.WithFileSize(fileSize).WithNumFiles(numFiles)
-	fioRunner := engineFioRunner(t, eng)
+	fioRunner := th.FioRunner()
 	err = fioRunner.WriteFiles("", fioOpts)
 	testenv.AssertNoError(t, err)
 
@@ -210,7 +212,7 @@ func TestDeleteSnapshotS3(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, bucketName)
 
-	eng, err := NewEngine("")
+	th, eng, err := newTestHarness(t, s3DataRepoPath, s3MetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
@@ -218,20 +220,20 @@ func TestDeleteSnapshotS3(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := eng.Cleanup()
+		cleanupErr := th.Cleanup()
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
 	opts := map[string]string{}
 	ctx := context.TODO()
-	err = eng.Init(ctx, s3DataRepoPath, s3MetadataRepoPath)
+	err = eng.Init(ctx)
 	testenv.AssertNoError(t, err)
 
 	fileSize := int64(256 * 1024)
 	numFiles := 10
 
 	fioOpts := fio.Options{}.WithFileSize(fileSize).WithNumFiles(numFiles)
-	fioRunner := engineFioRunner(t, eng)
+	fioRunner := th.FioRunner()
 	err = fioRunner.WriteFiles("", fioOpts)
 	testenv.AssertNoError(t, err)
 
@@ -257,7 +259,7 @@ func TestSnapshotVerificationFail(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, bucketName)
 
-	eng, err := NewEngine("")
+	th, eng, err := newTestHarness(t, s3DataRepoPath, s3MetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
@@ -265,13 +267,13 @@ func TestSnapshotVerificationFail(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := eng.Cleanup()
+		cleanupErr := th.Cleanup()
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
 	opts := map[string]string{}
 	ctx := context.TODO()
-	err = eng.Init(ctx, s3DataRepoPath, s3MetadataRepoPath)
+	err = eng.Init(ctx)
 	testenv.AssertNoError(t, err)
 
 	// Perform writes
@@ -279,7 +281,7 @@ func TestSnapshotVerificationFail(t *testing.T) {
 	numFiles := 10
 	fioOpt := fio.Options{}.WithFileSize(fileSize).WithNumFiles(numFiles)
 
-	fioRunner := engineFioRunner(t, eng)
+	fioRunner := th.FioRunner()
 	err = fioRunner.WriteFiles("", fioOpt)
 	testenv.AssertNoError(t, err)
 
@@ -327,7 +329,10 @@ func TestDataPersistency(t *testing.T) {
 
 	defer os.RemoveAll(tempDir)
 
-	eng, err := NewEngine("")
+	dataRepoPath := filepath.Join(tempDir, "data-repo-")
+	metadataRepoPath := filepath.Join(tempDir, "metadata-repo-")
+
+	th, eng, err := newTestHarness(t, dataRepoPath, metadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
@@ -335,16 +340,13 @@ func TestDataPersistency(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := eng.Cleanup()
+		cleanupErr := th.Cleanup()
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
-	dataRepoPath := filepath.Join(tempDir, "data-repo-")
-	metadataRepoPath := filepath.Join(tempDir, "metadata-repo-")
-
 	opts := map[string]string{}
 	ctx := context.TODO()
-	err = eng.Init(ctx, dataRepoPath, metadataRepoPath)
+	err = eng.Init(ctx)
 	testenv.AssertNoError(t, err)
 
 	// Perform writes
@@ -352,7 +354,7 @@ func TestDataPersistency(t *testing.T) {
 	numFiles := 10
 
 	fioOpt := fio.Options{}.WithFileSize(fileSize).WithNumFiles(numFiles)
-	fioRunner := engineFioRunner(t, eng)
+	fioRunner := th.FioRunner()
 	err = fioRunner.WriteFiles("", fioOpt)
 	testenv.AssertNoError(t, err)
 
@@ -369,19 +371,23 @@ func TestDataPersistency(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	// Create a new engine
-	eng2, err := NewEngine("")
+	th2, eng2, err := newTestHarness(t, dataRepoPath, metadataRepoPath)
 	testenv.AssertNoError(t, err)
 
-	defer eng2.CleanComponents()
+	defer func() {
+		th2.eng.cleanComponents()
+		th2.eng = nil
+		th2.Cleanup()
+	}()
 
 	// Connect this engine to the same data and metadata repositories -
 	// expect that the snapshot taken above will be found in metadata,
 	// and the data will be chosen to be restored to this engine's DataDir
 	// as a starting point.
-	err = eng2.Init(ctx, dataRepoPath, metadataRepoPath)
+	err = eng2.Init(ctx)
 	testenv.AssertNoError(t, err)
 
-	fioRunner2 := engineFioRunner(t, eng2)
+	fioRunner2 := th2.FioRunner()
 	err = eng2.Checker.RestoreSnapshotToPath(ctx, snapID, fioRunner2.LocalDataDir, os.Stdout, opts)
 	testenv.AssertNoError(t, err)
 
@@ -489,7 +495,7 @@ func TestActionsFilesystem(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, "")
 
-	eng, err := NewEngine("")
+	th, eng, err := newTestHarness(t, fsDataRepoPath, fsMetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
@@ -497,14 +503,14 @@ func TestActionsFilesystem(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := eng.Cleanup()
+		cleanupErr := th.Cleanup()
 		testenv.AssertNoError(t, cleanupErr)
 
 		os.RemoveAll(fsRepoBaseDirPath)
 	}()
 
 	ctx := context.TODO()
-	err = eng.Init(ctx, fsDataRepoPath, fsMetadataRepoPath)
+	err = eng.Init(ctx)
 	testenv.AssertNoError(t, err)
 
 	actionOpts := ActionOpts{
@@ -537,7 +543,7 @@ func TestActionsS3(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, bucketName)
 
-	eng, err := NewEngine("")
+	th, eng, err := newTestHarness(t, s3DataRepoPath, s3MetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
@@ -545,12 +551,12 @@ func TestActionsS3(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := eng.Cleanup()
+		cleanupErr := th.Cleanup()
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
 	ctx := context.TODO()
-	err = eng.Init(ctx, s3DataRepoPath, s3MetadataRepoPath)
+	err = eng.Init(ctx)
 	testenv.AssertNoError(t, err)
 
 	actionOpts := ActionOpts{
@@ -587,7 +593,7 @@ func TestIOLimitPerWriteAction(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, "")
 
-	eng, err := NewEngine("")
+	th, eng, err := newTestHarness(t, fsDataRepoPath, fsMetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
 		t.Skip(err)
 	}
@@ -595,14 +601,14 @@ func TestIOLimitPerWriteAction(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := eng.Cleanup()
+		cleanupErr := th.Cleanup()
 		testenv.AssertNoError(t, cleanupErr)
 
 		os.RemoveAll(fsRepoBaseDirPath)
 	}()
 
 	ctx := context.TODO()
-	err = eng.Init(ctx, fsDataRepoPath, fsMetadataRepoPath)
+	err = eng.Init(ctx)
 	testenv.AssertNoError(t, err)
 
 	actionOpts := ActionOpts{
@@ -720,7 +726,7 @@ func TestLogsPersist(t *testing.T) {
 	err = snapStore.ConnectOrCreateFilesystem(tmpDir)
 	testenv.AssertNoError(t, err)
 
-	log := Log{
+	logData := Log{
 		Log: []*LogEntry{
 			{
 				StartTime: time.Now().Add(-time.Hour),
@@ -740,7 +746,7 @@ func TestLogsPersist(t *testing.T) {
 
 	eng := &Engine{
 		MetaStore: snapStore,
-		EngineLog: log,
+		EngineLog: logData,
 	}
 
 	err = eng.saveLog()
@@ -771,14 +777,104 @@ func TestLogsPersist(t *testing.T) {
 	}
 }
 
-// engineFioRunner extracts the fio.Runner used by the engine.
-func engineFioRunner(t *testing.T, eng *Engine) *fio.Runner {
+type testHarness struct {
+	fw *fiofilewriter.FileWriter
+	ks *snapmeta.KopiaSnapshotter
+	kp *snapmeta.KopiaPersister
+	wc *fswalker.WalkCompare
+
+	baseDir string
+
+	eng *Engine
+}
+
+func newTestHarness(t *testing.T, dataRepoPath, metaRepoPath string) (*testHarness, *Engine, error) {
 	t.Helper()
 
-	fiofw, ok := eng.FileWriter.(*fiofilewriter.FileWriter)
-	if !ok {
-		t.Fatal("engine does not have a fiofilewriter.FileWriter")
+	var (
+		th  = &testHarness{}
+		err error
+	)
+
+	if th.baseDir, err = ioutil.TempDir("", "engine-data-"); err != nil {
+		return nil, nil, err
 	}
 
-	return fiofw.Runner
+	if th.fw, err = fiofilewriter.New(); err != nil {
+		th.Cleanup()
+		return nil, nil, err
+	}
+
+	if th.ks, err = snapmeta.NewSnapshotter(th.baseDir); err != nil {
+		th.Cleanup()
+		return nil, nil, err
+	}
+
+	if err = th.ks.ConnectOrCreateRepo(dataRepoPath); err != nil {
+		th.Cleanup()
+		return nil, nil, err
+	}
+
+	if th.kp, err = snapmeta.NewPersister(th.baseDir); err != nil {
+		th.Cleanup()
+		return nil, nil, err
+	}
+
+	if err = th.kp.ConnectOrCreateRepo(metaRepoPath); err != nil {
+		th.Cleanup()
+		return nil, nil, err
+	}
+
+	th.wc = fswalker.NewWalkCompare()
+
+	if th.eng, err = New(th.args()); err != nil {
+		th.Cleanup()
+		return nil, nil, err
+	}
+
+	return th, th.eng, err
+}
+
+func (th *testHarness) args() *Args {
+	return &Args{
+		MetaStore:  th.kp,
+		TestRepo:   th.ks,
+		Validator:  th.wc,
+		FileWriter: th.fw,
+		WorkingDir: th.baseDir,
+	}
+}
+
+func (th *testHarness) FioRunner() *fio.Runner {
+	return th.fw.Runner
+}
+
+func (th *testHarness) Cleanup() error {
+	var err error
+
+	if th.eng != nil {
+		err = th.eng.Shutdown()
+	}
+
+	if th.fw != nil {
+		th.fw.Cleanup()
+	}
+
+	if th.ks != nil {
+		if sc := th.ks.ServerCmd(); sc != nil {
+			if err = sc.Process.Signal(syscall.SIGTERM); err != nil {
+				log.Println("Failed to send termination signal to kopia server process:", err)
+			}
+		}
+
+		th.ks.Cleanup()
+	}
+
+	if th.kp != nil {
+		th.kp.Cleanup()
+	}
+
+	os.RemoveAll(th.baseDir)
+
+	return err
 }

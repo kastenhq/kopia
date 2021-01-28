@@ -7,118 +7,104 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/kopia/kopia/tests/robustness"
 	"github.com/kopia/kopia/tests/robustness/checker"
-	"github.com/kopia/kopia/tests/robustness/fiofilewriter"
-	"github.com/kopia/kopia/tests/robustness/snapmeta"
-	"github.com/kopia/kopia/tests/tools/fswalker"
 )
 
 var (
-	errNotAKopiaPersister   = fmt.Errorf("error: MetaStore is not a KopiaPersister")
-	errNotAKopiaSnapshotter = fmt.Errorf("error: TestRepo is not a KopiaSnapshotter")
+	// ErrorInvalidArgs is returned if the constructor arguments are incorrect.
+	ErrorInvalidArgs = fmt.Errorf("invalid arguments")
+
 	noSpaceOnDeviceMatchStr = "no space left on device"
 )
 
+// Args contain the parameters for the engine constructor.
+type Args struct {
+	// Interfaces used by the engine.
+	MetaStore  robustness.Persister
+	TestRepo   robustness.Snapshotter
+	Validator  robustness.Comparer
+	FileWriter robustness.FileWriter
+
+	// WorkingDir is a directory to use for temporary data.
+	WorkingDir string
+
+	// SyncRepositories should be set to true to reconcile differences.
+	SyncRepositories bool
+}
+
+// Validate checks the arguments for correctness.
+func (a *Args) Validate() error {
+	if a.MetaStore == nil || a.TestRepo == nil || a.Validator == nil || a.FileWriter == nil || a.WorkingDir == "" {
+		return ErrorInvalidArgs
+	}
+
+	return nil
+}
+
+// New creates an Engine.
+func New(args *Args) (*Engine, error) {
+	if err := args.Validate(); err != nil {
+		return nil, err
+	}
+
+	var (
+		e = &Engine{
+			MetaStore:   args.MetaStore,
+			TestRepo:    args.TestRepo,
+			Validator:   args.Validator,
+			FileWriter:  args.FileWriter,
+			baseDirPath: args.WorkingDir,
+			RunStats: Stats{
+				RunCounter:     1,
+				CreationTime:   time.Now(),
+				PerActionStats: make(map[ActionKey]*ActionStats),
+			},
+		}
+		err error
+	)
+
+	if err = e.setupLogging(); err != nil {
+		e.cleanComponents()
+		return nil, err
+	}
+
+	e.Checker, err = checker.NewChecker(e.TestRepo, e.MetaStore, e.Validator, e.baseDirPath)
+	if err != nil {
+		e.cleanComponents()
+		return nil, err
+	}
+
+	e.Checker.RecoveryMode = args.SyncRepositories
+	e.cleanupRoutines = append(e.cleanupRoutines, e.Checker.Cleanup)
+
+	return e, nil
+}
+
 // Engine is the outer level testing framework for robustness testing.
 type Engine struct {
-	FileWriter      robustness.FileWriter
-	TestRepo        robustness.Snapshotter
-	MetaStore       robustness.Persister
+	FileWriter robustness.FileWriter
+	TestRepo   robustness.Snapshotter
+	MetaStore  robustness.Persister
+	Validator  robustness.Comparer
+
 	Checker         *checker.Checker
 	cleanupRoutines []func()
 	baseDirPath     string
-	serverCmd       *exec.Cmd
 
 	RunStats        Stats
 	CumulativeStats Stats
 	EngineLog       Log
 }
 
-// NewEngine instantiates a new Engine and returns its pointer. It is
-// currently created with:
-// - FIO file writer
-// - Kopia test repo snapshotter
-// - Kopia metadata storage repo
-// - FSWalker data integrity checker.
-func NewEngine(workingDir string) (*Engine, error) {
-	baseDirPath, err := ioutil.TempDir(workingDir, "engine-data-")
-	if err != nil {
-		return nil, err
-	}
-
-	e := &Engine{
-		baseDirPath: baseDirPath,
-		RunStats: Stats{
-			RunCounter:     1,
-			CreationTime:   time.Now(),
-			PerActionStats: make(map[ActionKey]*ActionStats),
-		},
-	}
-
-	// Create an FIO file writer
-	e.FileWriter, err = fiofilewriter.New()
-	if err != nil {
-		e.CleanComponents()
-		return nil, err
-	}
-
-	e.cleanupRoutines = append(e.cleanupRoutines, e.FileWriter.Cleanup)
-
-	// Fill Snapshotter interface
-	kopiaSnapper, err := snapmeta.NewSnapshotter(baseDirPath)
-	if err != nil {
-		e.CleanComponents()
-		return nil, err
-	}
-
-	e.cleanupRoutines = append(e.cleanupRoutines, kopiaSnapper.Cleanup)
-	e.TestRepo = kopiaSnapper
-
-	// Fill the snapshot store interface
-	snapStore, err := snapmeta.NewPersister(baseDirPath)
-	if err != nil {
-		e.CleanComponents()
-		return nil, err
-	}
-
-	e.cleanupRoutines = append(e.cleanupRoutines, snapStore.Cleanup)
-
-	e.MetaStore = snapStore
-
-	err = e.setupLogging()
-	if err != nil {
-		e.CleanComponents()
-		return nil, err
-	}
-
-	// Create the data integrity checker
-	chk, err := checker.NewChecker(kopiaSnapper, snapStore, fswalker.NewWalkCompare(), baseDirPath)
-	e.cleanupRoutines = append(e.cleanupRoutines, chk.Cleanup)
-
-	if err != nil {
-		e.CleanComponents()
-		return nil, err
-	}
-
-	e.cleanupRoutines = append(e.cleanupRoutines, e.cleanUpServer)
-
-	e.Checker = chk
-
-	return e, nil
-}
-
-// Cleanup cleans up after each component of the test engine.
-func (e *Engine) Cleanup() error {
+// Shutdown makes a last snapshot then flushes the metadata and prints the final statistics.
+func (e *Engine) Shutdown() error {
 	// Perform a snapshot action to capture the state of the data directory
 	// at the end of the run
 	lastWriteEntry := e.EngineLog.FindLastThisRun(WriteRandomFilesActionKey)
@@ -144,7 +130,7 @@ func (e *Engine) Cleanup() error {
 	e.RunStats.RunTime = time.Since(e.RunStats.CreationTime)
 	e.CumulativeStats.RunTime += e.RunStats.RunTime
 
-	defer e.CleanComponents()
+	defer e.cleanComponents()
 
 	if e.MetaStore != nil {
 		err := e.saveLog()
@@ -185,8 +171,8 @@ func (e *Engine) formatLogName() string {
 	return fmt.Sprintf("Log_%s", st.Format("2006_01_02_15_04_05"))
 }
 
-// CleanComponents cleans up each component part of the test engine.
-func (e *Engine) CleanComponents() {
+// cleanComponents cleans up each component part of the test engine.
+func (e *Engine) cleanComponents() {
 	for _, f := range e.cleanupRoutines {
 		if f != nil {
 			f()
@@ -196,30 +182,8 @@ func (e *Engine) CleanComponents() {
 	os.RemoveAll(e.baseDirPath) //nolint:errcheck
 }
 
-// Init initializes the Engine to a repository location according to the environment setup.
-// - If S3_BUCKET_NAME is set, initialize S3
-// - Else initialize filesystem.
-func (e *Engine) Init(ctx context.Context, testRepoPath, metaRepoPath string) error {
-	kp, ok := e.MetaStore.(*snapmeta.KopiaPersister)
-	if !ok {
-		return errNotAKopiaPersister
-	}
-
-	if err := kp.ConnectOrCreateRepo(metaRepoPath); err != nil {
-		return err
-	}
-
-	ks, ok := e.TestRepo.(*snapmeta.KopiaSnapshotter)
-	if !ok {
-		return errNotAKopiaSnapshotter
-	}
-
-	if err := ks.ConnectOrCreateRepo(testRepoPath); err != nil {
-		return err
-	}
-
-	e.serverCmd = ks.ServerCmd()
-
+// Init initializes the Engine and performs a consistency check.
+func (e *Engine) Init(ctx context.Context) error {
 	err := e.MetaStore.LoadMetadata()
 	if err != nil {
 		return err
@@ -238,15 +202,4 @@ func (e *Engine) Init(ctx context.Context, testRepoPath, metaRepoPath string) er
 	}
 
 	return e.Checker.VerifySnapshotMetadata()
-}
-
-// cleanUpServer cleans up the server process.
-func (e *Engine) cleanUpServer() {
-	if e.serverCmd == nil {
-		return
-	}
-
-	if err := e.serverCmd.Process.Signal(syscall.SIGTERM); err != nil {
-		log.Println("Failed to send termination signal to kopia server process:", err)
-	}
 }
