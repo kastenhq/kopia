@@ -178,8 +178,6 @@ func (e *Engine) cleanComponents() {
 			f()
 		}
 	}
-
-	os.RemoveAll(e.baseDirPath) //nolint:errcheck
 }
 
 // Init initializes the Engine and performs a consistency check.
