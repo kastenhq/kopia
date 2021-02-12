@@ -13,6 +13,7 @@ import (
 const (
 	engineStatsStoreKey = "cumulative-engine-stats"
 	engineLogsStoreKey  = "engine-logs"
+	snapIDIndexStoreKey = "checker-snapID-index"
 )
 
 // saveLog saves the engine Log in the metadata store.
@@ -74,4 +75,30 @@ func (e *Engine) loadStats() error {
 	}
 
 	return json.Unmarshal(b, &e.CumulativeStats)
+}
+
+// saveSnapIDIndex saves the Checker's snapshot ID index in the metadata store.
+func (e *Engine) saveSnapIDIndex() error {
+	snapIDIdxRaw, err := json.Marshal(e.Checker.SnapIDIndex)
+	if err != nil {
+		return err
+	}
+
+	return e.MetaStore.Store(snapIDIndexStoreKey, snapIDIdxRaw)
+}
+
+// loadSnapIDIndex loads the Checker's snapshot ID index from the metadata store.
+func (e *Engine) loadSnapIDIndex() error {
+	b, err := e.MetaStore.Load(snapIDIndexStoreKey)
+	if err != nil {
+		if errors.Is(err, robustness.ErrKeyNotFound) {
+			// Swallow key-not-found error. We may not have historical
+			// index data.
+			return nil
+		}
+
+		return err
+	}
+
+	return json.Unmarshal(b, &e.Checker.SnapIDIndex)
 }
