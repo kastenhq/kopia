@@ -108,12 +108,12 @@ func (e *Engine) Shutdown() error {
 	// Perform a snapshot action to capture the state of the data directory
 	// at the end of the run
 	lastWriteEntry := e.EngineLog.FindLastThisRun(WriteRandomFilesActionKey)
-	lastSnapEntry := e.EngineLog.FindLastThisRun(SnapshotRootDirActionKey)
+	lastSnapEntry := e.EngineLog.FindLastThisRun(SnapshotDirActionKey)
 
 	if lastWriteEntry != nil {
 		if lastSnapEntry == nil || lastSnapEntry.Idx < lastWriteEntry.Idx {
 			// Only force a final snapshot if the data tree has been modified since the last snapshot
-			e.ExecAction(SnapshotRootDirActionKey, make(map[string]string)) //nolint:errcheck
+			e.ExecAction(SnapshotDirActionKey, make(map[string]string)) //nolint:errcheck
 		}
 	}
 

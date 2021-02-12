@@ -613,7 +613,7 @@ func TestIOLimitPerWriteAction(t *testing.T) {
 
 	actionOpts := ActionOpts{
 		ActionControlActionKey: map[string]string{
-			string(SnapshotRootDirActionKey):          strconv.Itoa(0),
+			string(SnapshotDirActionKey):              strconv.Itoa(0),
 			string(RestoreSnapshotActionKey):          strconv.Itoa(0),
 			string(DeleteRandomSnapshotActionKey):     strconv.Itoa(0),
 			string(WriteRandomFilesActionKey):         strconv.Itoa(1),
