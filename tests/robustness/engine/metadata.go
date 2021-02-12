@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/kopia/kopia/tests/robustness/snapmeta"
+	"github.com/kopia/kopia/tests/robustness"
 )
 
 const (
@@ -29,7 +29,7 @@ func (e *Engine) saveLog() error {
 func (e *Engine) loadLog() error {
 	b, err := e.MetaStore.Load(engineLogsStoreKey)
 	if err != nil {
-		if errors.Is(err, snapmeta.ErrKeyNotFound) {
+		if errors.Is(err, robustness.ErrKeyNotFound) {
 			// Swallow key-not-found error. May not have historical logs
 			return nil
 		}
@@ -61,7 +61,7 @@ func (e *Engine) saveStats() error {
 func (e *Engine) loadStats() error {
 	b, err := e.MetaStore.Load(engineStatsStoreKey)
 	if err != nil {
-		if errors.Is(err, snapmeta.ErrKeyNotFound) {
+		if errors.Is(err, robustness.ErrKeyNotFound) {
 			// Swallow key-not-found error. We may not have historical
 			// stats data. Initialize the action map for the cumulative stats
 			e.CumulativeStats.PerActionStats = make(map[ActionKey]*ActionStats)
