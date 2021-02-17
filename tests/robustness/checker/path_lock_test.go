@@ -1,6 +1,9 @@
-package engine
+package checker
 
 import (
+	"math/rand"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -59,4 +62,32 @@ func TestPathLockBasic(t *testing.T) {
 		}
 	}
 
+}
+
+func TestPathLockRace(t *testing.T) {
+	pl := NewPathLock()
+
+	counter := 0
+
+	wg := new(sync.WaitGroup)
+	numGoroutines := 100
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			path := "/some/path/a/b/c"
+			for i := 0; i < rand.Intn(3); i++ {
+				path = filepath.Dir(path)
+			}
+			pl.Lock(path)
+			counter++
+			pl.Unlock(path)
+		}()
+	}
+
+	wg.Wait()
+
+	if counter != numGoroutines {
+		t.Fatalf("counter %v != numgoroutines %v", counter, numGoroutines)
+	}
 }

@@ -1,4 +1,4 @@
-package engine
+package checker
 
 import (
 	"path/filepath"
