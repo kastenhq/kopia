@@ -1,10 +1,15 @@
-package checker
+package coordinate
 
 import (
 	"path/filepath"
 	"strings"
 	"sync"
 )
+
+type PathLocker interface {
+	Lock(path string)
+	Unlock(path string)
+}
 
 type PathLock struct {
 	mu          sync.Mutex

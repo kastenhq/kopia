@@ -16,7 +16,6 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/tests/robustness"
 	"github.com/kopia/kopia/tests/robustness/snapmeta"
 )
@@ -32,7 +31,6 @@ type Checker struct {
 	RestoreDir            string
 	snapshotIssuer        robustness.Snapshotter
 	snapshotMetadataStore robustness.Store
-	validator             robustness.Comparer
 	RecoveryMode          bool
 	DeleteLimit           int
 
@@ -42,7 +40,7 @@ type Checker struct {
 
 // NewChecker instantiates a new Checker, returning its pointer. A temporary
 // directory is created to mount restored data.
-func NewChecker(snapIssuer robustness.Snapshotter, snapmetaStore robustness.Store, validator robustness.Comparer, restoreDir string) (*Checker, error) {
+func NewChecker(snapIssuer robustness.Snapshotter, snapmetaStore robustness.Store, restoreDir string) (*Checker, error) {
 	restoreDir, err := ioutil.TempDir(restoreDir, "restore-data-")
 	if err != nil {
 		return nil, err
@@ -60,7 +58,6 @@ func NewChecker(snapIssuer robustness.Snapshotter, snapmetaStore robustness.Stor
 		RestoreDir:            restoreDir,
 		snapshotIssuer:        snapIssuer,
 		snapshotMetadataStore: snapmetaStore,
-		validator:             validator,
 		RecoveryMode:          false,
 		DeleteLimit:           delLimit,
 		SnapIDIndex:           make(snapmeta.Index),
@@ -190,25 +187,13 @@ func (chk *Checker) VerifySnapshotMetadata() error {
 // TakeSnapshot gathers state information on the requested snapshot path, then
 // performs the snapshot action defined by the Checker's Snapshotter.
 func (chk *Checker) TakeSnapshot(ctx context.Context, sourceDir string, opts map[string]string) (snapID string, err error) {
-	b, err := chk.validator.Gather(ctx, sourceDir, opts)
-	if err != nil {
-		return "", err
-	}
-
-	ssStart := clock.Now()
-
-	snapID, err = chk.snapshotIssuer.CreateSnapshot(sourceDir, opts)
-	if err != nil {
-		return snapID, err
-	}
-
-	ssEnd := clock.Now()
+	snapID, fingerprint, stats, err := chk.snapshotIssuer.CreateSnapshot(sourceDir, opts)
 
 	ssMeta := &SnapshotMetadata{
 		SnapID:         snapID,
-		SnapStartTime:  ssStart,
-		SnapEndTime:    ssEnd,
-		ValidationData: b,
+		SnapStartTime:  stats.SnapStartTime,
+		SnapEndTime:    stats.SnapEndTime,
+		ValidationData: fingerprint,
 	}
 
 	chk.mu.Lock()
@@ -260,7 +245,7 @@ func (chk *Checker) safeRestorePrepare(snapID string) (*SnapshotMetadata, error)
 	if !chk.SnapIDIndex.IsKeyInIndex(snapID, liveSnapshotsIdxName) {
 		// Preventing restore of a snapshot ID that has been (or is currently
 		// being) deleted.
-		log.Printf("Snapshot ID %s is flagged for deletion", snapID)
+		log.Printf("Snapshot ID %s could not be found as a live snapshot", snapID)
 		return nil, robustness.ErrNoOp
 	}
 
@@ -275,42 +260,38 @@ func (chk *Checker) safeRestorePrepare(snapID string) (*SnapshotMetadata, error)
 // RestoreVerifySnapshot restores a snapshot and verifies its integrity against
 // the metadata provided.
 func (chk *Checker) RestoreVerifySnapshot(ctx context.Context, snapID, destPath string, ssMeta *SnapshotMetadata, reportOut io.Writer, opts map[string]string) error {
-	err := chk.snapshotIssuer.RestoreSnapshot(snapID, destPath, opts)
+	if ssMeta != nil {
+		return chk.snapshotIssuer.RestoreSnapshotCompare(snapID, destPath, ssMeta.ValidationData, reportOut, opts)
+	}
+
+	// We have no metadata for this snapshot ID.
+	if !chk.RecoveryMode {
+		return robustness.ErrMetadataMissing
+	}
+
+	// Recovery path:
+	// If in recovery mode, restore the snapshot by snapshot ID and gather
+	// its fingerprint (i.e. assume the snapshot will restore properly).
+	fingerprint, err := chk.snapshotIssuer.RestoreSnapshot(snapID, destPath, opts)
 	if err != nil {
 		return err
 	}
 
-	if ssMeta == nil && chk.RecoveryMode {
-		var b []byte
-
-		b, err = chk.validator.Gather(ctx, destPath, opts)
-		if err != nil {
-			return err
-		}
-
-		ssMeta = &SnapshotMetadata{
-			SnapID:         snapID,
-			ValidationData: b,
-		}
-
-		chk.mu.Lock()
-		defer chk.mu.Unlock()
-
-		err := chk.saveSnapshotMetadata(ssMeta)
-		if err != nil {
-			return err
-		}
-
-		chk.SnapIDIndex.AddToIndex(snapID, allSnapshotsIdxName)
-		chk.SnapIDIndex.AddToIndex(snapID, liveSnapshotsIdxName)
-
-		return nil
+	ssMeta = &SnapshotMetadata{
+		SnapID:         snapID,
+		ValidationData: fingerprint,
 	}
 
-	err = chk.validator.Compare(ctx, destPath, ssMeta.ValidationData, reportOut, opts)
+	chk.mu.Lock()
+	defer chk.mu.Unlock()
+
+	err = chk.saveSnapshotMetadata(ssMeta)
 	if err != nil {
 		return err
 	}
+
+	chk.SnapIDIndex.AddToIndex(snapID, allSnapshotsIdxName)
+	chk.SnapIDIndex.AddToIndex(snapID, liveSnapshotsIdxName)
 
 	return nil
 }

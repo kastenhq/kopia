@@ -15,10 +15,12 @@ import (
 	"time"
 
 	"github.com/kopia/kopia/tests/robustness"
+	"github.com/kopia/kopia/tests/robustness/coordinate"
 	"github.com/kopia/kopia/tests/robustness/engine"
 	"github.com/kopia/kopia/tests/robustness/fiofilewriter"
 	"github.com/kopia/kopia/tests/robustness/snapmeta"
 	"github.com/kopia/kopia/tests/tools/fio"
+	"github.com/kopia/kopia/tests/tools/fswalker"
 	"github.com/kopia/kopia/tests/tools/kopiarunner"
 )
 
@@ -69,9 +71,11 @@ type kopiaRobustnessTestHarness struct {
 	metaRepoPath string
 
 	baseDirPath string
+	coordinator *coordinate.FSCoordination
 	fileWriter  *fiofilewriter.FileWriter
 	snapshotter *snapmeta.KopiaSnapshotter
 	persister   *snapmeta.KopiaPersister
+	comparer    *fswalker.WalkCompare
 	engine      *engine.Engine
 
 	skipTest bool
@@ -82,8 +86,8 @@ func (th *kopiaRobustnessTestHarness) init(dataRepoPath, metaRepoPath string) {
 	th.metaRepoPath = metaRepoPath
 
 	// the initialization state machine is linear and bails out on first failure
-	if th.makeBaseDir() && th.getFileWriter() && th.getSnapshotter() &&
-		th.getPersister() && th.getEngine() {
+	if th.makeBaseDir() && th.getFileWriter() && th.getSnapshotter() && th.getFSCoordinator() &&
+		th.getPersister() && th.getComparer() && th.getEngine() {
 		return // success!
 	}
 
@@ -104,6 +108,26 @@ func (th *kopiaRobustnessTestHarness) makeBaseDir() bool {
 	}
 
 	th.baseDirPath = baseDir
+
+	return true
+}
+
+func (th *kopiaRobustnessTestHarness) getFSCoordinator() bool {
+	// th.fileWriter and th.snapshotter must have already been created
+	if th.fileWriter == nil || th.snapshotter == nil {
+		log.Println("FileWriter and Snapshotter must already be initialized")
+		return false
+	}
+
+	mu := coordinate.NewPathLock()
+
+	th.fileWriter.Runner.PathLock = mu
+
+	th.coordinator = &coordinate.FSCoordination{
+		FileWriter:  th.fileWriter,
+		Snapshotter: th.snapshotter,
+		PathLock:    mu,
+	}
 
 	return true
 }
@@ -175,11 +199,16 @@ func (th *kopiaRobustnessTestHarness) getPersister() bool {
 	return true
 }
 
+func (th *kopiaRobustnessTestHarness) getComparer() bool {
+	th.comparer = fswalker.NewWalkCompare()
+	return true
+}
+
 func (th *kopiaRobustnessTestHarness) getEngine() bool {
 	args := &engine.Args{
 		MetaStore:        th.persister,
-		TestRepo:         th.snapshotter,
-		FileWriter:       th.fileWriter,
+		TestRepo:         th.coordinator,
+		FileWriter:       th.coordinator,
 		WorkingDir:       th.baseDirPath,
 		SyncRepositories: true,
 	}

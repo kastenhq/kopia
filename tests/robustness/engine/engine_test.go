@@ -366,6 +366,10 @@ func TestDataPersistency(t *testing.T) {
 	dataDirWalk, err := eng.Checker.GetSnapshotMetadata(snapID)
 	testenv.AssertNoError(t, err)
 
+	// Save the snapshot ID index
+	err = eng.saveSnapIDIndex()
+	testenv.AssertNoError(t, err)
+
 	// Flush the snapshot metadata to persistent storage
 	err = eng.MetaStore.FlushMetadata()
 	testenv.AssertNoError(t, err)
@@ -781,7 +785,6 @@ type testHarness struct {
 	fw *fiofilewriter.FileWriter
 	ks *snapmeta.KopiaSnapshotter
 	kp *snapmeta.KopiaPersister
-	wc *fswalker.WalkCompare
 
 	baseDir string
 
@@ -825,8 +828,6 @@ func newTestHarness(t *testing.T, dataRepoPath, metaRepoPath string) (*testHarne
 		return nil, nil, err
 	}
 
-	th.wc = fswalker.NewWalkCompare()
-
 	if th.eng, err = New(th.args()); err != nil {
 		th.Cleanup()
 		return nil, nil, err
@@ -839,7 +840,6 @@ func (th *testHarness) args() *Args {
 	return &Args{
 		MetaStore:  th.kp,
 		TestRepo:   th.ks,
-		Validator:  th.wc,
 		FileWriter: th.fw,
 		WorkingDir: th.baseDir,
 	}

@@ -17,6 +17,8 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+
+	"github.com/kopia/kopia/tests/robustness/coordinate"
 )
 
 // List of fio flags.
@@ -62,7 +64,20 @@ type Runner struct {
 	FioWriteBaseDir string
 	Global          Config
 	Debug           bool
+
+	PathLock coordinate.PathLocker
 }
+
+// InactivePathLocker satisfies the coordinate.PathLocker interface but is a no-op
+type InactivePathLocker struct{}
+
+var _ coordinate.PathLocker = (*InactivePathLocker)(nil)
+
+// Lock implements the coordiante.PathLocker interface
+func (*InactivePathLocker) Lock(path string) {}
+
+// Unlock implements the coordinate.PathLocker interface
+func (*InactivePathLocker) Unlock(path string) {}
 
 // NewRunner creates a new fio runner.
 func NewRunner() (fr *Runner, err error) {
@@ -136,6 +151,7 @@ func NewRunner() (fr *Runner, err error) {
 				}.WithDirectory(fioWriteBaseDir),
 			},
 		},
+		PathLock: &InactivePathLocker{},
 	}
 
 	err = fr.verifySetupWithTestWrites()

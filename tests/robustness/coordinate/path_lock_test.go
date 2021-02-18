@@ -1,4 +1,4 @@
-package checker
+package coordinate
 
 import (
 	"math/rand"
