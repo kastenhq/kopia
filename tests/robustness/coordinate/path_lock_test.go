@@ -12,28 +12,24 @@ func TestPathLockBasic(t *testing.T) {
 	pl := NewPathLock()
 
 	for ti, tc := range []struct {
-		name               string
-		path1              string
-		path2              string
-		expectPath2Blocked bool
+		name  string
+		path1 string
+		path2 string
 	}{
 		{
-			name:               "same path",
-			path1:              "/a/b/c",
-			path2:              "/a/b/c",
-			expectPath2Blocked: true,
+			name:  "same path",
+			path1: "/a/b/c",
+			path2: "/a/b/c",
 		},
 		{
-			name:               "path2 is a descendent of path1",
-			path1:              "/a/b/c",
-			path2:              "/a/b/c/d/e",
-			expectPath2Blocked: true,
+			name:  "path2 is a descendent of path1",
+			path1: "/a/b/c",
+			path2: "/a/b/c/d/e",
 		},
 		{
-			name:               "path1 is a descendent of path2",
-			path1:              "/a/b/c/d/e",
-			path2:              "/a/b/c",
-			expectPath2Blocked: true,
+			name:  "path1 is a descendent of path2",
+			path1: "/a/b/c/d/e",
+			path2: "/a/b/c",
 		},
 	} {
 		t.Log(ti, tc.name)
