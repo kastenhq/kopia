@@ -43,7 +43,7 @@ func TestPathLockBasic(t *testing.T) {
 			pl.Unlock(tc.path2)
 		}()
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 
 		if trigger == true {
 			t.Fatalf("Lock unsuccessful")
@@ -51,13 +51,72 @@ func TestPathLockBasic(t *testing.T) {
 
 		pl.Unlock(tc.path1)
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 
 		if trigger != true {
 			t.Fatalf("Unlock unsuccessful")
 		}
 	}
+}
 
+func TestPathLockWithoutBlock(t *testing.T) {
+	pl := NewPathLock()
+
+	for ti, tc := range []struct {
+		name  string
+		path1 string
+		path2 string
+	}{
+		{
+			name:  "same parent",
+			path1: "/a/b/c",
+			path2: "/a/b/d",
+		},
+		{
+			name:  "same grandparent",
+			path1: "/a/b/c/x",
+			path2: "/a/b/d/y",
+		},
+		{
+			name:  "differing depths",
+			path1: "/a/b/c/d/e",
+			path2: "/a/b/c/x",
+		},
+	} {
+		t.Log(ti, tc.name)
+
+		goroutineLockedWg := new(sync.WaitGroup)
+		goroutineLockedWg.Add(1)
+
+		trigger := false
+
+		go func() {
+			pl.Lock(tc.path2)
+			trigger = true
+			goroutineLockedWg.Done()
+			time.Sleep(10 * time.Millisecond)
+			trigger = false
+			pl.Unlock(tc.path2)
+		}()
+
+		// Wait for the goroutine to lock
+		goroutineLockedWg.Wait()
+
+		// This should not block; the paths should not interfere
+		pl.Lock(tc.path1)
+
+		if trigger != true {
+			t.Fatalf("Lock blocked")
+		}
+
+		pl.Unlock(tc.path1)
+
+		time.Sleep(20 * time.Millisecond)
+
+		if trigger != false {
+			t.Fatalf("Trigger should have been set false")
+		}
+	}
 }
 
 func TestPathLockRace(t *testing.T) {
@@ -71,6 +130,9 @@ func TestPathLockRace(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+
+			// Pick from three different path values that should all be
+			// covered by the same lock.
 			path := "/some/path/a/b/c"
 			for i := 0; i < rand.Intn(3); i++ {
 				path = filepath.Dir(path)
