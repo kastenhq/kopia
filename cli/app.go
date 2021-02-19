@@ -12,8 +12,6 @@ import (
 
 	"github.com/kopia/kopia/internal/apiclient"
 	"github.com/kopia/kopia/repo"
-	"github.com/kopia/kopia/repo/blob"
-	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/logging"
 	"github.com/kopia/kopia/repo/maintenance"
 	"github.com/kopia/kopia/snapshot/snapshotmaintenance"
@@ -99,7 +97,8 @@ func assertDirectRepository(act func(ctx context.Context, rep repo.DirectReposit
 func directRepositoryWriteAction(act func(ctx context.Context, rep repo.DirectRepositoryWriter) error) func(ctx *kingpin.ParseContext) error {
 	return maybeRepositoryAction(assertDirectRepository(func(ctx context.Context, rep repo.DirectRepository) error {
 		return repo.DirectWriteSession(ctx, rep, repo.WriteSessionOptions{
-			Purpose: "directRepositoryWriteAction",
+			Purpose:  "directRepositoryWriteAction",
+			OnUpload: progress.UploadedBytes,
 		}, func(dw repo.DirectRepositoryWriter) error { return act(ctx, dw) })
 	}), repositoryAccessMode{
 		mustBeConnected:    true,
@@ -128,7 +127,8 @@ func repositoryReaderAction(act func(ctx context.Context, rep repo.Repository) e
 func repositoryWriterAction(act func(ctx context.Context, rep repo.RepositoryWriter) error) func(ctx *kingpin.ParseContext) error {
 	return maybeRepositoryAction(func(ctx context.Context, rep repo.Repository) error {
 		return repo.WriteSession(ctx, rep, repo.WriteSessionOptions{
-			Purpose: "repositoryWriterAction",
+			Purpose:  "repositoryWriterAction",
+			OnUpload: progress.UploadedBytes,
 		}, func(w repo.RepositoryWriter) error {
 			return act(ctx, w)
 		})
@@ -138,17 +138,7 @@ func repositoryWriterAction(act func(ctx context.Context, rep repo.RepositoryWri
 }
 
 func rootContext() context.Context {
-	ctx := context.Background()
-	ctx = content.UsingContentCache(ctx, *enableCaching)
-	ctx = content.UsingListCache(ctx, *enableListCaching)
-	ctx = blob.WithUploadProgressCallback(ctx, func(desc string, bytesSent, totalBytes int64) {
-		if bytesSent >= totalBytes {
-			log(ctx).Debugf("Uploaded %v %v %v", desc, bytesSent, totalBytes)
-			progress.UploadedBytes(totalBytes)
-		}
-	})
-
-	return ctx
+	return context.Background()
 }
 
 type repositoryAccessMode struct {
@@ -158,9 +148,9 @@ type repositoryAccessMode struct {
 
 func maybeRepositoryAction(act func(ctx context.Context, rep repo.Repository) error, mode repositoryAccessMode) func(ctx *kingpin.ParseContext) error {
 	return func(kpc *kingpin.ParseContext) error {
-		return withProfiling(func() error {
-			ctx := rootContext()
+		ctx := rootContext()
 
+		if err := withProfiling(func() error {
 			startMemoryTracking(ctx)
 			defer finishMemoryTracking(ctx)
 
@@ -194,7 +184,13 @@ func maybeRepositoryAction(act func(ctx context.Context, rep repo.Repository) er
 			}
 
 			return err
-		})
+		}); err != nil {
+			// print error in red
+			log(ctx).Errorf("ERROR: %v", err.Error())
+			os.Exit(1)
+		}
+
+		return nil
 	}
 }
 
@@ -213,7 +209,8 @@ func maybeRunMaintenance(ctx context.Context, rep repo.Repository) error {
 	}
 
 	err := repo.DirectWriteSession(ctx, dr, repo.WriteSessionOptions{
-		Purpose: "maybeRunMaintenance",
+		Purpose:  "maybeRunMaintenance",
+		OnUpload: progress.UploadedBytes,
 	}, func(w repo.DirectRepositoryWriter) error {
 		return snapshotmaintenance.Run(ctx, w, maintenance.ModeAuto, false)
 	})

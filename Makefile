@@ -108,10 +108,10 @@ kopia-ui:
 # kopia-ui build needs this particular location to embed the correct server binary.
 # note we're not building or embedding HTML UI to speed up PR testing process.
 build-current-os-noui:
-	go build -o dist/kopia_$(shell go env GOOS)_$(shell go env GOARCH)$(exe_suffix)
+	go build -o dist/kopia_$(shell go env GOOS)_$(shell go env GOARCH)/kopia$(exe_suffix)
 
 build-current-os-with-ui: html-ui-bindata
-	go build -o dist/kopia_$(shell go env GOOS)_$(shell go env GOARCH)$(exe_suffix) -tags embedhtml
+	go build -o dist/kopia_$(shell go env GOOS)_$(shell go env GOARCH)/kopia$(exe_suffix) -tags embedhtml
 
 kopia-ui-pr-test: app-node-modules htmlui-node-modules
 	$(MAKE) build-current-os-with-ui
@@ -134,12 +134,11 @@ endif
 	$(MAKE) lint vet test-with-coverage
 	$(retry) $(MAKE) layering-test
 	$(retry) $(MAKE) integration-tests
-ifeq ($(TRAVIS_OS_NAME),linux)
+ifeq ($(TRAVIS_OS_NAME)/$(kopia_arch_name),linux/amd64)
 	$(MAKE) publish-packages
 	$(MAKE) robustness-tool-tests
 	$(MAKE) stress-test
 	$(MAKE) travis-create-long-term-repository
-	$(MAKE) upload-coverage
 endif
 
 endif
@@ -184,22 +183,6 @@ goreleaser: $(goreleaser) print_build_info
 	-git diff | cat
 	$(goreleaser) release $(GORELEASER_OPTIONS)
 
-ifeq ($(TRAVIS_PULL_REQUEST),false)
-
-upload-coverage: $(GOVERALLS_TOOL)
-ifeq ($(REPO_OWNER),kopia)
-	-$(GOVERALLS_TOOL) -service=$(GOVERALLS_SERVICE) -coverprofile=tmp.cov
-else
-	@echo Not uploading coverage from a fork.
-endif
-
-else
-
-upload-coverage:
-	@echo Not uploading coverage during PR build.
-
-endif
-
 dev-deps:
 	GO111MODULE=off go get -u golang.org/x/tools/cmd/gorename
 	GO111MODULE=off go get -u golang.org/x/tools/cmd/guru
@@ -211,11 +194,7 @@ dev-deps:
 
 test-with-coverage: export RCLONE_EXE=$(rclone)
 test-with-coverage: $(gotestsum) $(rclone)
-	$(GO_TEST) -count=$(REPEAT_TEST) -coverprofile=tmp.cov --coverpkg $(COVERAGE_PACKAGES) -timeout 300s $(shell go list ./...)
-
-test-with-coverage-pkgonly: export RCLONE_EXE=$(rclone)
-test-with-coverage-pkgonly: $(gotestsum) $(rclone)
-	$(GO_TEST) -count=$(REPEAT_TEST) -coverprofile=tmp.cov -timeout 300s github.com/kopia/kopia/...
+	$(GO_TEST) -count=$(REPEAT_TEST) -covermode=atomic -coverprofile=coverage.txt --coverpkg $(COVERAGE_PACKAGES) -timeout 300s ./...
 
 test: export RCLONE_EXE=$(rclone)
 test: $(gotestsum) $(rclone)
@@ -270,7 +249,7 @@ godoc:
 coverage: test-with-coverage coverage-html
 
 coverage-html:
-	go tool cover -html=tmp.cov
+	go tool cover -html=coverage.txt
 
 official-release:
 	git tag $(RELEASE_VERSION) -m $(RELEASE_VERSION)

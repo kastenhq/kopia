@@ -2,7 +2,6 @@ package snapshotfs
 
 import (
 	"context"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,6 +16,7 @@ import (
 	"github.com/kopia/kopia/internal/faketime"
 	"github.com/kopia/kopia/internal/mockfs"
 	"github.com/kopia/kopia/internal/testlogging"
+	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob/filesystem"
 	"github.com/kopia/kopia/repo/object"
@@ -42,11 +42,10 @@ func (th *uploadTestHarness) cleanup() {
 	os.RemoveAll(th.repoDir)
 }
 
-func newUploadTestHarness(ctx context.Context) *uploadTestHarness {
-	repoDir, err := ioutil.TempDir("", "kopia-repo")
-	if err != nil {
-		panic("cannot create temp directory: " + err.Error())
-	}
+func newUploadTestHarness(ctx context.Context, t *testing.T) *uploadTestHarness {
+	t.Helper()
+
+	repoDir := testutil.TempDirectory(t)
 
 	storage, err := filesystem.New(ctx, &filesystem.Options{
 		Path: repoDir,
@@ -95,7 +94,7 @@ func newUploadTestHarness(ctx context.Context) *uploadTestHarness {
 	sourceDir.AddFile("d2/d1/f1", []byte{1, 2, 3}, defaultPermissions)
 	sourceDir.AddFile("d2/d1/f2", []byte{1, 2, 3, 4}, defaultPermissions)
 
-	w, err := rep.NewWriter(ctx, "test")
+	w, err := rep.NewWriter(ctx, repo.WriteSessionOptions{Purpose: "test"})
 	if err != nil {
 		panic("writer creation error: " + err.Error())
 	}
@@ -113,7 +112,7 @@ func newUploadTestHarness(ctx context.Context) *uploadTestHarness {
 // nolint:gocyclo
 func TestUpload(t *testing.T) {
 	ctx := testlogging.Context(t)
-	th := newUploadTestHarness(ctx)
+	th := newUploadTestHarness(ctx, t)
 
 	defer th.cleanup()
 
@@ -205,7 +204,7 @@ func TestUpload(t *testing.T) {
 
 func TestUpload_TopLevelDirectoryReadFailure(t *testing.T) {
 	ctx := testlogging.Context(t)
-	th := newUploadTestHarness(ctx)
+	th := newUploadTestHarness(ctx, t)
 
 	defer th.cleanup()
 
@@ -225,31 +224,45 @@ func TestUpload_TopLevelDirectoryReadFailure(t *testing.T) {
 	}
 }
 
-func TestUpload_SubDirectoryReadFailure(t *testing.T) {
+func TestUpload_SubDirectoryReadFailureFailFast(t *testing.T) {
 	ctx := testlogging.Context(t)
-	th := newUploadTestHarness(ctx)
+	th := newUploadTestHarness(ctx, t)
 
 	defer th.cleanup()
 
 	th.sourceDir.Subdir("d1").FailReaddir(errTest)
+	th.sourceDir.Subdir("d2").Subdir("d1").FailReaddir(errTest)
 
 	u := NewUploader(th.repo)
+	u.ParallelUploads = 1
+	u.FailFast = true
 
 	policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
 
-	_, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
-	if err == nil {
-		t.Errorf("expected error")
+	man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
+
+	if man.IncompleteReason == "" {
+		t.Fatalf("snapshot not marked as incomplete")
+	}
+
+	// will have one error because we're canceling early.
+	verifyErrors(t, man, 1, 0,
+		[]*fs.EntryWithError{
+			{EntryPath: "d1", Error: errTest.Error()},
+		},
+	)
 }
 
 func objectIDsEqual(o1, o2 object.ID) bool {
 	return reflect.DeepEqual(o1, o2)
 }
 
-func TestUpload_SubDirectoryReadFailureIgnoreFailures(t *testing.T) {
+func TestUpload_SubDirectoryReadFailureIgnoredNoFailFast(t *testing.T) {
 	ctx := testlogging.Context(t)
-	th := newUploadTestHarness(ctx)
+	th := newUploadTestHarness(ctx, t)
 
 	defer th.cleanup()
 
@@ -272,24 +285,110 @@ func TestUpload_SubDirectoryReadFailureIgnoreFailures(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
+	// 0 failed, 2 ignored
+	verifyErrors(t, man, 0, 2,
+		[]*fs.EntryWithError{
+			{EntryPath: "d1", Error: errTest.Error()},
+			{EntryPath: "d2/d1", Error: errTest.Error()},
+		},
+	)
+}
+
+func TestUpload_SubDirectoryReadFailureNoFailFast(t *testing.T) {
+	ctx := testlogging.Context(t)
+	th := newUploadTestHarness(ctx, t)
+
+	defer th.cleanup()
+
+	th.sourceDir.Subdir("d1").FailReaddir(errTest)
+	th.sourceDir.Subdir("d2").Subdir("d1").FailReaddir(errTest)
+
+	u := NewUploader(th.repo)
+
+	policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
+
+	man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
 	// make sure we have 2 errors
-	if got, want := man.RootEntry.DirSummary.NumFailed, 2; got != want {
+	if got, want := man.RootEntry.DirSummary.FatalErrorCount, 2; got != want {
 		t.Errorf("invalid number of failed entries: %v, want %v", got, want)
 	}
 
-	wantErrors := []*fs.EntryWithError{
-		{EntryPath: "d1", Error: errTest.Error()},
-		{EntryPath: "d2/d1", Error: errTest.Error()},
+	verifyErrors(t, man,
+		2, 0,
+		[]*fs.EntryWithError{
+			{EntryPath: "d1", Error: errTest.Error()},
+			{EntryPath: "d2/d1", Error: errTest.Error()},
+		},
+	)
+}
+
+func verifyErrors(t *testing.T, man *snapshot.Manifest, wantFatalErrors, wantIgnoredErrors int, wantErrors []*fs.EntryWithError) {
+	t.Helper()
+
+	if got, want := man.RootEntry.DirSummary.FatalErrorCount, wantFatalErrors; got != want {
+		t.Fatalf("invalid number of fatal errors: %v, want %v", got, want)
+	}
+
+	if got, want := man.RootEntry.DirSummary.IgnoredErrorCount, wantIgnoredErrors; got != want {
+		t.Fatalf("invalid number of ignored errors: %v, want %v", got, want)
 	}
 
 	if diff := pretty.Compare(man.RootEntry.DirSummary.FailedEntries, wantErrors); diff != "" {
-		t.Errorf("unexpected directory tree, diff(-got,+want): %v\n", diff)
+		t.Errorf("unexpected errors, diff(-got,+want): %v\n", diff)
 	}
+}
+
+func TestUpload_SubDirectoryReadFailureSomeIgnoredNoFailFast(t *testing.T) {
+	ctx := testlogging.Context(t)
+	th := newUploadTestHarness(ctx, t)
+
+	defer th.cleanup()
+
+	th.sourceDir.Subdir("d1").FailReaddir(errTest)
+	th.sourceDir.Subdir("d2").Subdir("d1").FailReaddir(errTest)
+	th.sourceDir.AddDir("d3", defaultPermissions)
+	th.sourceDir.Subdir("d3").FailReaddir(errTest)
+
+	u := NewUploader(th.repo)
+
+	trueValue := true
+
+	// set up a policy tree where errors from d3 are ignored.
+	policyTree := policy.BuildTree(map[string]*policy.Policy{
+		"./d3": {
+			ErrorHandlingPolicy: policy.ErrorHandlingPolicy{
+				IgnoreFileErrors:      &trueValue,
+				IgnoreDirectoryErrors: &trueValue,
+			},
+		},
+	}, policy.DefaultPolicy)
+
+	if got, want := policyTree.Child("d3").EffectivePolicy().ErrorHandlingPolicy.IgnoreDirectoryErrorsOrDefault(false), true; got != want {
+		t.Fatalf("policy not effective")
+	}
+
+	man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	verifyErrors(t, man,
+		2, 1,
+		[]*fs.EntryWithError{
+			{EntryPath: "d1", Error: errTest.Error()},
+			{EntryPath: "d2/d1", Error: errTest.Error()},
+			{EntryPath: "d3", Error: errTest.Error()},
+		},
+	)
 }
 
 func TestUploadWithCheckpointing(t *testing.T) {
 	ctx := testlogging.Context(t)
-	th := newUploadTestHarness(ctx)
+	th := newUploadTestHarness(ctx, t)
 
 	defer th.cleanup()
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -72,6 +73,8 @@ type IndexBlobInfo struct {
 
 // WriteManager builds content-addressable storage with encryption, deduplication and packaging on top of BLOB store.
 type WriteManager struct {
+	revision int64 // changes on each local write
+
 	mu       *sync.RWMutex
 	cond     *sync.Cond
 	flushing bool
@@ -90,6 +93,8 @@ type WriteManager struct {
 	disableIndexFlushCount int
 	flushPackIndexesAfter  time.Time // time when those indexes should be flushed
 
+	onUpload func(int64)
+
 	*SharedManager
 }
 
@@ -101,6 +106,11 @@ type pendingPackInfo struct {
 	finalized        bool                // indicates whether currentPackData has local index appended to it
 }
 
+// Revision returns data revision number that changes on each write or refresh.
+func (bm *WriteManager) Revision() int64 {
+	return atomic.LoadInt64(&bm.revision) + bm.committedContents.revision()
+}
+
 // DeleteContent marks the given contentID as deleted.
 //
 // NOTE: To avoid race conditions only contents that cannot be possibly re-created
@@ -109,6 +119,8 @@ type pendingPackInfo struct {
 func (bm *WriteManager) DeleteContent(ctx context.Context, contentID ID) error {
 	bm.lock()
 	defer bm.unlock()
+
+	atomic.AddInt64(&bm.revision, 1)
 
 	formatLog(ctx).Debugf("delete-content %v", contentID)
 
@@ -207,6 +219,8 @@ func (bm *WriteManager) addToPackUnlocked(ctx context.Context, contentID ID, dat
 	prefix := packPrefixForContentID(contentID)
 
 	bm.lock()
+
+	atomic.AddInt64(&bm.revision, 1)
 
 	// do not start new uploads while flushing
 	for bm.flushing {
@@ -351,6 +365,8 @@ func (bm *WriteManager) flushPackIndexesLocked(ctx context.Context) error {
 
 		data := b.Bytes()
 		dataCopy := append([]byte(nil), data...)
+
+		bm.onUpload(int64(len(data)))
 
 		indexBlobMD, err := bm.indexBlobManager.writeIndexBlob(ctx, data, bm.currentSessionInfo.ID)
 		if err != nil {
@@ -781,6 +797,7 @@ func NewManager(ctx context.Context, st blob.Storage, f *FormattingOptions, cach
 type SessionOptions struct {
 	SessionUser string
 	SessionHost string
+	OnUpload    func(int64)
 }
 
 // NewWriteManager returns a session write manager.
@@ -788,6 +805,10 @@ func NewWriteManager(sm *SharedManager, options SessionOptions) *WriteManager {
 	mu := &sync.RWMutex{}
 
 	sm.addRef()
+
+	if options.OnUpload == nil {
+		options.OnUpload = func(int64) {}
+	}
 
 	return &WriteManager{
 		SharedManager: sm,
@@ -800,5 +821,6 @@ func NewWriteManager(sm *SharedManager, options SessionOptions) *WriteManager {
 		packIndexBuilder:      make(packIndexBuilder),
 		sessionUser:           options.SessionUser,
 		sessionHost:           options.SessionHost,
+		onUpload:              options.OnUpload,
 	}
 }

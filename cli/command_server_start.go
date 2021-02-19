@@ -18,7 +18,6 @@ import (
 	"github.com/pkg/errors"
 	prom "github.com/prometheus/client_golang/prometheus"
 	htpasswd "github.com/tg123/go-htpasswd"
-	"google.golang.org/grpc"
 
 	"github.com/kopia/kopia/internal/auth"
 	"github.com/kopia/kopia/internal/clock"
@@ -39,9 +38,10 @@ var (
 	serverStartMaxConcurrency  = serverStartCommand.Flag("max-concurrency", "Maximum number of server goroutines").Default("0").Int()
 
 	serverStartRandomPassword = serverStartCommand.Flag("random-password", "Generate random password and print to stderr").Hidden().Bool()
-	serverStartAutoShutdown   = serverStartCommand.Flag("auto-shutdown", "Auto shutdown the server if API requests not received within given time").Hidden().Duration()
 	serverStartHtpasswdFile   = serverStartCommand.Flag("htpasswd-file", "Path to htpasswd file that contains allowed user@hostname entries").Hidden().ExistingFile()
 	serverStartAllowRepoUsers = serverStartCommand.Flag("allow-repository-users", "Allow users defined in the repository to connect").Bool()
+
+	serverStartShutdownWhenStdinClosed = serverStartCommand.Flag("shutdown-on-stdin", "Shut down the server when stdin handle has closed.").Hidden().Bool()
 )
 
 func init() {
@@ -108,34 +108,21 @@ func runServer(ctx context.Context, rep repo.Repository) error {
 
 	var handler http.Handler = mux
 
-	if as := *serverStartAutoShutdown; as > 0 {
-		log(ctx).Infof("starting a watchdog to stop the server if there's no activity for %v", as)
-		handler = startServerWatchdog(handler, as, func() {
-			if serr := httpServer.Shutdown(ctx); err != nil {
-				log(ctx).Warningf("unable to stop the server: %v", serr)
-			}
-		})
+	if *serverStartGRPC {
+		handler = srv.GRPCRouterHandler(handler)
 	}
 
-	if *serverStartGRPC {
-		grpcServer := grpc.NewServer(
-			grpc.MaxSendMsgSize(repo.MaxGRPCMessageSize),
-			grpc.MaxRecvMsgSize(repo.MaxGRPCMessageSize),
-		)
-		srv.RegisterGRPCHandlers(grpcServer)
+	httpServer.Handler = handler
 
-		log(ctx).Debugf("starting GRPC/HTTP server...")
+	if *serverStartShutdownWhenStdinClosed {
+		log(ctx).Infof("Server will close when stdin is closed...")
 
-		httpServer.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.ProtoMajor == 2 && strings.Contains(r.Header.Get("Content-Type"), "application/grpc") {
-				grpcServer.ServeHTTP(w, r)
-			} else {
-				handler.ServeHTTP(w, r)
-			}
-		})
-	} else {
-		log(ctx).Debugf("starting HTTP-only server...")
-		httpServer.Handler = handler
+		go func() {
+			// consume all stdin and close the server when it closes
+			ioutil.ReadAll(os.Stdin) //nolint:errcheck
+			log(ctx).Infof("Shutting down server...")
+			httpServer.Shutdown(ctx) //nolint:errcheck
+		}()
 	}
 
 	err = startServerWithOptionalTLS(ctx, httpServer)
@@ -175,6 +162,7 @@ func stripProtocol(addr string) string {
 func isKnownUIRoute(path string) bool {
 	return strings.HasPrefix(path, "/snapshots") ||
 		strings.HasPrefix(path, "/policies") ||
+		strings.HasPrefix(path, "/tasks") ||
 		strings.HasPrefix(path, "/repo")
 }
 

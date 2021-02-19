@@ -2,8 +2,6 @@ package content
 
 import (
 	"bytes"
-	"io/ioutil"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -17,6 +15,7 @@ import (
 	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/testlogging"
+	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo/blob"
 )
 
@@ -53,7 +52,7 @@ func TestCacheExpiration(t *testing.T) {
 
 	underlyingStorage := newUnderlyingStorageForContentCacheTesting(t)
 
-	cb, err := newContentCacheBase(testlogging.Context(t), cacheStorage, 10000, 0, 500*time.Millisecond)
+	cb, err := newContentCacheBase(testlogging.Context(t), "test cache", cacheStorage, 10000, 0, 500*time.Millisecond)
 	if err != nil {
 		t.Fatalf("unable to create base cache: %v", err)
 	}
@@ -63,9 +62,10 @@ func TestCacheExpiration(t *testing.T) {
 		cacheBase: cb,
 	}
 
-	defer cache.close()
-
 	ctx := testlogging.Context(t)
+
+	defer cache.close(ctx)
+
 	_, err = cache.getContent(ctx, "00000a", "content-4k", 0, -1) // 4k
 	assertNoError(t, err)
 	_, err = cache.getContent(ctx, "00000b", "content-4k", 0, -1) // 4k
@@ -106,12 +106,7 @@ func TestCacheExpiration(t *testing.T) {
 func TestDiskContentCache(t *testing.T) {
 	ctx := testlogging.Context(t)
 
-	tmpDir, err := ioutil.TempDir("", "kopia")
-	if err != nil {
-		t.Fatalf("error getting temp dir: %v", err)
-	}
-
-	defer os.RemoveAll(tmpDir)
+	tmpDir := testutil.TempDirectory(t)
 
 	const maxBytes = 10000
 
@@ -125,7 +120,7 @@ func TestDiskContentCache(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	defer cache.close()
+	defer cache.close(ctx)
 
 	verifyContentCache(t, cache)
 }
@@ -217,12 +212,14 @@ func TestCacheFailureToOpen(t *testing.T) {
 	}
 
 	// ListBlobs fails only once, next time it succeeds.
-	cache, err := newContentCacheForData(testlogging.Context(t), underlyingStorage, faultyCache, 10000, nil)
+	ctx := testlogging.Context(t)
+
+	cache, err := newContentCacheForData(ctx, underlyingStorage, faultyCache, 10000, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	defer cache.close()
+	defer cache.close(ctx)
 }
 
 func TestCacheFailureToWrite(t *testing.T) {
@@ -240,9 +237,10 @@ func TestCacheFailureToWrite(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	defer cache.close()
-
 	ctx := testlogging.Context(t)
+
+	defer cache.close(ctx)
+
 	faultyCache.Faults = map[string][]*blobtesting.Fault{
 		"PutBlob": {
 			{Err: someError},
@@ -283,9 +281,10 @@ func TestCacheFailureToRead(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	defer cache.close()
-
 	ctx := testlogging.Context(t)
+
+	defer cache.close(ctx)
+
 	faultyCache.Faults = map[string][]*blobtesting.Fault{
 		"GetBlob": {
 			{Err: someError, Repeat: 100},

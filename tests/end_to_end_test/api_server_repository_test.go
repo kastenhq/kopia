@@ -84,7 +84,6 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 			"--tls-generate-cert",
 			"--tls-key-file", tlsKey,
 			"--tls-cert-file", tlsCert,
-			"--auto-shutdown=60s",
 		}, serverStartArgs...)...)
 	t.Logf("detected server parameters %#v", sp)
 
@@ -116,7 +115,7 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 
 	// open new write session in repository client
 
-	writeSess, err := rep.NewWriter(ctx, "some writer")
+	writeSess, err := rep.NewWriter(ctx, repo.WriteSessionOptions{Purpose: "some writer"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +135,6 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 			"--address=" + sp.baseURL,
 			"--tls-key-file", tlsKey,
 			"--tls-cert-file", tlsCert,
-			"--auto-shutdown=60s",
 		}, serverStartArgs...)...)
 	t.Logf("detected server parameters %#v", sp)
 

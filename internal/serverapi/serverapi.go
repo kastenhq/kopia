@@ -5,12 +5,14 @@ import (
 	"time"
 
 	"github.com/kopia/kopia/fs"
+	"github.com/kopia/kopia/internal/uitask"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
+	"github.com/kopia/kopia/snapshot/restore"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
 )
 
@@ -48,6 +50,7 @@ type SourceStatus struct {
 	LastSnapshot     *snapshot.Manifest         `json:"lastSnapshot,omitempty"`
 	NextSnapshotTime *time.Time                 `json:"nextSnapshotTime,omitempty"`
 	UploadCounters   *snapshotfs.UploadCounters `json:"upload,omitempty"`
+	CurrentTask      string                     `json:"currentTask,omitempty"`
 }
 
 // PolicyListEntry describes single policy.
@@ -187,4 +190,27 @@ type MountedSnapshots struct {
 type CurrentUserResponse struct {
 	Username string `json:"username"`
 	Hostname string `json:"hostname"`
+}
+
+// TaskListResponse contains a list of tasks.
+type TaskListResponse struct {
+	Tasks []uitask.Info `json:"tasks"`
+}
+
+// TaskLogResponse contains a task log.
+type TaskLogResponse struct {
+	Logs []uitask.LogEntry `json:"logs"`
+}
+
+// RestoreRequest contains request to restore an object (file or directory) to a given destination.
+type RestoreRequest struct {
+	Root string `json:"root"`
+
+	Filesystem *restore.FilesystemOutput `json:"fsOutput"`
+
+	ZipFile         string `json:"zipFile"`
+	UncompressedZip bool   `json:"uncompressedZip"`
+
+	TarFile string          `json:"tarFile"`
+	Options restore.Options `json:"options"`
 }

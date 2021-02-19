@@ -9,11 +9,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/natefinch/atomic"
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/fs/localfs"
+	"github.com/kopia/kopia/internal/atomicfile"
 )
 
 const modBits = os.ModePerm | os.ModeSetgid | os.ModeSetuid | os.ModeSticky
@@ -23,32 +23,32 @@ const maxTimeDeltaToConsiderFileTheSame = 2 * time.Second
 // FilesystemOutput contains the options for outputting a file system tree.
 type FilesystemOutput struct {
 	// TargetPath for restore.
-	TargetPath string
+	TargetPath string `json:"targetPath"`
 
 	// If a directory already exists, overwrite the directory.
-	OverwriteDirectories bool
+	OverwriteDirectories bool `json:"overwriteDirectories"`
 
 	// Indicate whether or not to overwrite existing files. When set to false,
 	// the copier does not modify already existing files and returns an error
 	// instead.
-	OverwriteFiles bool
+	OverwriteFiles bool `json:"overwriteFiles"`
 
 	// If a symlink already exists, remove it and create a new one. When set to
 	// false, the copier does not modify existing symlinks and will return an
 	// error instead.
-	OverwriteSymlinks bool
+	OverwriteSymlinks bool `json:"overwriteSymlinks"`
 
 	// IgnorePermissionErrors causes restore to ignore errors due to invalid permissions.
-	IgnorePermissionErrors bool
+	IgnorePermissionErrors bool `json:"ignorePermissionErrors"`
 
 	// SkipOwners when set to true causes restore to skip restoring owner information.
-	SkipOwners bool
+	SkipOwners bool `json:"skipOwners"`
 
 	// SkipPermissions when set to true causes restore to skip restoring permission information.
-	SkipPermissions bool
+	SkipPermissions bool `json:"skipPermissions"`
 
 	// SkipTimes when set to true causes restore to skip restoring modification times.
-	SkipTimes bool
+	SkipTimes bool `json:"skipTimes"`
 }
 
 // Parallelizable implements restore.Output interface.
@@ -308,7 +308,7 @@ func (o *FilesystemOutput) copyFileContent(ctx context.Context, targetPath strin
 
 	log(ctx).Debugf("copying file contents to: %v", targetPath)
 
-	return atomic.WriteFile(targetPath, r)
+	return atomicfile.Write(targetPath, r)
 }
 
 func isEmptyDirectory(name string) (bool, error) {

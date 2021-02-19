@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/url"
@@ -46,7 +47,7 @@ type grpcRepositoryClient struct {
 	innerSessionMutex sync.Mutex
 	innerSession      *grpcInnerSession
 
-	purpose            string
+	opt                WriteSessionOptions
 	isReadOnly         bool
 	transparentRetries bool
 
@@ -383,8 +384,8 @@ func (r *grpcInnerSession) Flush(ctx context.Context) error {
 	return errNoSessionResponse()
 }
 
-func (r *grpcRepositoryClient) NewWriter(ctx context.Context, purpose string) (RepositoryWriter, error) {
-	w, err := newGRPCAPIRepositoryForConnection(ctx, r.conn, r.connRefCount, r.cliOpts, purpose, false)
+func (r *grpcRepositoryClient) NewWriter(ctx context.Context, opt WriteSessionOptions) (RepositoryWriter, error) {
+	w, err := newGRPCAPIRepositoryForConnection(ctx, r.conn, r.connRefCount, r.cliOpts, opt, false)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +426,7 @@ func (r *grpcRepositoryClient) retry(ctx context.Context, attempt sessionAttempt
 func (r *grpcRepositoryClient) inSessionWithoutRetry(ctx context.Context, attempt sessionAttemptFunc) (interface{}, error) {
 	sess, err := r.getOrEstablishInnerSession(ctx)
 	if err != nil {
-		return nil, errors.Wrapf(err, "unable to establish session for purpose=%v", r.purpose)
+		return nil, errors.Wrapf(err, "unable to establish session for purpose=%v", r.opt.Purpose)
 	}
 
 	return attempt(ctx, sess)
@@ -525,6 +526,22 @@ func (r *grpcInnerSession) GetContent(ctx context.Context, contentID content.ID)
 }
 
 func (r *grpcRepositoryClient) WriteContent(ctx context.Context, data []byte, prefix content.ID) (content.ID, error) {
+	if err := content.ValidatePrefix(prefix); err != nil {
+		return "", errors.Wrap(err, "invalid prefix")
+	}
+
+	var hashOutput [128]byte
+
+	contentID := prefix + content.ID(hex.EncodeToString(r.h(hashOutput[:0], data)))
+
+	// avoid uploading the content body if it already exists.
+	if _, err := r.ContentInfo(ctx, contentID); err == nil {
+		// content already exists
+		return contentID, nil
+	}
+
+	r.opt.OnUpload(int64(len(data)))
+
 	v, err := r.inSessionWithoutRetry(ctx, func(ctx context.Context, sess *grpcInnerSession) (interface{}, error) {
 		return sess.WriteContent(ctx, data, prefix)
 	})
@@ -636,7 +653,7 @@ func OpenGRPCAPIRepository(ctx context.Context, si *APIServerInfo, cliOpts Clien
 		return nil, errors.Wrap(err, "dial error")
 	}
 
-	rep, err := newGRPCAPIRepositoryForConnection(ctx, conn, new(int32), cliOpts, "", true)
+	rep, err := newGRPCAPIRepositoryForConnection(ctx, conn, new(int32), cliOpts, WriteSessionOptions{}, true)
 	if err != nil {
 		return nil, err
 	}
@@ -651,7 +668,7 @@ func (r *grpcRepositoryClient) getOrEstablishInnerSession(ctx context.Context) (
 	if r.innerSession == nil {
 		cli := apipb.NewKopiaRepositoryClient(r.conn)
 
-		log(ctx).Debugf("establishing new GRPC streaming session (purpose=%v)", r.purpose)
+		log(ctx).Debugf("establishing new GRPC streaming session (purpose=%v)", r.opt.Purpose)
 
 		retryPolicy := retry.Always
 		if r.transparentRetries && r.innerSessionAttemptCount == 0 {
@@ -676,7 +693,7 @@ func (r *grpcRepositoryClient) getOrEstablishInnerSession(ctx context.Context) (
 
 			go newSess.readLoop(ctx)
 
-			newSess.repoParams, err = newSess.initializeSession(ctx, r.purpose, r.isReadOnly)
+			newSess.repoParams, err = newSess.initializeSession(ctx, r.opt.Purpose, r.isReadOnly)
 			if err != nil {
 				return nil, errors.Wrap(err, "unable to initialize session")
 			}
@@ -704,13 +721,17 @@ func (r *grpcRepositoryClient) killInnerSession() {
 }
 
 // newGRPCAPIRepositoryForConnection opens GRPC-based repository connection.
-func newGRPCAPIRepositoryForConnection(ctx context.Context, conn *grpc.ClientConn, connRefCount *int32, cliOpts ClientOptions, purpose string, transparentRetries bool) (*grpcRepositoryClient, error) {
+func newGRPCAPIRepositoryForConnection(ctx context.Context, conn *grpc.ClientConn, connRefCount *int32, cliOpts ClientOptions, opt WriteSessionOptions, transparentRetries bool) (*grpcRepositoryClient, error) {
+	if opt.OnUpload == nil {
+		opt.OnUpload = func(i int64) {}
+	}
+
 	rr := &grpcRepositoryClient{
 		connRefCount:       connRefCount,
 		conn:               conn,
 		cliOpts:            cliOpts,
 		transparentRetries: transparentRetries,
-		purpose:            purpose,
+		opt:                opt,
 		isReadOnly:         cliOpts.ReadOnly,
 	}
 

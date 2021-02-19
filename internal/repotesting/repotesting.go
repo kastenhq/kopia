@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kopia/kopia/internal/testlogging"
+	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/filesystem"
@@ -39,8 +40,8 @@ func (e *Environment) Setup(t *testing.T, opts ...Options) *Environment {
 	t.Helper()
 
 	ctx := testlogging.Context(t)
-	e.configDir = t.TempDir()
-	e.storageDir = t.TempDir()
+	e.configDir = testutil.TempDirectory(t)
+	e.storageDir = testutil.TempDirectory(t)
 	openOpt := &repo.Options{}
 
 	opt := &repo.NewRepositoryOptions{
@@ -75,20 +76,20 @@ func (e *Environment) Setup(t *testing.T, opts ...Options) *Environment {
 		t.Fatalf("err: %v", err)
 	}
 
-	if err = repo.Connect(ctx, e.configFile(), st, masterPassword, nil); err != nil {
+	if err = repo.Connect(ctx, e.ConfigFile(), st, masterPassword, nil); err != nil {
 		t.Fatalf("can't connect: %v", err)
 	}
 
 	e.connected = true
 
-	rep, err := repo.Open(ctx, e.configFile(), masterPassword, openOpt)
+	rep, err := repo.Open(ctx, e.ConfigFile(), masterPassword, openOpt)
 	if err != nil {
 		t.Fatalf("can't open: %v", err)
 	}
 
 	e.Repository = rep
 
-	e.RepositoryWriter, err = rep.(repo.DirectRepository).NewDirectWriter(ctx, "test")
+	e.RepositoryWriter, err = rep.(repo.DirectRepository).NewDirectWriter(ctx, repo.WriteSessionOptions{Purpose: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +106,7 @@ func (e *Environment) Close(ctx context.Context, t *testing.T) {
 	}
 
 	if e.connected {
-		if err := repo.Disconnect(ctx, e.configFile()); err != nil {
+		if err := repo.Disconnect(ctx, e.ConfigFile()); err != nil {
 			t.Errorf("error disconnecting: %v", err)
 		}
 	}
@@ -116,7 +117,8 @@ func (e *Environment) Close(ctx context.Context, t *testing.T) {
 	}
 }
 
-func (e *Environment) configFile() string {
+// ConfigFile returns the name of the config file.
+func (e *Environment) ConfigFile() string {
 	return filepath.Join(e.configDir, "kopia.config")
 }
 
@@ -131,12 +133,12 @@ func (e *Environment) MustReopen(t *testing.T, openOpts ...func(*repo.Options)) 
 		t.Fatalf("close error: %v", err)
 	}
 
-	rep, err := repo.Open(ctx, e.configFile(), masterPassword, repoOptions(openOpts))
+	rep, err := repo.Open(ctx, e.ConfigFile(), masterPassword, repoOptions(openOpts))
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 
-	e.RepositoryWriter, err = rep.(repo.DirectRepository).NewDirectWriter(ctx, "test")
+	e.RepositoryWriter, err = rep.(repo.DirectRepository).NewDirectWriter(ctx, repo.WriteSessionOptions{Purpose: "test"})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -148,7 +150,7 @@ func (e *Environment) MustOpenAnother(t *testing.T) repo.RepositoryWriter {
 
 	ctx := testlogging.Context(t)
 
-	rep2, err := repo.Open(ctx, e.configFile(), masterPassword, &repo.Options{})
+	rep2, err := repo.Open(ctx, e.ConfigFile(), masterPassword, &repo.Options{})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -157,7 +159,7 @@ func (e *Environment) MustOpenAnother(t *testing.T) repo.RepositoryWriter {
 		rep2.Close(ctx)
 	})
 
-	w, err := rep2.NewWriter(ctx, "test")
+	w, err := rep2.NewWriter(ctx, repo.WriteSessionOptions{Purpose: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,10 +181,10 @@ func (e *Environment) MustConnectOpenAnother(t *testing.T, openOpts ...func(*rep
 		t.Fatal("err:", err)
 	}
 
-	config := filepath.Join(t.TempDir(), "kopia.config")
+	config := filepath.Join(testutil.TempDirectory(t), "kopia.config")
 	connOpts := &repo.ConnectOptions{
 		CachingOptions: content.CachingOptions{
-			CacheDirectory: t.TempDir(),
+			CacheDirectory: testutil.TempDirectory(t),
 		},
 	}
 
@@ -190,7 +192,7 @@ func (e *Environment) MustConnectOpenAnother(t *testing.T, openOpts ...func(*rep
 		t.Fatal("can't connect:", err)
 	}
 
-	rep, err := repo.Open(ctx, e.configFile(), masterPassword, repoOptions(openOpts))
+	rep, err := repo.Open(ctx, e.ConfigFile(), masterPassword, repoOptions(openOpts))
 	if err != nil {
 		t.Fatal("can't open:", err)
 	}

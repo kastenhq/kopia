@@ -3,6 +3,8 @@ package snapshotfs
 import (
 	"sync"
 	"sync/atomic"
+
+	"github.com/kopia/kopia/internal/uitask"
 )
 
 // UploadProgress is invoked by by uploader to report status of file and directory uploads.
@@ -19,14 +21,20 @@ type UploadProgress interface {
 	// HashingFile is emitted at the beginning of hashing of a given file.
 	HashingFile(fname string)
 
+	// ExcludedFile is emitted when a file is excluded.
+	ExcludedFile(fname string, size int64)
+
+	// ExcludedDir is emitted when a directory is excluded.
+	ExcludedDir(dirname string)
+
 	// FinishedHashingFile is emitted at the end of hashing of a given file.
 	FinishedHashingFile(fname string, numBytes int64)
 
 	// HashedBytes is emitted while hashing any blocks of bytes.
 	HashedBytes(numBytes int64)
 
-	// IgnoredError is emitted when an error is encountered and ignored
-	IgnoredError(path string, err error)
+	// Error is emitted when an error is encountered.
+	Error(path string, err error, isIgnored bool)
 
 	// UploadedBytes is emitted whenever bytes are written to the blob storage.
 	UploadedBytes(numBytes int64)
@@ -56,6 +64,12 @@ func (p *NullUploadProgress) UploadFinished() {}
 // HashedBytes implements UploadProgress.
 func (p *NullUploadProgress) HashedBytes(numBytes int64) {}
 
+// ExcludedFile implements UploadProgress.
+func (p *NullUploadProgress) ExcludedFile(fname string, numBytes int64) {}
+
+// ExcludedDir implements UploadProgress.
+func (p *NullUploadProgress) ExcludedDir(dirname string) {}
+
 // CachedFile implements UploadProgress.
 func (p *NullUploadProgress) CachedFile(fname string, numBytes int64) {}
 
@@ -74,23 +88,28 @@ func (p *NullUploadProgress) StartedDirectory(dirname string) {}
 // FinishedDirectory implements UploadProgress.
 func (p *NullUploadProgress) FinishedDirectory(dirname string) {}
 
-// IgnoredError implements UploadProgress.
-func (p *NullUploadProgress) IgnoredError(path string, err error) {}
+// Error implements UploadProgress.
+func (p *NullUploadProgress) Error(path string, err error, isIgnored bool) {}
 
 var _ UploadProgress = (*NullUploadProgress)(nil)
 
 // UploadCounters represents a snapshot of upload counters.
 type UploadCounters struct {
-	TotalCachedBytes int64 `json:"cachedBytes"`
-	TotalHashedBytes int64 `json:"hashedBytes"`
+	TotalCachedBytes   int64 `json:"cachedBytes"`
+	TotalHashedBytes   int64 `json:"hashedBytes"`
+	TotalUploadedBytes int64 `json:"uploadedBytes"`
 
 	EstimatedBytes int64 `json:"estimatedBytes"`
 
 	TotalCachedFiles int32 `json:"cachedFiles"`
 	TotalHashedFiles int32 `json:"hashedFiles"`
 
-	TotalIgnoredErrors int32 `json:"ignoredErrors"`
-	EstimatedFiles     int32 `json:"estimatedFiles"`
+	TotalExcludedFiles int32 `json:"excludedFiles"`
+	TotalExcludedDirs  int32 `json:"excludedDirs"`
+
+	FatalErrorCount   int32 `json:"errors"`
+	IgnoredErrorCount int32 `json:"ignoredErrors"`
+	EstimatedFiles    int32 `json:"estimatedFiles"`
 
 	CurrentDirectory string `json:"directory"`
 
@@ -111,6 +130,11 @@ type CountingUploadProgress struct {
 func (p *CountingUploadProgress) UploadStarted() {
 	// reset counters to all-zero values.
 	p.counters = UploadCounters{}
+}
+
+// UploadedBytes implements UploadProgress.
+func (p *CountingUploadProgress) UploadedBytes(numBytes int64) {
+	atomic.AddInt64(&p.counters.TotalUploadedBytes, numBytes)
 }
 
 // EstimatedDataSize implements UploadProgress.
@@ -135,12 +159,27 @@ func (p *CountingUploadProgress) FinishedHashingFile(fname string, numBytes int6
 	atomic.AddInt32(&p.counters.TotalHashedFiles, 1)
 }
 
-// IgnoredError implements UploadProgress.
-func (p *CountingUploadProgress) IgnoredError(path string, err error) {
+// ExcludedDir implements UploadProgress.
+func (p *CountingUploadProgress) ExcludedDir(dirname string) {
+	atomic.AddInt32(&p.counters.TotalExcludedDirs, 1)
+}
+
+// ExcludedFile implements UploadProgress.
+func (p *CountingUploadProgress) ExcludedFile(fname string, numBytes int64) {
+	atomic.AddInt32(&p.counters.TotalExcludedFiles, 1)
+}
+
+// Error implements UploadProgress.
+func (p *CountingUploadProgress) Error(path string, err error, isIgnored bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.counters.TotalIgnoredErrors++
+	if isIgnored {
+		p.counters.IgnoredErrorCount++
+	} else {
+		p.counters.FatalErrorCount++
+	}
+
 	p.counters.LastErrorPath = path
 	p.counters.LastError = err.Error()
 }
@@ -169,6 +208,40 @@ func (p *CountingUploadProgress) Snapshot() UploadCounters {
 		LastErrorPath:    p.counters.LastErrorPath,
 		LastError:        p.counters.LastError,
 	}
+}
+
+// UITaskCounters returns UI task counters.
+func (p *CountingUploadProgress) UITaskCounters(final bool) map[string]uitask.CounterValue {
+	cachedFiles := int64(atomic.LoadInt32(&p.counters.TotalCachedFiles))
+	hashedFiles := int64(atomic.LoadInt32(&p.counters.TotalHashedFiles))
+
+	cachedBytes := atomic.LoadInt64(&p.counters.TotalCachedBytes)
+	hashedBytes := atomic.LoadInt64(&p.counters.TotalHashedBytes)
+
+	m := map[string]uitask.CounterValue{
+		"Cached Files":    uitask.SimpleCounter(cachedFiles),
+		"Hashed Files":    uitask.SimpleCounter(hashedFiles),
+		"Processed Files": uitask.NoticeBytesCounter(hashedFiles + cachedFiles),
+
+		"Cached Bytes":    uitask.BytesCounter(cachedBytes),
+		"Hashed Bytes":    uitask.BytesCounter(hashedBytes),
+		"Processed Bytes": uitask.NoticeBytesCounter(hashedBytes + cachedBytes),
+
+		// bytes actually ploaded to the server (non-deduplicated)
+		"Uploaded Bytes": uitask.NoticeBytesCounter(atomic.LoadInt64(&p.counters.TotalUploadedBytes)),
+
+		"Excluded Files":       uitask.SimpleCounter(int64(atomic.LoadInt32(&p.counters.TotalExcludedFiles))),
+		"Excluded Directories": uitask.SimpleCounter(int64(atomic.LoadInt32(&p.counters.TotalExcludedDirs))),
+
+		"Errors": uitask.ErrorCounter(int64(atomic.LoadInt32(&p.counters.IgnoredErrorCount))),
+	}
+
+	if !final {
+		m["Estimated Files"] = uitask.NoticeCounter(int64(atomic.LoadInt32(&p.counters.EstimatedFiles)))
+		m["Estimated Bytes"] = uitask.NoticeBytesCounter(atomic.LoadInt64(&p.counters.EstimatedBytes))
+	}
+
+	return m
 }
 
 var _ UploadProgress = (*CountingUploadProgress)(nil)

@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/natefinch/atomic"
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/atomicfile"
 	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/hmac"
 	"github.com/kopia/kopia/repo/blob"
@@ -26,7 +26,7 @@ type listCache struct {
 
 func (c *listCache) listBlobs(ctx context.Context, prefix blob.ID) ([]blob.Metadata, error) {
 	if c.cacheFilePrefix != "" {
-		ci, err := c.readBlobsFromCache(ctx, prefix)
+		ci, err := c.readBlobsFromCache(prefix)
 		if err == nil {
 			expirationTime := ci.Timestamp.Add(c.listCacheDuration)
 			if clock.Now().Before(expirationTime) {
@@ -60,7 +60,7 @@ func (c *listCache) saveListToCache(ctx context.Context, prefix blob.ID, ci *cac
 
 	if data, err := json.Marshal(ci); err == nil {
 		b := hmac.Append(data, c.hmacSecret)
-		if err := atomic.WriteFile(c.cacheFilePrefix+string(prefix), bytes.NewReader(b)); err != nil {
+		if err := atomicfile.Write(c.cacheFilePrefix+string(prefix), bytes.NewReader(b)); err != nil {
 			log(ctx).Warningf("unable to write list cache: %v", err)
 		}
 	}
@@ -72,11 +72,7 @@ func (c *listCache) deleteListCache(prefix blob.ID) {
 	}
 }
 
-func (c *listCache) readBlobsFromCache(ctx context.Context, prefix blob.ID) (*cachedList, error) {
-	if !shouldUseListCache(ctx) {
-		return nil, blob.ErrBlobNotFound
-	}
-
+func (c *listCache) readBlobsFromCache(prefix blob.ID) (*cachedList, error) {
 	ci := &cachedList{}
 
 	fname := c.cacheFilePrefix + string(prefix)
@@ -111,13 +107,15 @@ func newListCache(st blob.Storage, caching *CachingOptions) (*listCache, error) 
 	var listCacheFilePrefix string
 
 	if caching.CacheDirectory != "" {
-		listCacheFilePrefix = filepath.Join(caching.CacheDirectory, "blob-list-")
+		blobListCacheDir := filepath.Join(caching.CacheDirectory, "blob-list")
 
-		if _, err := os.Stat(caching.CacheDirectory); os.IsNotExist(err) {
-			if err := os.MkdirAll(caching.CacheDirectory, 0o700); err != nil {
+		if _, err := os.Stat(blobListCacheDir); os.IsNotExist(err) {
+			if err := os.MkdirAll(blobListCacheDir, 0o700); err != nil {
 				return nil, errors.Wrap(err, "error creating list cache directory")
 			}
 		}
+
+		listCacheFilePrefix = filepath.Join(blobListCacheDir, "list-")
 	}
 
 	c := &listCache{

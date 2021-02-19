@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/tests/testenv"
 )
@@ -35,7 +36,7 @@ func TestRestoreFail(t *testing.T) {
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 
-	scratchDir := t.TempDir()
+	scratchDir := testutil.TempDirectory(t)
 	sourceDir := filepath.Join(scratchDir, "source")
 	targetDir := filepath.Join(scratchDir, "target")
 
@@ -48,7 +49,7 @@ func TestRestoreFail(t *testing.T) {
 	beforeBlobList := e.RunAndExpectSuccess(t, "blob", "list")
 
 	_, errOut := e.RunAndExpectSuccessWithErrOut(t, "snapshot", "create", sourceDir)
-	snapID := parseSnapID(t, errOut)
+	parsed := parseSnapshotResult(t, errOut)
 
 	afterBlobList := e.RunAndExpectSuccess(t, "blob", "list")
 
@@ -63,10 +64,10 @@ func TestRestoreFail(t *testing.T) {
 	e.RunAndExpectSuccess(t, "blob", "delete", blobIDToDelete)
 
 	// Expect a subsequent restore to fail
-	e.RunAndExpectFailure(t, "snapshot", "restore", snapID, targetDir)
+	e.RunAndExpectFailure(t, "snapshot", "restore", parsed.manifestID, targetDir)
 
 	// --ignore-errors allows the snapshot to succeed despite missing blob.
-	e.RunAndExpectSuccess(t, "snapshot", "restore", "--ignore-errors", snapID, targetDir)
+	e.RunAndExpectSuccess(t, "snapshot", "restore", "--ignore-errors", parsed.manifestID, targetDir)
 }
 
 func findPackBlob(blobIDs []string) string {
