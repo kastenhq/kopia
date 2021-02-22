@@ -39,7 +39,7 @@ type pathLock struct {
 	lockedPaths map[string]chan struct{}
 }
 
-// NewLocker instantiates a new PathLock and returns its pointer.
+// NewLocker returns a Locker.
 func NewLocker() Locker {
 	return &pathLock{
 		lockedPaths: make(map[string]chan struct{}),
