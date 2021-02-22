@@ -17,19 +17,24 @@ func TestPathLockBasic(t *testing.T) {
 		path2 string
 	}{
 		{
-			name:  "same path",
+			name:  "Blocks a Lock call for the same path /a/b/c",
 			path1: "/a/b/c",
 			path2: "/a/b/c",
 		},
 		{
-			name:  "path2 is a descendent of path1",
+			name:  "Blocks a Lock call for path /a/b/c/d",
 			path1: "/a/b/c",
-			path2: "/a/b/c/d/e",
+			path2: "/a/b/c/d",
 		},
 		{
-			name:  "path1 is a descendent of path2",
-			path1: "/a/b/c/d/e",
-			path2: "/a/b/c",
+			name:  "Blocks a Lock call for path /a/b",
+			path1: "/a/b/c",
+			path2: "/a/b",
+		},
+		{
+			name:  "Blocks a Lock call for path /a",
+			path1: "/a/b/c",
+			path2: "/a",
 		},
 	} {
 		t.Log(ti, tc.name)
@@ -70,19 +75,14 @@ func TestPathLockWithoutBlock(t *testing.T) {
 		path2 string
 	}{
 		{
-			name:  "same parent",
+			name:  "Allows a Lock call for path /a/b/x",
 			path1: "/a/b/c",
-			path2: "/a/b/d",
+			path2: "/a/b/x",
 		},
 		{
-			name:  "same grandparent",
-			path1: "/a/b/c/x",
-			path2: "/a/b/d/y",
-		},
-		{
-			name:  "differing depths",
-			path1: "/a/b/c/d/e",
-			path2: "/a/b/c/x",
+			name:  "Allows a Lock call for path /a/x",
+			path1: "/a/b/c",
+			path2: "/a/x",
 		},
 	} {
 		t.Log(ti, tc.name)
