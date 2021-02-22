@@ -25,4 +25,5 @@ type Snapshotter interface {
 type CreateSnapshotStats struct {
 	SnapStartTime time.Time
 	SnapEndTime   time.Time
+	Raw           []byte
 }
