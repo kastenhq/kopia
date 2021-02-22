@@ -9,7 +9,7 @@ import (
 )
 
 func TestPathLockBasic(t *testing.T) {
-	pl := NewPathLock()
+	pl := NewLocker()
 
 	for ti, tc := range []struct {
 		name  string
@@ -33,16 +33,16 @@ func TestPathLockBasic(t *testing.T) {
 		},
 	} {
 		t.Log(ti, tc.name)
-		pl.Lock(tc.path1)
+		lock1 := pl.Lock(tc.path1)
 
 		triggerCh := make(chan struct{})
 		trigger := false
 
 		go func() {
-			pl.Lock(tc.path2)
+			lock2 := pl.Lock(tc.path2)
 			trigger = true
 			triggerCh <- struct{}{}
-			pl.Unlock(tc.path2)
+			lock2.Unlock()
 		}()
 
 		time.Sleep(10 * time.Millisecond)
@@ -51,7 +51,7 @@ func TestPathLockBasic(t *testing.T) {
 			t.Fatalf("Lock unsuccessful")
 		}
 
-		pl.Unlock(tc.path1)
+		lock1.Unlock()
 
 		<-triggerCh
 
@@ -62,7 +62,7 @@ func TestPathLockBasic(t *testing.T) {
 }
 
 func TestPathLockWithoutBlock(t *testing.T) {
-	pl := NewPathLock()
+	pl := NewLocker()
 
 	for ti, tc := range []struct {
 		name  string
@@ -93,7 +93,7 @@ func TestPathLockWithoutBlock(t *testing.T) {
 		trigger := false
 
 		go func() {
-			pl.Lock(tc.path2)
+			lock2 := pl.Lock(tc.path2)
 
 			trigger = true
 
@@ -103,20 +103,20 @@ func TestPathLockWithoutBlock(t *testing.T) {
 
 			trigger = false
 
-			pl.Unlock(tc.path2)
+			lock2.Unlock()
 		}()
 
 		// Wait for the goroutine to lock
 		goroutineLockedWg.Wait()
 
 		// This should not block; the paths should not interfere
-		pl.Lock(tc.path1)
+		lock1 := pl.Lock(tc.path1)
 
 		if trigger != true {
 			t.Fatalf("Lock blocked")
 		}
 
-		pl.Unlock(tc.path1)
+		lock1.Unlock()
 
 		time.Sleep(20 * time.Millisecond)
 
@@ -127,7 +127,7 @@ func TestPathLockWithoutBlock(t *testing.T) {
 }
 
 func TestPathLockRace(t *testing.T) {
-	pl := NewPathLock()
+	pl := NewLocker()
 
 	counter := 0
 
@@ -146,9 +146,9 @@ func TestPathLockRace(t *testing.T) {
 			for i := 0; i < rand.Intn(3); i++ {
 				path = filepath.Dir(path)
 			}
-			pl.Lock(path)
+			lock := pl.Lock(path)
 			counter++
-			pl.Unlock(path)
+			lock.Unlock()
 		}()
 	}
 

@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-// PathLocker is an interface for synchronizing on a given filepath.
+// Locker is an interface for synchronizing on a given filepath.
 // A call to Lock a given path will block any asynchronous calls to Lock
 // that same path, or any parent or child path in the same sub-tree.
 // For example:
@@ -18,34 +18,47 @@ import (
 //		- Blocks a Lock call for path /a/b/c/d
 //		- Allows a Lock call for path /a/b/x
 //		- Allows a Lock call for path /a/x
-type PathLocker interface {
-	Lock(path string)
-	Unlock(path string)
+type Locker interface {
+	Lock(path string) Unlocker
 }
 
-var _ PathLocker = (*PathLock)(nil)
+// Unlocker unlocks from a previous invocation of Lock()
+type Unlocker interface {
+	Unlock()
+}
 
-// PathLock is a path-based mutex mechanism that allows for synchronization
+var _ Locker = (*pathLock)(nil)
+
+// pathLock is a path-based mutex mechanism that allows for synchronization
 // along subpaths. A call to Lock will block as long as the requested path
 // is equal to, or otherwise in the path of (e.g. parent/child) another path
 // that has already been Locked. The thread will be blocked until the holder
 // of the lock calls Unlock.
-type PathLock struct {
+type pathLock struct {
 	mu          sync.Mutex
 	lockedPaths map[string]chan struct{}
 }
 
-// NewPathLock instantiates a new PathLock and returns its pointer.
-func NewPathLock() *PathLock {
-	return &PathLock{
+// NewLocker instantiates a new PathLock and returns its pointer.
+func NewLocker() Locker {
+	return &pathLock{
 		lockedPaths: make(map[string]chan struct{}),
 	}
+}
+
+type lock struct {
+	pl   *pathLock
+	path string
+}
+
+func (l *lock) Unlock() {
+	l.pl.unlock(l.path)
 }
 
 // Lock will lock the given path, preventing concurrent calls to Lock
 // for that path, or any parent/child path, until Unlock has been called.
 // Any concurrent Lock calls will block until that path is available.
-func (pl *PathLock) Lock(path string) {
+func (pl *pathLock) Lock(path string) Unlocker {
 	for {
 		ch := pl.tryToLockPath(path)
 		if ch == nil {
@@ -53,6 +66,11 @@ func (pl *PathLock) Lock(path string) {
 		}
 
 		<-ch
+	}
+
+	return &lock{
+		pl:   pl,
+		path: path,
 	}
 }
 
@@ -72,7 +90,7 @@ func (pl *PathLock) Lock(path string) {
 // the channel is closed, the caller should try again by calling
 // `tryToLockPath` until no channel is returned (indicating the lock
 // has been claimed).
-func (pl *PathLock) tryToLockPath(path string) chan struct{} {
+func (pl *pathLock) tryToLockPath(path string) chan struct{} {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 
@@ -87,10 +105,10 @@ func (pl *PathLock) tryToLockPath(path string) chan struct{} {
 	return nil
 }
 
-// Unlock will unlock the given path. It is assumed that Lock
-// has already been called, and that Unlock will be called once
+// unlock will unlock the given path. It is assumed that Lock
+// has already been called, and that unlock will be called once
 // and only once with the exact path provided to the Lock function.
-func (pl *PathLock) Unlock(path string) {
+func (pl *pathLock) unlock(path string) {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 
