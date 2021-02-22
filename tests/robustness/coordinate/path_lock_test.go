@@ -35,11 +35,13 @@ func TestPathLockBasic(t *testing.T) {
 		t.Log(ti, tc.name)
 		pl.Lock(tc.path1)
 
+		triggerCh := make(chan struct{})
 		trigger := false
 
 		go func() {
 			pl.Lock(tc.path2)
 			trigger = true
+			triggerCh <- struct{}{}
 			pl.Unlock(tc.path2)
 		}()
 
@@ -51,7 +53,7 @@ func TestPathLockBasic(t *testing.T) {
 
 		pl.Unlock(tc.path1)
 
-		time.Sleep(10 * time.Millisecond)
+		<-triggerCh
 
 		if trigger != true {
 			t.Fatalf("Unlock unsuccessful")
