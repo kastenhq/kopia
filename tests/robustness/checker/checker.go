@@ -111,6 +111,17 @@ func (chk *Checker) GetLiveSnapIDs() []string {
 	return chk.SnapIDIndex.GetKeys(liveSnapshotsIdxName)
 }
 
+// IsSnapshotIDDeleted reports whether the metadata associated with the provided snapshot ID
+// has it marked as deleted.
+func (chk *Checker) IsSnapshotIDDeleted(snapID string) (bool, error) {
+	md, err := chk.loadSnapshotMetadata(snapID)
+	if err != nil {
+		return false, err
+	}
+
+	return md.IsDeleted(), nil
+}
+
 // VerifySnapshotMetadata compares the list of live snapshot IDs present in
 // the Checker's metadata against a list of live snapshot IDs in the connected
 // repository. This should not be called concurrently, as there is no thread
