@@ -2,6 +2,7 @@ package pathlock
 
 import (
 	"math/rand"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -11,33 +12,99 @@ import (
 func TestPathLockBasic(t *testing.T) {
 	pl := NewLocker()
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Could not get working directory: %v", err)
+	}
+
 	for ti, tc := range []struct {
 		name  string
 		path1 string
 		path2 string
 	}{
 		{
-			name:  "Blocks a Lock call for the same path /a/b/c",
+			name:  "(Abs) Blocks a Lock call for the same path /a/b/c",
 			path1: "/a/b/c",
 			path2: "/a/b/c",
 		},
 		{
-			name:  "Blocks a Lock call for path /a/b/c/d",
+			name:  "(Abs) Blocks a Lock call for path /a/b/c/d",
 			path1: "/a/b/c",
 			path2: "/a/b/c/d",
 		},
 		{
-			name:  "Blocks a Lock call for path /a/b",
+			name:  "(Abs) Blocks a Lock call for path /a/b",
 			path1: "/a/b/c",
 			path2: "/a/b",
 		},
 		{
-			name:  "Blocks a Lock call for path /a",
+			name:  "(Abs) Blocks a Lock call for path /a",
 			path1: "/a/b/c",
 			path2: "/a",
 		},
+		{
+			name:  "(Rel) Blocks a Lock call for the same path a/b/c",
+			path1: "a/b/c",
+			path2: "a/b/c",
+		},
+		{
+			name:  "(Rel) Blocks a Lock call for path a/b/c/d",
+			path1: "a/b/c",
+			path2: "a/b/c/d",
+		},
+		{
+			name:  "(Rel) Blocks a Lock call for path a/b",
+			path1: "a/b/c",
+			path2: "a/b",
+		},
+		{
+			name:  "(Rel) Blocks a Lock call for path a",
+			path1: "a/b/c",
+			path2: "a",
+		},
+		{
+			name:  "(Mix Abs/Rel) Blocks a Lock call for the same path a/b/c",
+			path1: filepath.Join(cwd, "a/b/c"),
+			path2: "a/b/c",
+		},
+		{
+			name:  "(Mix Abs/Rel) Blocks a Lock call for path a/b/c/d",
+			path1: filepath.Join(cwd, "a/b/c"),
+			path2: "a/b/c/d",
+		},
+		{
+			name:  "(Mix Abs/Rel) Blocks a Lock call for path a/b",
+			path1: filepath.Join(cwd, "a/b/c"),
+			path2: "a/b",
+		},
+		{
+			name:  "(Mix Abs/Rel) Blocks a Lock call for path a",
+			path1: filepath.Join(cwd, "a/b/c"),
+			path2: "a",
+		},
+		{
+			name:  "(Mix Rel/Abs) Blocks a Lock call for the same path a/b/c",
+			path1: "a/b/c",
+			path2: filepath.Join(cwd, "a/b/c"),
+		},
+		{
+			name:  "(Mix Rel/Abs) Blocks a Lock call for path a/b/c/d",
+			path1: "a/b/c",
+			path2: filepath.Join(cwd, "a/b/c/d"),
+		},
+		{
+			name:  "(Mix Rel/Abs) Blocks a Lock call for path a/b",
+			path1: "a/b/c",
+			path2: filepath.Join(cwd, "a/b"),
+		},
+		{
+			name:  "(Mix Rel/Abs) Blocks a Lock call for path a",
+			path1: "a/b/c",
+			path2: filepath.Join(cwd, "a"),
+		},
 	} {
-		t.Log(ti, tc.name)
+		t.Logf("%v %v (path1: %q, path2: %q)", ti, tc.name, tc.path1, tc.path2)
+
 		lock1, err := pl.Lock(tc.path1)
 		if err != nil {
 			t.Fatalf("Unexpected path lock error: %v", err)
@@ -83,23 +150,58 @@ func TestPathLockBasic(t *testing.T) {
 func TestPathLockWithoutBlock(t *testing.T) {
 	pl := NewLocker()
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Could not get working directory: %v", err)
+	}
+
 	for ti, tc := range []struct {
 		name  string
 		path1 string
 		path2 string
 	}{
 		{
-			name:  "Allows a Lock call for path /a/b/x",
+			name:  "(Abs) Allows a Lock call for path /a/b/x",
 			path1: "/a/b/c",
 			path2: "/a/b/x",
 		},
 		{
-			name:  "Allows a Lock call for path /a/x",
+			name:  "(Abs) Allows a Lock call for path /a/x",
 			path1: "/a/b/c",
 			path2: "/a/x",
 		},
+		{
+			name:  "(Rel) Allows a Lock call for path a/b/x",
+			path1: "a/b/c",
+			path2: "a/b/x",
+		},
+		{
+			name:  "(Rel) Allows a Lock call for path a/x",
+			path1: "a/b/c",
+			path2: "a/x",
+		},
+		{
+			name:  "(Mix Abs/Rel) Allows a Lock call for path a/b/x",
+			path1: filepath.Join(cwd, "a/b/c"),
+			path2: "a/b/x",
+		},
+		{
+			name:  "(Mix Abs/Rel) Allows a Lock call for path a/x",
+			path1: filepath.Join(cwd, "a/b/c"),
+			path2: "a/x",
+		},
+		{
+			name:  "(Mix Rel/Abs) Allows a Lock call for path a/b/x",
+			path1: "a/b/c",
+			path2: filepath.Join(cwd, "a/b/x"),
+		},
+		{
+			name:  "(Mix Rel/Abs) Allows a Lock call for path a/x",
+			path1: "a/b/c",
+			path2: filepath.Join(cwd, "a/x"),
+		},
 	} {
-		t.Log(ti, tc.name)
+		t.Logf("%v %v (path1: %q, path2: %q)", ti, tc.name, tc.path1, tc.path2)
 
 		goroutineLockedWg := new(sync.WaitGroup)
 		goroutineLockedWg.Add(1)
