@@ -88,6 +88,12 @@ type SnapshotMetadata struct {
 	ValidationData []byte    `json:"validationData"`
 }
 
+// IsDeleted returns true if the SnapshotMetadata references a snapshot ID that
+// has been deleted.
+func (ssMeta *SnapshotMetadata) IsDeleted() bool {
+	return !ssMeta.DeletionTime.IsZero()
+}
+
 // GetSnapshotMetadata gets the metadata associated with the given snapshot ID.
 func (chk *Checker) GetSnapshotMetadata(snapID string) (*SnapshotMetadata, error) {
 	chk.mu.RLock()
