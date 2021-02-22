@@ -112,18 +112,23 @@ func TestPathLockBasic(t *testing.T) {
 
 		triggerCh := make(chan struct{})
 		trigger := false
+
 		var path2Err error
 
 		go func() {
 			lock2, err := pl.Lock(tc.path2)
 			if err != nil {
 				path2Err = err
+
 				close(triggerCh)
+
 				return
 			}
 
 			trigger = true
+
 			close(triggerCh)
+
 			lock2.Unlock()
 		}()
 
@@ -207,13 +212,16 @@ func TestPathLockWithoutBlock(t *testing.T) {
 		goroutineLockedWg.Add(1)
 
 		trigger := false
+
 		var path2Err error
 
 		go func() {
 			lock2, err := pl.Lock(tc.path2)
 			if err != nil {
 				path2Err = err
+
 				goroutineLockedWg.Done()
+
 				return
 			}
 
@@ -280,7 +288,9 @@ func TestPathLockRace(t *testing.T) {
 			lock, err := pl.Lock(path)
 			if err != nil {
 				t.Logf("Unexpected path lock error: %v", err)
+
 				hitError = true
+
 				return
 			}
 

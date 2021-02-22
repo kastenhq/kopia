@@ -22,7 +22,7 @@ type Locker interface {
 	Lock(path string) (Unlocker, error)
 }
 
-// Unlocker unlocks from a previous invocation of Lock()
+// Unlocker unlocks from a previous invocation of Lock().
 type Unlocker interface {
 	Unlock()
 }
@@ -104,12 +104,15 @@ func (pl *pathLock) tryToLockPath(path string) (chan struct{}, error) {
 	defer pl.mu.Unlock()
 
 	for lockedPath, ch := range pl.lockedPaths {
-		pathInLockedPath, err := isInPath(path, lockedPath)
-		if err != nil {
-			return nil, err
+		var (
+			pathInLockedPath, lockedPathInPath bool
+			err                                error
+		)
+
+		if pathInLockedPath, err = isInPath(path, lockedPath); err == nil {
+			lockedPathInPath, err = isInPath(lockedPath, path)
 		}
 
-		lockedPathInPath, err := isInPath(lockedPath, path)
 		if err != nil {
 			return nil, err
 		}
