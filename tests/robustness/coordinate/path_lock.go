@@ -1,4 +1,6 @@
-package coordinate
+// Package pathlock defines a PathLocker interface and an implementation
+// that will synchronize based on filepath.
+package pathlock
 
 import (
 	"path/filepath"
@@ -30,13 +32,13 @@ var _ PathLocker = (*PathLock)(nil)
 // of the lock calls Unlock.
 type PathLock struct {
 	mu          sync.Mutex
-	lockedPaths map[string](chan struct{})
+	lockedPaths map[string]chan struct{}
 }
 
 // NewPathLock instantiates a new PathLock and returns its pointer.
 func NewPathLock() *PathLock {
 	return &PathLock{
-		lockedPaths: make(map[string](chan struct{})),
+		lockedPaths: make(map[string]chan struct{}),
 	}
 }
 
@@ -69,7 +71,7 @@ func (pl *PathLock) Lock(path string) {
 // channel is returned. The caller can wait on that channel. After
 // the channel is closed, the caller should try again by calling
 // `tryToLockPath` until no channel is returned (indicating the lock
-// has been claimed)
+// has been claimed).
 func (pl *PathLock) tryToLockPath(path string) chan struct{} {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()

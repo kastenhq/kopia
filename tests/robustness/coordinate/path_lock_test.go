@@ -1,4 +1,4 @@
-package coordinate
+package pathlock
 
 import (
 	"math/rand"
@@ -94,10 +94,15 @@ func TestPathLockWithoutBlock(t *testing.T) {
 
 		go func() {
 			pl.Lock(tc.path2)
+
 			trigger = true
+
 			goroutineLockedWg.Done()
+
 			time.Sleep(10 * time.Millisecond)
+
 			trigger = false
+
 			pl.Unlock(tc.path2)
 		}()
 
@@ -127,9 +132,11 @@ func TestPathLockRace(t *testing.T) {
 	counter := 0
 
 	wg := new(sync.WaitGroup)
+
 	numGoroutines := 100
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(1)
+
 		go func() {
 			defer wg.Done()
 
