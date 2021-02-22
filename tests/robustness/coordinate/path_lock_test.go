@@ -38,15 +38,25 @@ func TestPathLockBasic(t *testing.T) {
 		},
 	} {
 		t.Log(ti, tc.name)
-		lock1 := pl.Lock(tc.path1)
+		lock1, err := pl.Lock(tc.path1)
+		if err != nil {
+			t.Fatalf("Unexpected path lock error: %v", err)
+		}
 
 		triggerCh := make(chan struct{})
 		trigger := false
+		var path2Err error
 
 		go func() {
-			lock2 := pl.Lock(tc.path2)
+			lock2, err := pl.Lock(tc.path2)
+			if err != nil {
+				path2Err = err
+				close(triggerCh)
+				return
+			}
+
 			trigger = true
-			triggerCh <- struct{}{}
+			close(triggerCh)
 			lock2.Unlock()
 		}()
 
@@ -59,6 +69,10 @@ func TestPathLockBasic(t *testing.T) {
 		lock1.Unlock()
 
 		<-triggerCh
+
+		if path2Err != nil {
+			t.Fatalf("Error in second lock path: %v", path2Err)
+		}
 
 		if trigger != true {
 			t.Fatalf("Unlock unsuccessful")
@@ -91,9 +105,15 @@ func TestPathLockWithoutBlock(t *testing.T) {
 		goroutineLockedWg.Add(1)
 
 		trigger := false
+		var path2Err error
 
 		go func() {
-			lock2 := pl.Lock(tc.path2)
+			lock2, err := pl.Lock(tc.path2)
+			if err != nil {
+				path2Err = err
+				goroutineLockedWg.Done()
+				return
+			}
 
 			trigger = true
 
@@ -109,8 +129,15 @@ func TestPathLockWithoutBlock(t *testing.T) {
 		// Wait for the goroutine to lock
 		goroutineLockedWg.Wait()
 
+		if path2Err != nil {
+			t.Fatalf("Error in second lock path: %v", path2Err)
+		}
+
 		// This should not block; the paths should not interfere
-		lock1 := pl.Lock(tc.path1)
+		lock1, err := pl.Lock(tc.path1)
+		if err != nil {
+			t.Fatalf("Unexpected path lock error: %v", err)
+		}
 
 		if trigger != true {
 			t.Fatalf("Lock blocked")
@@ -130,6 +157,7 @@ func TestPathLockRace(t *testing.T) {
 	pl := NewLocker()
 
 	counter := 0
+	hitError := false
 
 	wg := new(sync.WaitGroup)
 
@@ -146,13 +174,24 @@ func TestPathLockRace(t *testing.T) {
 			for i := 0; i < rand.Intn(3); i++ {
 				path = filepath.Dir(path)
 			}
-			lock := pl.Lock(path)
+
+			lock, err := pl.Lock(path)
+			if err != nil {
+				t.Logf("Unexpected path lock error: %v", err)
+				hitError = true
+				return
+			}
+
 			counter++
 			lock.Unlock()
 		}()
 	}
 
 	wg.Wait()
+
+	if hitError {
+		t.Fatal("Hit unexpected error locking paths")
+	}
 
 	if counter != numGoroutines {
 		t.Fatalf("counter %v != numgoroutines %v", counter, numGoroutines)

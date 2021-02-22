@@ -19,7 +19,7 @@ import (
 //		- Allows a Lock call for path /a/b/x
 //		- Allows a Lock call for path /a/x
 type Locker interface {
-	Lock(path string) Unlocker
+	Lock(path string) (Unlocker, error)
 }
 
 // Unlocker unlocks from a previous invocation of Lock()
@@ -58,9 +58,18 @@ func (l *lock) Unlock() {
 // Lock will lock the given path, preventing concurrent calls to Lock
 // for that path, or any parent/child path, until Unlock has been called.
 // Any concurrent Lock calls will block until that path is available.
-func (pl *pathLock) Lock(path string) Unlocker {
+func (pl *pathLock) Lock(path string) (Unlocker, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+
 	for {
-		ch := pl.tryToLockPath(path)
+		ch, err := pl.tryToLockPath(absPath)
+		if err != nil {
+			return nil, err
+		}
+
 		if ch == nil {
 			break
 		}
@@ -70,8 +79,8 @@ func (pl *pathLock) Lock(path string) Unlocker {
 
 	return &lock{
 		pl:   pl,
-		path: path,
-	}
+		path: absPath,
+	}, nil
 }
 
 // tryToLockPath is a helper for locking a given path/subpath.
@@ -90,19 +99,29 @@ func (pl *pathLock) Lock(path string) Unlocker {
 // the channel is closed, the caller should try again by calling
 // `tryToLockPath` until no channel is returned (indicating the lock
 // has been claimed).
-func (pl *pathLock) tryToLockPath(path string) chan struct{} {
+func (pl *pathLock) tryToLockPath(path string) (chan struct{}, error) {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 
 	for lockedPath, ch := range pl.lockedPaths {
-		if isInPath(path, lockedPath) || isInPath(lockedPath, path) {
-			return ch
+		pathInLockedPath, err := isInPath(path, lockedPath)
+		if err != nil {
+			return nil, err
+		}
+
+		lockedPathInPath, err := isInPath(lockedPath, path)
+		if err != nil {
+			return nil, err
+		}
+
+		if pathInLockedPath || lockedPathInPath {
+			return ch, nil
 		}
 	}
 
 	pl.lockedPaths[path] = make(chan struct{})
 
-	return nil
+	return nil, nil
 }
 
 // unlock will unlock the given path. It is assumed that Lock
@@ -118,15 +137,14 @@ func (pl *pathLock) unlock(path string) {
 
 // isInPath is a helper to determine whether one path is
 // either the same as another, or a child path (recursively) of it.
-func isInPath(path1, path2 string) bool {
+func isInPath(path1, path2 string) (bool, error) {
 	relFP, err := filepath.Rel(path2, path1)
 	if err != nil {
-		// Not sure - just wait anyway?
-		return true
+		return true, err
 	}
 
 	// If the relative path contains "..", this function will
 	// return false, because it is a cousin path. Only children (recursive)
 	// and the path itself will return true.
-	return !strings.Contains(relFP, "..")
+	return !strings.Contains(relFP, ".."), nil
 }
