@@ -213,6 +213,8 @@ func TestPathLockWithoutBlock(t *testing.T) {
 
 		trigger := false
 
+		triggerFalseCh := make(chan struct{})
+
 		var path2Err error
 
 		go func() {
@@ -232,6 +234,8 @@ func TestPathLockWithoutBlock(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 
 			trigger = false
+
+			close(triggerFalseCh)
 
 			lock2.Unlock()
 		}()
@@ -255,7 +259,7 @@ func TestPathLockWithoutBlock(t *testing.T) {
 
 		lock1.Unlock()
 
-		time.Sleep(20 * time.Millisecond)
+		<-triggerFalseCh
 
 		if trigger != false {
 			t.Fatalf("Trigger should have been set false")
