@@ -8,7 +8,7 @@ import (
 	"github.com/kopia/kopia/tests/robustness"
 )
 
-func TestSimpleWithIndex(t *testing.T) {
+func TestSimpleBasic(t *testing.T) {
 	simple := NewSimple()
 
 	gotData, err := simple.Load("non-existent-key")
