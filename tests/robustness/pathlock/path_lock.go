@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Locker is an interface for synchronizing on a given filepath.
@@ -55,6 +56,10 @@ func (l *lock) Unlock() {
 	l.pl.unlock(l.path)
 }
 
+// busyCounter is for unit testing, to determine whether a Lock has been
+// called and blocked
+var busyCounter uint64
+
 // Lock will lock the given path, preventing concurrent calls to Lock
 // for that path, or any parent/child path, until Unlock has been called.
 // Any concurrent Lock calls will block until that path is available.
@@ -73,6 +78,8 @@ func (pl *pathLock) Lock(path string) (Unlocker, error) {
 		if ch == nil {
 			break
 		}
+
+		atomic.AddUint64(&busyCounter, 1)
 
 		<-ch
 	}

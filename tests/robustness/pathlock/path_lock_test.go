@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -110,6 +111,8 @@ func TestPathLockBasic(t *testing.T) {
 			t.Fatalf("Unexpected path lock error: %v", err)
 		}
 
+		currBusyCounter := atomic.LoadUint64(&busyCounter)
+
 		triggerCh := make(chan struct{})
 		trigger := false
 
@@ -132,9 +135,18 @@ func TestPathLockBasic(t *testing.T) {
 			lock2.Unlock()
 		}()
 
-		time.Sleep(10 * time.Millisecond)
+		// Wait until the internal atomic counter increments.
+		// That will only happen once the Lock call to path2 executes
+		// and blocks on the prior Lock to path1.
+		for {
+			if atomic.LoadUint64(&busyCounter) > currBusyCounter {
+				break
+			}
 
-		if trigger == true {
+			time.Sleep(1 * time.Millisecond)
+		}
+
+		if trigger {
 			t.Fatalf("Lock unsuccessful")
 		}
 
@@ -146,7 +158,7 @@ func TestPathLockBasic(t *testing.T) {
 			t.Fatalf("Error in second lock path: %v", path2Err)
 		}
 
-		if trigger != true {
+		if !trigger {
 			t.Fatalf("Unlock unsuccessful")
 		}
 	}
@@ -253,7 +265,7 @@ func TestPathLockWithoutBlock(t *testing.T) {
 			t.Fatalf("Unexpected path lock error: %v", err)
 		}
 
-		if trigger != true {
+		if !trigger {
 			t.Fatalf("Lock blocked")
 		}
 
@@ -261,7 +273,7 @@ func TestPathLockWithoutBlock(t *testing.T) {
 
 		<-triggerFalseCh
 
-		if trigger != false {
+		if trigger {
 			t.Fatalf("Trigger should have been set false")
 		}
 	}
