@@ -23,6 +23,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/tests/robustness"
 	"github.com/kopia/kopia/tests/robustness/fiofilewriter"
@@ -631,7 +632,7 @@ func TestIOLimitPerWriteAction(t *testing.T) {
 		},
 	}
 
-	st := time.Now()
+	st := clock.Now()
 
 	numActions := 1
 	for loop := 0; loop < numActions; loop++ {
@@ -639,7 +640,7 @@ func TestIOLimitPerWriteAction(t *testing.T) {
 		testenv.AssertNoError(t, err)
 	}
 
-	if time.Since(st) > timeout {
+	if clock.Since(st) > timeout {
 		t.Errorf("IO limit parameter did not cut down on the fio runtime")
 	}
 }
@@ -667,7 +668,7 @@ func TestStatsPersist(t *testing.T) {
 		MaxRuntime:   35 * time.Minute,
 	}
 
-	creationTime := time.Now().Add(-time.Hour)
+	creationTime := clock.Now().Add(-time.Hour)
 
 	eng := &Engine{
 		MetaStore: snapStore,
@@ -731,8 +732,8 @@ func TestLogsPersist(t *testing.T) {
 	logData := Log{
 		Log: []*LogEntry{
 			{
-				StartTime: time.Now().Add(-time.Hour),
-				EndTime:   time.Now(),
+				StartTime: clock.Now().Add(-time.Hour),
+				EndTime:   clock.Now(),
 				Action:    ActionKey("some action"),
 				Error:     "some error",
 				Idx:       11235,
