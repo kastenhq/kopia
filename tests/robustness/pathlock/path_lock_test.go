@@ -113,24 +113,19 @@ func TestPathLockBasic(t *testing.T) {
 
 		currBusyCounter := atomic.LoadUint64(&busyCounter)
 
-		triggerCh := make(chan struct{})
-		trigger := false
-
 		var path2Err error
 
+		wg := new(sync.WaitGroup)
+		wg.Add(1)
+
 		go func() {
+			defer wg.Done()
+
 			lock2, err := pl.Lock(tc.path2)
 			if err != nil {
 				path2Err = err
-
-				close(triggerCh)
-
 				return
 			}
-
-			trigger = true
-
-			close(triggerCh)
 
 			lock2.Unlock()
 		}()
@@ -146,21 +141,15 @@ func TestPathLockBasic(t *testing.T) {
 			time.Sleep(1 * time.Millisecond)
 		}
 
-		if trigger {
-			t.Fatalf("Lock unsuccessful")
-		}
-
 		lock1.Unlock()
 
-		<-triggerCh
+		// Wait for the goroutine to return
+		wg.Wait()
 
 		if path2Err != nil {
 			t.Fatalf("Error in second lock path: %v", path2Err)
 		}
 
-		if !trigger {
-			t.Fatalf("Unlock unsuccessful")
-		}
 	}
 }
 
