@@ -252,7 +252,8 @@ func (chk *Checker) RestoreSnapshotToPath(ctx context.Context, snapID, destPath 
 	return chk.RestoreVerifySnapshot(ctx, snapID, destPath, ssMeta, reportOut, opts)
 }
 
-// safeRestorePrepare
+// safeRestorePrepare wraps key indexing operations that need to be
+// executed together under one mutex lock.
 func (chk *Checker) safeRestorePrepare(snapID string) (*SnapshotMetadata, error) {
 	chk.mu.RLock()
 	defer chk.mu.RUnlock()
@@ -296,7 +297,7 @@ func (chk *Checker) RestoreVerifySnapshot(ctx context.Context, snapID, destPath 
 		chk.mu.Lock()
 		defer chk.mu.Unlock()
 
-		err := chk.saveSnapshotMetadata(ssMeta)
+		err = chk.saveSnapshotMetadata(ssMeta)
 		if err != nil {
 			return err
 		}
