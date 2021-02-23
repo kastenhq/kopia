@@ -209,6 +209,9 @@ func TestPathLockWithoutBlock(t *testing.T) {
 	} {
 		t.Logf("%v %v (path1: %q, path2: %q)", ti, tc.name, tc.path1, tc.path2)
 
+		goroutineDoneWg := new(sync.WaitGroup)
+		goroutineDoneWg.Add(1)
+
 		goroutineLockedWg := new(sync.WaitGroup)
 		goroutineLockedWg.Add(1)
 
@@ -219,6 +222,8 @@ func TestPathLockWithoutBlock(t *testing.T) {
 		var path2Err error
 
 		go func() {
+			defer goroutineDoneWg.Done()
+
 			lock2, err := pl.Lock(tc.path2)
 			if err != nil {
 				path2Err = err
@@ -265,6 +270,9 @@ func TestPathLockWithoutBlock(t *testing.T) {
 		if trigger {
 			t.Fatalf("Trigger should have been set false")
 		}
+
+		// Ensure the goroutine returns
+		goroutineDoneWg.Wait()
 	}
 }
 
