@@ -4,9 +4,14 @@ go:
 - 1.16.x
 os:
 - linux
-install: go mod download
-script: make travis-release
+install: make -j4 ci-setup
+script:
+  - make ci-build
+  - make lint
+  - make ci-tests
+  - make -j2 ci-integration-tests
 git:
   depth: 10
 env:
 - GO111MODULE=on
+- CI=${TRAVIS}
