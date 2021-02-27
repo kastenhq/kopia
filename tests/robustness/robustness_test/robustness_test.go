@@ -3,6 +3,7 @@
 package robustness
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -27,13 +28,15 @@ func TestManySmallFiles(t *testing.T) {
 		fiofilewriter.MinNumFilesPerWriteField: strconv.Itoa(numFiles),
 	}
 
-	_, err := eng.ExecAction(engine.WriteRandomFilesActionKey, fileWriteOpts)
+	ctx := context.TODO()
+
+	_, err := eng.ExecAction(ctx, engine.WriteRandomFilesActionKey, fileWriteOpts)
 	testenv.AssertNoError(t, err)
 
-	snapOut, err := eng.ExecAction(engine.SnapshotDirActionKey, nil)
+	snapOut, err := eng.ExecAction(ctx, engine.SnapshotDirActionKey, nil)
 	testenv.AssertNoError(t, err)
 
-	_, err = eng.ExecAction(engine.RestoreSnapshotActionKey, snapOut)
+	_, err = eng.ExecAction(ctx, engine.RestoreSnapshotActionKey, snapOut)
 	testenv.AssertNoError(t, err)
 }
 
@@ -49,13 +52,15 @@ func TestOneLargeFile(t *testing.T) {
 		fiofilewriter.MinNumFilesPerWriteField: strconv.Itoa(numFiles),
 	}
 
-	_, err := eng.ExecAction(engine.WriteRandomFilesActionKey, fileWriteOpts)
+	ctx := context.TODO()
+
+	_, err := eng.ExecAction(ctx, engine.WriteRandomFilesActionKey, fileWriteOpts)
 	testenv.AssertNoError(t, err)
 
-	snapOut, err := eng.ExecAction(engine.SnapshotDirActionKey, nil)
+	snapOut, err := eng.ExecAction(ctx, engine.SnapshotDirActionKey, nil)
 	testenv.AssertNoError(t, err)
 
-	_, err = eng.ExecAction(engine.RestoreSnapshotActionKey, snapOut)
+	_, err = eng.ExecAction(ctx, engine.RestoreSnapshotActionKey, snapOut)
 	testenv.AssertNoError(t, err)
 }
 
@@ -75,13 +80,15 @@ func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
 		engine.ActionRepeaterField:             strconv.Itoa(actionRepeats),
 	}
 
-	_, err := eng.ExecAction(engine.WriteRandomFilesActionKey, fileWriteOpts)
+	ctx := context.TODO()
+
+	_, err := eng.ExecAction(ctx, engine.WriteRandomFilesActionKey, fileWriteOpts)
 	testenv.AssertNoError(t, err)
 
-	snapOut, err := eng.ExecAction(engine.SnapshotDirActionKey, nil)
+	snapOut, err := eng.ExecAction(ctx, engine.SnapshotDirActionKey, nil)
 	testenv.AssertNoError(t, err)
 
-	_, err = eng.ExecAction(engine.RestoreSnapshotActionKey, snapOut)
+	_, err = eng.ExecAction(ctx, engine.RestoreSnapshotActionKey, snapOut)
 	testenv.AssertNoError(t, err)
 }
 
@@ -105,7 +112,9 @@ func TestRandomizedSmall(t *testing.T) {
 	}
 
 	for time.Since(st) <= *randomizedTestDur {
-		err := eng.RandomAction(opts)
+		ctx := context.TODO()
+
+		err := eng.RandomAction(ctx, opts)
 		if errors.Is(err, robustness.ErrNoOp) {
 			t.Log("Random action resulted in no-op")
 
