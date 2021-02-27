@@ -4,7 +4,9 @@ go:
 - 1.16.x
 os:
 - linux
-install: echo
+install:
+- git fetch origin master
+- git branch master FETCH_HEAD
 script: docker/kopia-alpine/build.sh kanisterio/kopia
 git:
   depth: false
