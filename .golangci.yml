@@ -4,10 +4,18 @@ linters-settings:
   funlen:
     lines: 100
     statements: 60
+  forbidigo:
+    forbid:
+    - time.Now # use clock.Now
+    - time.Since # use clock.Since
+    - time.Until # use clock.Until
   gocognit:
     min-complexity: 40
   gocyclo:
     min-complexity: 15
+  cyclop:
+    max-complexity: 20
+    skip-tests: true
   maligned:
     suggest-new: true
   goconst:
@@ -25,6 +33,10 @@ linters-settings:
   goimports:
     local-prefixes: github.com/kopia/kopia
   gocritic:
+    settings:
+      hugeParam:
+        # size in bytes that makes the warning trigger (default 80)
+        sizeThreshold: 160
     enabled-tags:
       - diagnostic
       - performance
@@ -56,9 +68,6 @@ run:
 issues:
   exclude-use-default: false
   exclude-rules:
-    - path: cli
-      linters:
-      - forbidigo # allow fmt.Printf in the CLI
     - path: _test\.go|testing|tests|test_env|fshasher
       linters:
       - gomnd
@@ -68,7 +77,6 @@ issues:
       - gosec
       - nestif
       - wrapcheck
-      - forbidigo
       - nolintlint
     - text: "Magic number: 1e"
       linters:

@@ -16,6 +16,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/tests/robustness"
 	"github.com/kopia/kopia/tests/robustness/snapmeta"
 )
@@ -254,7 +255,8 @@ func (chk *Checker) RestoreSnapshotToPath(ctx context.Context, snapID, destPath 
 	return chk.RestoreVerifySnapshot(ctx, snapID, destPath, ssMeta, reportOut, opts)
 }
 
-// safeRestorePrepare
+// safeRestorePrepare wraps key indexing operations that need to be
+// executed together under one mutex lock.
 func (chk *Checker) safeRestorePrepare(snapID string) (*SnapshotMetadata, error) {
 	chk.mu.RLock()
 	defer chk.mu.RUnlock()
@@ -335,7 +337,7 @@ func (chk *Checker) DeleteSnapshot(ctx context.Context, snapID string, opts map[
 		return err
 	}
 
-	ssMeta.DeletionTime = time.Now()
+	ssMeta.DeletionTime = clock.Now()
 	ssMeta.ValidationData = nil
 
 	return chk.safeDeleteFinish(ssMeta)
