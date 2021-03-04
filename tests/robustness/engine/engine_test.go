@@ -24,6 +24,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
 	"github.com/kopia/kopia/internal/clock"
+	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/tests/robustness"
 	"github.com/kopia/kopia/tests/robustness/fiofilewriter"
@@ -52,7 +53,7 @@ func TestEngineWritefilesBasicFS(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, "")
 
-	ctx := context.TODO()
+	ctx := testlogging.Context(t)
 
 	th, eng, err := newTestHarness(ctx, t, fsDataRepoPath, fsMetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
@@ -62,7 +63,7 @@ func TestEngineWritefilesBasicFS(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := th.Cleanup(context.TODO())
+		cleanupErr := th.Cleanup(ctx)
 		testenv.AssertNoError(t, cleanupErr)
 
 		os.RemoveAll(fsRepoBaseDirPath)
@@ -113,7 +114,7 @@ func makeTempS3Bucket(t *testing.T) (bucketName string, cleanupCB func()) {
 		t.Skip("Skipping S3 tests if no creds provided")
 	}
 
-	ctx := context.Background()
+	ctx := testlogging.Context(t)
 
 	cli, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, sessionToken),
@@ -169,7 +170,7 @@ func TestWriteFilesBasicS3(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, bucketName)
 
-	ctx := context.TODO()
+	ctx := testlogging.Context(t)
 
 	th, eng, err := newTestHarness(ctx, t, s3DataRepoPath, s3MetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
@@ -179,7 +180,7 @@ func TestWriteFilesBasicS3(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := th.Cleanup(context.TODO())
+		cleanupErr := th.Cleanup(ctx)
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
@@ -216,7 +217,7 @@ func TestDeleteSnapshotS3(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, bucketName)
 
-	ctx := context.TODO()
+	ctx := testlogging.Context(t)
 
 	th, eng, err := newTestHarness(ctx, t, s3DataRepoPath, s3MetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
@@ -226,7 +227,7 @@ func TestDeleteSnapshotS3(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := th.Cleanup(context.TODO())
+		cleanupErr := th.Cleanup(ctx)
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
@@ -264,7 +265,7 @@ func TestSnapshotVerificationFail(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, bucketName)
 
-	ctx := context.TODO()
+	ctx := testlogging.Context(t)
 
 	th, eng, err := newTestHarness(ctx, t, s3DataRepoPath, s3MetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
@@ -274,7 +275,7 @@ func TestSnapshotVerificationFail(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := th.Cleanup(context.TODO())
+		cleanupErr := th.Cleanup(ctx)
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
@@ -335,7 +336,7 @@ func TestDataPersistency(t *testing.T) {
 	dataRepoPath := filepath.Join(tempDir, "data-repo-")
 	metadataRepoPath := filepath.Join(tempDir, "metadata-repo-")
 
-	ctx := context.TODO()
+	ctx := testlogging.Context(t)
 
 	th, eng, err := newTestHarness(ctx, t, dataRepoPath, metadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
@@ -345,7 +346,7 @@ func TestDataPersistency(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := th.Cleanup(context.TODO())
+		cleanupErr := th.Cleanup(ctx)
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
@@ -385,7 +386,7 @@ func TestDataPersistency(t *testing.T) {
 	defer func() {
 		th2.eng.cleanComponents()
 		th2.eng = nil
-		th2.Cleanup(context.TODO())
+		th2.Cleanup(ctx)
 	}()
 
 	// Connect this engine to the same data and metadata repositories -
@@ -503,7 +504,7 @@ func TestActionsFilesystem(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, "")
 
-	ctx := context.TODO()
+	ctx := testlogging.Context(t)
 
 	th, eng, err := newTestHarness(ctx, t, fsDataRepoPath, fsMetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
@@ -513,7 +514,7 @@ func TestActionsFilesystem(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := th.Cleanup(context.TODO())
+		cleanupErr := th.Cleanup(ctx)
 		testenv.AssertNoError(t, cleanupErr)
 
 		os.RemoveAll(fsRepoBaseDirPath)
@@ -552,7 +553,7 @@ func TestActionsS3(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, bucketName)
 
-	ctx := context.TODO()
+	ctx := testlogging.Context(t)
 
 	th, eng, err := newTestHarness(ctx, t, s3DataRepoPath, s3MetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
@@ -562,7 +563,7 @@ func TestActionsS3(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := th.Cleanup(context.TODO())
+		cleanupErr := th.Cleanup(ctx)
 		testenv.AssertNoError(t, cleanupErr)
 	}()
 
@@ -603,7 +604,7 @@ func TestIOLimitPerWriteAction(t *testing.T) {
 	os.Setenv(snapmeta.EngineModeEnvKey, snapmeta.EngineModeBasic)
 	os.Setenv(snapmeta.S3BucketNameEnvKey, "")
 
-	ctx := context.TODO()
+	ctx := testlogging.Context(t)
 
 	th, eng, err := newTestHarness(ctx, t, fsDataRepoPath, fsMetadataRepoPath)
 	if errors.Is(err, kopiarunner.ErrExeVariableNotSet) || errors.Is(err, fio.ErrEnvNotSet) {
@@ -613,7 +614,7 @@ func TestIOLimitPerWriteAction(t *testing.T) {
 	testenv.AssertNoError(t, err)
 
 	defer func() {
-		cleanupErr := th.Cleanup(context.TODO())
+		cleanupErr := th.Cleanup(ctx)
 		testenv.AssertNoError(t, cleanupErr)
 
 		os.RemoveAll(fsRepoBaseDirPath)
