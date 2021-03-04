@@ -5,8 +5,12 @@ go:
 os:
 - linux
 install:
+- git branch
+- git tag
 - git fetch origin master
 - git branch master FETCH_HEAD
+- git branch
+- git tag
 script: docker/kopia-alpine/build.sh kanisterio/kopia
 git:
   depth: false
