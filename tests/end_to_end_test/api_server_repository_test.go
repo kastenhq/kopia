@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kopia/kopia/internal/apiclient"
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/serverapi"
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/repo"
@@ -108,7 +109,7 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 	}, repo.ClientOptions{
 		Username: "foo",
 		Hostname: "bar",
-	}, "baz")
+	}, nil, "baz")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +233,7 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 	serverapi.Shutdown(ctx, cli)
 
 	// open repository client to a dead server, this should fail quickly instead of retrying forever.
-	t0 := time.Now()
+	t0 := clock.Now()
 
 	repo.OpenAPIServer(ctx, &repo.APIServerInfo{
 		BaseURL:                             sp.baseURL,
@@ -241,9 +242,9 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 	}, repo.ClientOptions{
 		Username: "foo",
 		Hostname: "bar",
-	}, "baz")
+	}, nil, "baz")
 
-	if dur := time.Since(t0); dur > 15*time.Second {
+	if dur := clock.Since(t0); dur > 15*time.Second {
 		t.Fatalf("failed connection took %v", dur)
 	}
 }

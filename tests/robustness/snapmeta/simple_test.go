@@ -8,7 +8,7 @@ import (
 	"github.com/kopia/kopia/tests/robustness"
 )
 
-func TestSimpleWithIndex(t *testing.T) {
+func TestSimpleBasic(t *testing.T) {
 	simple := NewSimple()
 
 	gotData, err := simple.Load("non-existent-key")
@@ -29,7 +29,7 @@ func TestSimpleWithIndex(t *testing.T) {
 		t.Fatalf("Error getting key: %v", err)
 	}
 
-	if bytes.Compare(gotData, data) != 0 {
+	if !bytes.Equal(gotData, data) {
 		t.Fatalf("Did not get the correct data")
 	}
 

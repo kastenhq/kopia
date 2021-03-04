@@ -22,6 +22,7 @@ import (
 	"github.com/kopia/kopia/internal/blobtesting"
 	"github.com/kopia/kopia/internal/faketime"
 	"github.com/kopia/kopia/internal/testlogging"
+	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/logging"
 )
@@ -249,7 +250,12 @@ func TestContentManagerWriteMultiple(t *testing.T) {
 
 	var contentIDs []ID
 
-	for i := 0; i < 5000; i++ {
+	repeatCount := 5000
+	if testutil.ShouldReduceTestComplexity() {
+		repeatCount = 500
+	}
+
+	for i := 0; i < repeatCount; i++ {
 		b := seededRandomData(i, i%113)
 
 		blkID, err := bm.WriteContent(ctx, b, "")
@@ -1491,6 +1497,7 @@ func TestIterateContents(t *testing.T) {
 		desc    string
 		options IterateOptions
 		want    map[ID]bool
+		sleep   time.Duration
 		fail    error
 	}{
 		{
@@ -1528,8 +1535,9 @@ func TestIterateContents(t *testing.T) {
 			options: IterateOptions{
 				Parallel: 10,
 			},
-			fail: someError,
-			want: map[ID]bool{},
+			fail:  someError,
+			sleep: 10 * time.Millisecond,
+			want:  map[ID]bool{},
 		},
 		{
 			desc: "parallel, include deleted",
@@ -1569,6 +1577,10 @@ func TestIterateContents(t *testing.T) {
 			got := map[ID]bool{}
 
 			err := bm.IterateContents(ctx, tc.options, func(ci Info) error {
+				if tc.sleep > 0 {
+					time.Sleep(tc.sleep)
+				}
+
 				if tc.fail != nil {
 					return tc.fail
 				}

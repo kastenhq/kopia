@@ -42,5 +42,6 @@ func (idx Index) IsKeyInIndex(key, indexName string) bool {
 		_, keyExists := idx[indexName][key]
 		return keyExists
 	}
+
 	return false
 }

@@ -11,6 +11,8 @@ import (
 	"github.com/kopia/kopia/tests/tools/fswalker"
 )
 
+// KopiaSnapshotter wraps the functionality to connect to a kopia repository with
+// the fswalker WalkCompare.
 type KopiaSnapshotter struct {
 	comparer *fswalker.WalkCompare
 	kopiaConnector
@@ -73,6 +75,8 @@ func (ks *KopiaSnapshotter) CreateSnapshot(ctx context.Context, sourceDir string
 	return
 }
 
+// RestoreSnapshot restores the snapshot with the given ID to the provided restore directory. It returns
+// fingerprint verification data of the restored snapshot directory.
 func (ks *KopiaSnapshotter) RestoreSnapshot(ctx context.Context, snapID, restoreDir string, opts map[string]string) (fingerprint []byte, err error) {
 	err = ks.snap.RestoreSnapshot(snapID, restoreDir)
 	if err != nil {
@@ -82,6 +86,8 @@ func (ks *KopiaSnapshotter) RestoreSnapshot(ctx context.Context, snapID, restore
 	return ks.comparer.Gather(ctx, restoreDir, opts)
 }
 
+// RestoreSnapshotCompare restores the snapshot with the given ID to the provided restore directory, then verifies the data
+// that has been restored against the provided fingerprint validation data.
 func (ks *KopiaSnapshotter) RestoreSnapshotCompare(ctx context.Context, snapID, restoreDir string, validationData []byte, reportOut io.Writer, opts map[string]string) (err error) {
 	err = ks.snap.RestoreSnapshot(snapID, restoreDir)
 	if err != nil {

@@ -1,12 +1,15 @@
-package coordinate
+// Package pathlock defines a PathLocker interface and an implementation
+// that will synchronize based on filepath.
+package pathlock
 
 import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
-// PathLocker is an interface for synchronizing on a given filepath.
+// Locker is an interface for synchronizing on a given filepath.
 // A call to Lock a given path will block any asynchronous calls to Lock
 // that same path, or any parent or child path in the same sub-tree.
 // For example:
@@ -16,42 +19,75 @@ import (
 //		- Blocks a Lock call for path /a/b/c/d
 //		- Allows a Lock call for path /a/b/x
 //		- Allows a Lock call for path /a/x
-type PathLocker interface {
-	Lock(path string)
-	Unlock(path string)
+type Locker interface {
+	Lock(path string) (Unlocker, error)
 }
 
-var _ PathLocker = (*PathLock)(nil)
+// Unlocker unlocks from a previous invocation of Lock().
+type Unlocker interface {
+	Unlock()
+}
 
-// PathLock is a path-based mutex mechanism that allows for synchronization
+var _ Locker = (*pathLock)(nil)
+
+// pathLock is a path-based mutex mechanism that allows for synchronization
 // along subpaths. A call to Lock will block as long as the requested path
 // is equal to, or otherwise in the path of (e.g. parent/child) another path
 // that has already been Locked. The thread will be blocked until the holder
 // of the lock calls Unlock.
-type PathLock struct {
+type pathLock struct {
 	mu          sync.Mutex
-	lockedPaths map[string](chan struct{})
+	lockedPaths map[string]chan struct{}
 }
 
-// NewPathLock instantiates a new PathLock and returns its pointer.
-func NewPathLock() *PathLock {
-	return &PathLock{
-		lockedPaths: make(map[string](chan struct{})),
+// NewLocker returns a Locker.
+func NewLocker() Locker {
+	return &pathLock{
+		lockedPaths: make(map[string]chan struct{}),
 	}
 }
+
+type lock struct {
+	pl   *pathLock
+	path string
+}
+
+func (l *lock) Unlock() {
+	l.pl.unlock(l.path)
+}
+
+// busyCounter is for unit testing, to determine whether a Lock has been
+// called and blocked.
+var busyCounter uint64
 
 // Lock will lock the given path, preventing concurrent calls to Lock
 // for that path, or any parent/child path, until Unlock has been called.
 // Any concurrent Lock calls will block until that path is available.
-func (pl *PathLock) Lock(path string) {
+func (pl *pathLock) Lock(path string) (Unlocker, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+
 	for {
-		ch := pl.tryToLockPath(path)
+		ch, err := pl.tryToLockPath(absPath)
+		if err != nil {
+			return nil, err
+		}
+
 		if ch == nil {
 			break
 		}
 
+		atomic.AddUint64(&busyCounter, 1)
+
 		<-ch
 	}
+
+	return &lock{
+		pl:   pl,
+		path: absPath,
+	}, nil
 }
 
 // tryToLockPath is a helper for locking a given path/subpath.
@@ -69,26 +105,39 @@ func (pl *PathLock) Lock(path string) {
 // channel is returned. The caller can wait on that channel. After
 // the channel is closed, the caller should try again by calling
 // `tryToLockPath` until no channel is returned (indicating the lock
-// has been claimed)
-func (pl *PathLock) tryToLockPath(path string) chan struct{} {
+// has been claimed).
+func (pl *pathLock) tryToLockPath(path string) (chan struct{}, error) {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 
 	for lockedPath, ch := range pl.lockedPaths {
-		if isInPath(path, lockedPath) || isInPath(lockedPath, path) {
-			return ch
+		var (
+			pathInLockedPath, lockedPathInPath bool
+			err                                error
+		)
+
+		if pathInLockedPath, err = isInPath(path, lockedPath); err == nil {
+			lockedPathInPath, err = isInPath(lockedPath, path)
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		if pathInLockedPath || lockedPathInPath {
+			return ch, nil
 		}
 	}
 
 	pl.lockedPaths[path] = make(chan struct{})
 
-	return nil
+	return nil, nil
 }
 
-// Unlock will unlock the given path. It is assumed that Lock
-// has already been called, and that Unlock will be called once
+// unlock will unlock the given path. It is assumed that Lock
+// has already been called, and that unlock will be called once
 // and only once with the exact path provided to the Lock function.
-func (pl *PathLock) Unlock(path string) {
+func (pl *pathLock) unlock(path string) {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 
@@ -98,15 +147,14 @@ func (pl *PathLock) Unlock(path string) {
 
 // isInPath is a helper to determine whether one path is
 // either the same as another, or a child path (recursively) of it.
-func isInPath(path1, path2 string) bool {
+func isInPath(path1, path2 string) (bool, error) {
 	relFP, err := filepath.Rel(path2, path1)
 	if err != nil {
-		// Not sure - just wait anyway?
-		return true
+		return true, err
 	}
 
 	// If the relative path contains "..", this function will
 	// return false, because it is a cousin path. Only children (recursive)
 	// and the path itself will return true.
-	return !strings.Contains(relFP, "..")
+	return !strings.Contains(relFP, ".."), nil
 }
