@@ -73,7 +73,7 @@ type InactivePathLocker struct{}
 
 var _ pathlock.Locker = (*InactivePathLocker)(nil)
 
-// Lock implements the coordiante.PathLocker interface.
+// Lock implements the pathlock.Locker interface.
 func (l *InactivePathLocker) Lock(lockPath string) (pathlock.Unlocker, error) {
 	return l, nil
 }
