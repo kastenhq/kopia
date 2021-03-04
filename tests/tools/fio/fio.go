@@ -18,7 +18,7 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/kopia/kopia/tests/robustness/coordinate"
+	"github.com/kopia/kopia/tests/robustness/pathlock"
 )
 
 // List of fio flags.
@@ -65,19 +65,21 @@ type Runner struct {
 	Global          Config
 	Debug           bool
 
-	PathLock coordinate.PathLocker
+	PathLock pathlock.Locker
 }
 
-// InactivePathLocker satisfies the coordinate.PathLocker interface but is a no-op
+// InactivePathLocker satisfies the pathlock.Locker interface but is a no-op.
 type InactivePathLocker struct{}
 
-var _ coordinate.PathLocker = (*InactivePathLocker)(nil)
+var _ pathlock.Locker = (*InactivePathLocker)(nil)
 
-// Lock implements the coordiante.PathLocker interface
-func (*InactivePathLocker) Lock(path string) {}
+// Lock implements the coordiante.PathLocker interface.
+func (l *InactivePathLocker) Lock(lockPath string) (pathlock.Unlocker, error) {
+	return l, nil
+}
 
-// Unlock implements the coordinate.PathLocker interface
-func (*InactivePathLocker) Unlock(path string) {}
+// Unlock satisfies the pathlock.Unlocker interface.
+func (l *InactivePathLocker) Unlock() {}
 
 // NewRunner creates a new fio runner.
 func NewRunner() (fr *Runner, err error) {
