@@ -670,7 +670,7 @@ func TestIOLimitPerWriteAction(t *testing.T) {
 		return nil
 	}
 
-	fioPath := eng.FileWriter.DataDirectory()
+	fioPath := eng.FileWriter.DataDirectory(ctx)
 
 	// Walk the FIO data directory tree, counting the non-zero data written.
 	err = filepath.Walk(fioPath, walkFunc)
