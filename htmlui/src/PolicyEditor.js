@@ -3,26 +3,28 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import axios from 'axios';
 import React, { Component } from 'react';
 import Button from 'react-bootstrap/Button';
+import Row from 'react-bootstrap/Row';
 import Col from 'react-bootstrap/Col';
 import Form from 'react-bootstrap/Form';
 import Tab from 'react-bootstrap/Tab';
 import Tabs from 'react-bootstrap/Tabs';
 import { handleChange, OptionalBoolean, OptionalNumberField, RequiredBoolean, stateProperty, StringList } from './forms';
+import { sourceQueryStringParams } from './uiutil';
 
-function sourceDisplayName(s) {
+function policyTypeName(s) {
     if (!s.host && !s.userName) {
-        return "global"
+        return "Global Policy"
     }
 
     if (!s.userName) {
-        return "host " + s.host;
+        return "Per-Host Policy";
     }
 
     if (!s.path) {
-        return "user " + s.userName + "@" + s.host;
+        return "Per-User Policy";
     }
 
-    return "user " + s.userName + "@" + s.host + " path '" + s.path + "'";
+    return "Directory Policy";
 }
 
 export class PolicyEditor extends Component {
@@ -57,27 +59,30 @@ export class PolicyEditor extends Component {
     }
 
     fetchPolicy(props) {
-        if (props.isNew) {
-            this.setState({
-                isLoading: false,
-                policy: {},
-            });
-
-            return;
-        }
-
         axios.get(this.snapshotURL(props)).then(result => {
             this.setState({
                 isLoading: false,
                 policy: result.data,
             });
-        }).catch(error => this.setState({
-            error: error,
-            isLoading: false
-        }));
+        }).catch(error => {
+            if (error.response && error.response.data.code !== "NOT_FOUND") {
+                this.setState({
+                    error: error,
+                    isLoading: false
+                })
+            } else {
+                this.setState({
+                    policy: {},
+                    isNew: true,
+                    isLoading: false
+                })
+            }
+        });
     }
 
-    saveChanges() {
+    saveChanges(e) {
+        e.preventDefault()
+
         function removeEmpty(l) {
             if (!l) {
                 return l;
@@ -119,7 +124,7 @@ export class PolicyEditor extends Component {
         axios.put(this.snapshotURL(this.props), policy).then(result => {
             this.props.close();
         }).catch(error => {
-            alert('Error saving policy: ' + error);
+            alert('Error saving policy: ' + JSON.stringify(error));
         });
     }
 
@@ -134,7 +139,7 @@ export class PolicyEditor extends Component {
     }
 
     snapshotURL(props) {
-        return '/api/v1/policy?host=' + props.host + '&userName=' + props.userName + '&path=' + props.path;
+        return '/api/v1/policy?' + sourceQueryStringParams(props);
     }
 
     isGlobal() {
@@ -152,8 +157,29 @@ export class PolicyEditor extends Component {
         }
 
         return <div className="padded">
-            <h3><Button size="sm" variant="outline-secondary" onClick={this.props.close} ><FontAwesomeIcon icon={faChevronLeft} /> Return </Button> {this.props.isNew && "New "}Policy: {sourceDisplayName(this.props)}</h3>
-
+            {!this.props.embedded && <h4><Button size="sm" variant="outline-secondary" onClick={this.props.close} ><FontAwesomeIcon icon={faChevronLeft} /> Return </Button>
+            &nbsp;&nbsp;{policyTypeName(this.props)}</h4>}
+            <Form onSubmit={this.saveChanges}>
+            {!this.props.embedded && <Row>
+                <Col xs="2">
+                    <Form.Group>
+                        <Form.Label className="required">Target User</Form.Label>
+                        <Form.Control size="sm" type="text" readOnly value={this.props.userName || "<any user>"} />
+                    </Form.Group>
+                </Col>
+                <Col xs="2">
+                    <Form.Group>
+                        <Form.Label className="required">Target Host</Form.Label>
+                        <Form.Control size="sm" type="text" readOnly value={this.props.host || "<any host>"} />
+                    </Form.Group>
+                </Col>
+                <Col xs="8">
+                    <Form.Group>
+                        <Form.Label className="required">Target Directory Path</Form.Label>
+                        <Form.Control size="sm" type="text" readOnly value={this.props.path || "<any path>"} />
+                    </Form.Group>
+                </Col>
+            </Row>}
             <Tabs defaultActiveKey="retention">
                 <Tab eventKey="retention" title="Retention">
                     <div className="tab-body">
@@ -190,7 +216,7 @@ export class PolicyEditor extends Component {
                     </div>
                 </Tab>
                 <Tab eventKey="errors" title="Errors">
-                    <div class="tab-body">
+                    <div className="tab-body">
                         <p className="policy-help">Controls how errors detected while snapshotting are handled.</p>
                         <Form.Row>
                             {OptionalBoolean(this, "Ignore Directory Errors", "policy.errorHandling.ignoreDirectoryErrors", "inherit from parent")}
@@ -200,7 +226,7 @@ export class PolicyEditor extends Component {
                     </div>
                 </Tab>
                 <Tab eventKey="compression" title="Compression">
-                    <div class="tab-body">
+                    <div className="tab-body">
                         <p className="policy-help">Controls which files are compressed.</p>
                         <Form.Row>
                             <Form.Group as={Col}>
@@ -209,7 +235,7 @@ export class PolicyEditor extends Component {
                                     name="policy.compression.compressorName"
                                     onChange={this.handleChange}
                                     value={stateProperty(this, "policy.compression.compressorName")}>
-                                        <option value="">(none)</option>
+                                    <option value="">(none)</option>
                                     {this.state.algorithms && this.state.algorithms.compression.map(x => <option key={x} value={x}>{x}</option>)}
                                 </Form.Control>
                             </Form.Group>
@@ -223,7 +249,7 @@ export class PolicyEditor extends Component {
                     </div>
                 </Tab>
                 <Tab eventKey="scheduling" title="Scheduling">
-                    <div class="tab-body">
+                    <div className="tab-body">
                         <p className="policy-help">Controls when snapshots are automatically created.</p>
                         <Form.Row>
                             {OptionalNumberField(this, "Snapshot Interval", "policy.scheduling.intervalSeconds", { placeholder: "seconds" })}
@@ -238,14 +264,18 @@ export class PolicyEditor extends Component {
                 {RequiredBoolean(this, "Disable Parent Policy Evaluation (prevents any parent policies from affecting this directory and subdirectories)", "policy.noParent")}
             </Form.Row>
 
-            <Button size="sm" variant="success" onClick={this.saveChanges}>Save Policy</Button>
-            {!this.props.isNew && <>&nbsp;
+            <Button size="sm" variant="success" type="submit" onClick={this.saveChanges}>Save Policy</Button>
+            {!this.state.isNew && <>&nbsp;
             <Button size="sm" variant="danger" disabled={this.isGlobal()} onClick={this.deletePolicy}>Delete Policy</Button>
             </>}
+            
+            {!this.props.embedded && <>
             <hr />
             <h5>JSON representation</h5>
             <pre className="debug-json">{JSON.stringify(this.state.policy, null, 4)}
             </pre>
+            </>}
+            </Form>
         </div>;
     }
 }

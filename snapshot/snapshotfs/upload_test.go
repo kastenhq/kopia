@@ -12,6 +12,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/fs"
+	"github.com/kopia/kopia/fs/virtualfs"
 	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/faketime"
 	"github.com/kopia/kopia/internal/mockfs"
@@ -546,7 +547,7 @@ func TestUploadWithCheckpointing(t *testing.T) {
 	}
 }
 
-func TestUploadScan(t *testing.T) {
+func TestUploadScanStopsOnContextCancel(t *testing.T) {
 	ctx := testlogging.Context(t)
 	th := newUploadTestHarness(ctx, t)
 
@@ -560,12 +561,116 @@ func TestUploadScan(t *testing.T) {
 		cancel()
 	})
 
-	result, err := u.scanDirectory(scanctx, th.sourceDir)
+	result, err := u.scanDirectory(scanctx, th.sourceDir, nil)
 	if !errors.Is(err, scanctx.Err()) {
 		t.Fatalf("invalid scan error: %v", err)
 	}
 
 	if result.numFiles == 0 && result.totalFileSize == 0 {
 		t.Fatalf("should have returned partial results, got zeros")
+	}
+}
+
+func TestUploadScanIgnoresFiles(t *testing.T) {
+	ctx := testlogging.Context(t)
+	th := newUploadTestHarness(ctx, t)
+
+	defer th.cleanup()
+
+	u := NewUploader(th.repo)
+
+	// set up a policy tree where that ignores some files.
+	policyTree := policy.BuildTree(map[string]*policy.Policy{
+		".": {
+			FilesPolicy: policy.FilesPolicy{
+				IgnoreRules: []string{"f1"},
+			},
+		},
+	}, policy.DefaultPolicy)
+
+	// no policy
+	result1, err := u.scanDirectory(ctx, th.sourceDir, nil)
+	must(t, err)
+
+	result2, err := u.scanDirectory(ctx, th.sourceDir, policyTree)
+	must(t, err)
+
+	if result1.numFiles == 0 {
+		t.Fatalf("no files scanned")
+	}
+
+	if result2.numFiles == 0 {
+		t.Fatalf("no files scanned")
+	}
+
+	if got, want := result2.numFiles, result1.numFiles; got >= want {
+		t.Fatalf("expected lower number of files %v, wanted %v", got, want)
+	}
+
+	if got, want := result2.totalFileSize, result1.totalFileSize; got >= want {
+		t.Fatalf("expected lower file size %v, wanted %v", got, want)
+	}
+}
+
+func TestUpload_VirtualDirectoryWithStreamingFile(t *testing.T) {
+	ctx := testlogging.Context(t)
+	th := newUploadTestHarness(ctx, t)
+
+	defer th.cleanup()
+
+	log(ctx).Infof("Uploading static directory with streaming file")
+
+	u := NewUploader(th.repo)
+
+	policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
+
+	// Create a temporary pipe file with test data
+	content := []byte("Streaming Temporary file content")
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("error creating pipe file: %v", err)
+	}
+
+	if _, err = w.Write(content); err != nil {
+		t.Fatalf("error writing to pipe file: %v", err)
+	}
+
+	w.Close()
+
+	staticRoot := virtualfs.NewStaticDirectory("rootdir", fs.Entries{
+		virtualfs.StreamingFileFromReader("stream-file", r),
+	})
+
+	man, err := u.Upload(ctx, staticRoot, policyTree, snapshot.SourceInfo{})
+	if err != nil {
+		t.Fatalf("Upload error: %v", err)
+	}
+
+	if got, want := man.Stats.CachedFiles, int32(0); got != want {
+		t.Fatalf("unexpected manifest cached files: %v, want %v", got, want)
+	}
+
+	if got, want := man.Stats.NonCachedFiles, int32(1); got != want {
+		// one file is not cached
+		t.Fatalf("unexpected manifest non-cached files: %v, want %v", got, want)
+	}
+
+	if got, want := man.Stats.TotalDirectoryCount, int32(1); got != want {
+		// must have one directory
+		t.Fatalf("unexpected manifest directory count: %v, want %v", got, want)
+	}
+
+	if got, want := man.Stats.TotalFileCount, int32(1); got != want {
+		// must have one file
+		t.Fatalf("unexpected manifest file count: %v, want %v", got, want)
+	}
+}
+
+func must(t *testing.T, err error) {
+	t.Helper()
+
+	if err != nil {
+		t.Fatal(err)
 	}
 }
