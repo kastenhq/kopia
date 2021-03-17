@@ -3,13 +3,13 @@
 package robustness
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"testing"
 
 	"github.com/kopia/kopia/internal/clock"
+	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/tests/robustness"
 	"github.com/kopia/kopia/tests/robustness/engine"
 	"github.com/kopia/kopia/tests/robustness/fiofilewriter"
@@ -28,7 +28,7 @@ func TestManySmallFiles(t *testing.T) {
 		fiofilewriter.MinNumFilesPerWriteField: strconv.Itoa(numFiles),
 	}
 
-	ctx := context.TODO()
+	ctx := testlogging.Context(t)
 
 	_, err := eng.ExecAction(ctx, engine.WriteRandomFilesActionKey, fileWriteOpts)
 	testenv.AssertNoError(t, err)
@@ -52,7 +52,7 @@ func TestOneLargeFile(t *testing.T) {
 		fiofilewriter.MinNumFilesPerWriteField: strconv.Itoa(numFiles),
 	}
 
-	ctx := context.TODO()
+	ctx := testlogging.Context(t)
 
 	_, err := eng.ExecAction(ctx, engine.WriteRandomFilesActionKey, fileWriteOpts)
 	testenv.AssertNoError(t, err)
@@ -80,7 +80,7 @@ func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
 		engine.ActionRepeaterField:             strconv.Itoa(actionRepeats),
 	}
 
-	ctx := context.TODO()
+	ctx := testlogging.Context(t)
 
 	_, err := eng.ExecAction(ctx, engine.WriteRandomFilesActionKey, fileWriteOpts)
 	testenv.AssertNoError(t, err)
@@ -112,7 +112,7 @@ func TestRandomizedSmall(t *testing.T) {
 	}
 
 	for clock.Since(st) <= *randomizedTestDur {
-		ctx := context.TODO()
+		ctx := testlogging.Context(t)
 
 		err := eng.RandomAction(ctx, opts)
 		if errors.Is(err, robustness.ErrNoOp) {
