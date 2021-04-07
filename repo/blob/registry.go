@@ -2,9 +2,17 @@ package blob
 
 import (
 	"context"
+	"time"
 
 	"github.com/pkg/errors"
 )
+
+// Options are optional runtime parameters for the storage layer.
+type Options struct {
+	// Use a point in time view when the store supports it, for example via
+	// object versioning
+	PointInTimeView time.Time
+}
 
 var factories = map[string]*storageFactory{}
 
