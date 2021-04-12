@@ -8,12 +8,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-var pointInTime time.Time
-
-func registerPointInTimeFlag(cmd *kingpin.CmdClause) {
-	addPointInTimeFlag(cmd, &pointInTime)
-}
-
 func addPointInTimeFlag(cmd *kingpin.CmdClause, pit *time.Time) {
 	var pointInTimeStr string
 
