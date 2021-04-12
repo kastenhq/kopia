@@ -1,7 +1,10 @@
 package s3
 
+import "github.com/kopia/kopia/repo/blob"
+
 // Options defines options for S3-based storage.
 type Options struct {
+	StoreOptions blob.Options `json:"storeOptions,omitempty"`
 	// BucketName is the name of the bucket where data is stored.
 	BucketName string `json:"bucket"`
 

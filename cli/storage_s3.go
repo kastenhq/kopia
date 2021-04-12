@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/alecthomas/kingpin"
+	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/s3"
@@ -27,8 +28,13 @@ func init() {
 			cmd.Flag("disable-tls-verification", "Disable TLS (HTTPS) certificate verification").BoolVar(&s3options.DoNotVerifyTLS)
 			cmd.Flag("max-download-speed", "Limit the download speed.").PlaceHolder("BYTES_PER_SEC").IntVar(&s3options.MaxDownloadSpeedBytesPerSecond)
 			cmd.Flag("max-upload-speed", "Limit the upload speed.").PlaceHolder("BYTES_PER_SEC").IntVar(&s3options.MaxUploadSpeedBytesPerSecond)
+			addPointInTimeFlag(cmd, &s3options.StoreOptions.PointInTimeView)
 		},
 		func(ctx context.Context, isNew bool) (blob.Storage, error) {
+			if isNew && !s3options.StoreOptions.PointInTimeView.IsZero() {
+				return nil, errors.New("Cannot specify a 'point-in-time' option when creating a repository")
+			}
+
 			return s3.New(ctx, &s3options)
 		},
 	)
