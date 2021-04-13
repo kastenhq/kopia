@@ -54,6 +54,16 @@ func (s pitStorage) ListBlobs(ctx context.Context, blobIDPrefix blob.ID, cb func
 	return nil
 }
 
+func (s pitStorage) GetBlob(ctx context.Context, blobID blob.ID, offset, length int64) ([]byte, error) {
+	// getMetadata returns the specific blob version at time t
+	m, err := s.getMetadata(ctx, blobID)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.vs.GetBlobWithVersion(ctx, blobID, m.Version, offset, length)
+}
+
 func (s pitStorage) GetMetadata(ctx context.Context, blobID blob.ID) (blob.Metadata, error) {
 	m, err := s.getMetadata(ctx, blobID)
 
