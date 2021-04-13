@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +20,7 @@ import (
 const (
 	maxSnapshotDescriptionLength = 1024
 	timeFormat                   = "2006-01-02 15:04:05 MST"
+	numTagFields                 = 2
 )
 
 var (
@@ -114,13 +114,16 @@ func runSnapshotCommand(ctx context.Context, rep repo.RepositoryWriter) error {
 
 func getTags() (map[string]string, error) {
 	tags := map[string]string{}
+
 	for _, tagkv := range *snapshotCreateTags {
 		tagFields := strings.Split(tagkv, ":")
-		if len(tagFields) != 2 {
-			return nil, fmt.Errorf("Invalid tag format. Requires <key>:<value>")
+		if len(tagFields) != numTagFields {
+			return nil, errors.New("Invalid tag format. Requires <key>:<value>")
 		}
+
 		tags[tagFields[0]] = tagFields[1]
 	}
+
 	return tags, nil
 }
 

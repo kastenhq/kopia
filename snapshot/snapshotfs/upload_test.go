@@ -222,7 +222,9 @@ func TestUploadWithTags(t *testing.T) {
 	if err != nil {
 		t.Errorf("Upload error: %v", err)
 	}
-	if val, ok := s1.Tags["testkey"]; !ok || val != "testvalue" {
+
+	val, ok := s1.Tags["testkey"]
+	if !ok || val != "testvalue" {
 		t.Errorf("Tags not set correctly")
 	}
 }
