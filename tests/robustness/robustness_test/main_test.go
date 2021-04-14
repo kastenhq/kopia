@@ -83,101 +83,24 @@ func (th *kopiaRobustnessTestHarness) init(ctx context.Context, dataRepoPath, me
 	th.dataRepoPath = dataRepoPath
 	th.metaRepoPath = metaRepoPath
 
-	// the initialization state machine is linear and bails out on first failure
-	if th.makeBaseDir() && th.getFileWriter() && th.getSnapshotter() &&
-		th.getPersister() && th.getEngine() {
-		return // success!
+	var ok bool
+
+	if th.baseDirPath, ok = MakeBaseDir(); !ok {
+		th.exitTest(ctx)
 	}
 
-	th.cleanup(ctx)
-
-	if th.skipTest {
-		os.Exit(0)
+	if th.fileWriter, th.skipTest, ok = GetFioFileWriter(); !ok {
+		th.exitTest(ctx)
 	}
 
-	os.Exit(1)
-}
-
-func (th *kopiaRobustnessTestHarness) makeBaseDir() bool {
-	baseDir, err := ioutil.TempDir("", "engine-data-")
-	if err != nil {
-		log.Println("Error creating temp dir:", err)
-		return false
+	if th.snapshotter, th.skipTest, ok = GetKopiaSnapshotter(th.baseDirPath, th.dataRepoPath); !ok {
+		th.exitTest(ctx)
 	}
 
-	th.baseDirPath = baseDir
-
-	return true
-}
-
-func (th *kopiaRobustnessTestHarness) getFileWriter() bool {
-	fw, err := fiofilewriter.New()
-	if err != nil {
-		if errors.Is(err, fio.ErrEnvNotSet) {
-			log.Println("Skipping robustness tests because FIO environment is not set")
-
-			th.skipTest = true
-		} else {
-			log.Println("Error creating fio FileWriter:", err)
-		}
-
-		return false
+	if th.persister, th.skipTest, ok = GetKopiaPersister(th.baseDirPath, th.metaRepoPath); !ok {
+		th.exitTest(ctx)
 	}
 
-	th.fileWriter = fw
-
-	return true
-}
-
-func (th *kopiaRobustnessTestHarness) getSnapshotter() bool {
-	ks, err := snapmeta.NewSnapshotter(th.baseDirPath)
-	if err != nil {
-		if errors.Is(err, kopiarunner.ErrExeVariableNotSet) {
-			log.Println("Skipping robustness tests because KOPIA_EXE is not set")
-
-			th.skipTest = true
-		} else {
-			log.Println("Error creating kopia Snapshotter:", err)
-		}
-
-		return false
-	}
-
-	th.snapshotter = ks
-
-	if err = ks.ConnectOrCreateRepo(th.dataRepoPath); err != nil {
-		log.Println("Error initializing kopia Snapshotter:", err)
-		return false
-	}
-
-	return true
-}
-
-func (th *kopiaRobustnessTestHarness) getPersister() bool {
-	kp, err := snapmeta.NewPersister(th.baseDirPath)
-	if err != nil {
-		if errors.Is(err, kopiarunner.ErrExeVariableNotSet) {
-			log.Println("Skipping robustness tests because KOPIA_EXE is not set")
-
-			th.skipTest = true
-		} else {
-			log.Println("Error creating kopia Persister:", err)
-		}
-
-		return false
-	}
-
-	th.persister = kp
-
-	if err = kp.ConnectOrCreateRepo(th.metaRepoPath); err != nil {
-		log.Println("Error initializing kopia Persister:", err)
-		return false
-	}
-
-	return true
-}
-
-func (th *kopiaRobustnessTestHarness) getEngine() bool {
 	args := &engine.Args{
 		MetaStore:        th.persister,
 		TestRepo:         th.snapshotter,
@@ -186,24 +109,104 @@ func (th *kopiaRobustnessTestHarness) getEngine() bool {
 		SyncRepositories: true,
 	}
 
+	if th.engine, ok = GetEngine(ctx, args); !ok {
+		th.exitTest(ctx)
+	}
+}
+
+// MakeBaseDir creates a temp directory for engine data.
+func MakeBaseDir() (string, bool) {
+	baseDir, err := ioutil.TempDir("", "engine-data-")
+	if err != nil {
+		log.Println("Error creating temp dir:", err)
+		return "", false
+	}
+
+	return baseDir, true
+}
+
+// GetFioFileWriter creates an fiofilewriter.
+func GetFioFileWriter() (fw *fiofilewriter.FileWriter, skipTest, ok bool) {
+	fw, err := fiofilewriter.New()
+	if err != nil {
+		if errors.Is(err, fio.ErrEnvNotSet) {
+			log.Println("Skipping robustness tests because FIO environment is not set")
+
+			skipTest = true
+		} else {
+			log.Println("Error creating fio FileWriter:", err)
+		}
+
+		return nil, skipTest, false
+	}
+
+	return fw, false, true
+}
+
+// GetKopiaSnapshotter creates a KopiaSnapshotter.
+func GetKopiaSnapshotter(baseDirPath, dataRepoPath string) (s *snapmeta.KopiaSnapshotter, skipTest, ok bool) {
+	ks, err := snapmeta.NewSnapshotter(baseDirPath)
+	if err != nil {
+		if errors.Is(err, kopiarunner.ErrExeVariableNotSet) {
+			log.Println("Skipping robustness tests because KOPIA_EXE is not set")
+
+			skipTest = true
+		} else {
+			log.Println("Error creating kopia Snapshotter:", err)
+		}
+
+		return nil, skipTest, false
+	}
+
+	if err = ks.ConnectOrCreateRepo(dataRepoPath); err != nil {
+		log.Println("Error initializing kopia Snapshotter:", err)
+		return ks, false, false
+	}
+
+	return ks, false, true
+}
+
+// GetKopiaPersister creates a KopiaPersister.
+func GetKopiaPersister(baseDirPath, metaRepoPath string) (kp *snapmeta.KopiaPersister, skipTest, ok bool) {
+	kp, err := snapmeta.NewPersister(baseDirPath)
+	if err != nil {
+		if errors.Is(err, kopiarunner.ErrExeVariableNotSet) {
+			log.Println("Skipping robustness tests because KOPIA_EXE is not set")
+
+			skipTest = true
+		} else {
+			log.Println("Error creating kopia Persister:", err)
+		}
+
+		return nil, skipTest, false
+	}
+
+	if err = kp.ConnectOrCreateRepo(metaRepoPath); err != nil {
+		log.Println("Error initializing kopia Persister:", err)
+		return kp, false, false
+	}
+
+	return kp, false, true
+}
+
+// GetEngine creates an engine for use in robustness tests.
+func GetEngine(ctx context.Context, args *engine.Args) (eng *engine.Engine, ok bool) {
 	eng, err := engine.New(args) // nolint:govet
 	if err != nil {
 		log.Println("Error on engine creation:", err)
-		return false
+		return nil, false
 	}
 
 	// Initialize the engine, connecting it to the repositories.
 	// Note that th.engine is not yet set so that metadata will not be
 	// flushed on cleanup in case there was an issue while loading.
-	err = eng.Init(context.Background())
+	err = eng.Init(ctx)
 	if err != nil {
 		log.Println("Error initializing engine for S3:", err)
-		return false
+		return nil, false
 	}
 
-	th.engine = eng
-
-	return true
+	return eng, true
 }
 
 func (th *kopiaRobustnessTestHarness) cleanup(ctx context.Context) (retErr error) {
@@ -234,4 +237,14 @@ func (th *kopiaRobustnessTestHarness) cleanup(ctx context.Context) (retErr error
 	}
 
 	return
+}
+
+func (th *kopiaRobustnessTestHarness) exitTest(ctx context.Context) {
+	th.cleanup(ctx)
+
+	if th.skipTest {
+		os.Exit(0)
+	}
+
+	os.Exit(1)
 }
