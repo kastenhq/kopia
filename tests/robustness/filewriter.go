@@ -26,4 +26,7 @@ type FileWriter interface {
 	// on its input option values (none of which are required).
 	// The method returns the effective option values used and the error if any.
 	WriteRandomFiles(ctx context.Context, opts map[string]string) (map[string]string, error)
+
+	// Cleanup cleans up the FileWriter.
+	Cleanup()
 }

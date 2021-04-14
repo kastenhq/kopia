@@ -19,6 +19,7 @@ type Snapshotter interface {
 	DeleteSnapshot(ctx context.Context, snapID string, opts map[string]string) error
 	RunGC(ctx context.Context, opts map[string]string) error
 	ListSnapshots(ctx context.Context) ([]string, error)
+	Cleanup()
 }
 
 // CreateSnapshotStats is a struct for returning various stats from the snapshot execution.
