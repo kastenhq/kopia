@@ -71,17 +71,19 @@ var providerCreds = map[string]string{
 }
 
 // startDockerMinioOrSkip starts ephemeral minio instance on a random port and returns the endpoint ("localhost:xxx").
-func startDockerMinioOrSkip(t *testing.T) string {
+func startDockerMinioOrSkip(t *testing.T, minioExtraArgs ...string) string {
 	t.Helper()
 
 	testutil.TestSkipOnCIUnlessLinuxAMD64(t)
 
-	containerID := testutil.RunContainerAndKillOnCloseOrSkip(t,
+	args := append([]string{
 		"run", "--rm", "-p", "0:9000",
-		"-e", "MINIO_ROOT_USER="+minioAccessKeyID,
-		"-e", "MINIO_ROOT_PASSWORD="+minioSecretAccessKey,
-		"-e", "MINIO_REGION_NAME="+minioRegion,
-		"-d", "minio/minio", "server", "/data")
+		"-e", "MINIO_ROOT_USER=" + minioAccessKeyID,
+		"-e", "MINIO_ROOT_PASSWORD=" + minioSecretAccessKey,
+		"-e", "MINIO_REGION_NAME=" + minioRegion,
+		"-d", "minio/minio", "server", "/data",
+	}, minioExtraArgs...)
+	containerID := testutil.RunContainerAndKillOnCloseOrSkip(t, args...)
 	endpoint := testutil.GetContainerMappedPortAddress(t, containerID, "9000")
 
 	t.Logf("endpoint: %v", endpoint)
