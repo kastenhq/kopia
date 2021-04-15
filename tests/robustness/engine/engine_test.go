@@ -719,7 +719,7 @@ func TestStatsPersist(t *testing.T) {
 
 	eng := &Engine{
 		MetaStore: snapStore,
-		CumulativeStats: &Stats{
+		CumulativeStats: Stats{
 			ActionCounter: 11235,
 			CreationTime:  creationTime,
 			PerActionStats: map[ActionKey]*ActionStats{
@@ -776,7 +776,7 @@ func TestLogsPersist(t *testing.T) {
 	err = snapStore.ConnectOrCreateFilesystem(tmpDir)
 	testenv.AssertNoError(t, err)
 
-	logData := &Log{
+	logData := Log{
 		Log: []*LogEntry{
 			{
 				StartTime: clock.Now().Add(-time.Hour),
