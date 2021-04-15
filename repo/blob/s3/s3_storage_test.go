@@ -58,6 +58,10 @@ const (
 	testSTSSecretAccessKeyEnv = "KOPIA_S3_TEST_STS_SECRET_ACCESS_KEY"
 	testSessionTokenEnv       = "KOPIA_S3_TEST_SESSION_TOKEN"
 
+	// env vars for versioned store creds.
+	versionedS3CredsEnv     = "KOPIA_S3_VERSIONED_CREDS"
+	versionedWasabiCredsEnv = "KOPIA_S3_WASABI_VERSIONED_CREDS"
+
 	expiredBadSSL       = "https://expired.badssl.com/"
 	selfSignedBadSSL    = "https://self-signed.badssl.com/"
 	untrustedRootBadSSL = "https://untrusted-root.badssl.com/"
@@ -66,8 +70,9 @@ const (
 
 var providerCreds = map[string]string{
 	"S3":               "KOPIA_S3_CREDS",
+	"S3-Versioned":     versionedS3CredsEnv,
 	"Wasabi":           "KOPIA_S3_WASABI_CREDS",
-	"Wasabi-Versioned": "KOPIA_S3_WASABI_VERSIONED_CREDS",
+	"Wasabi-Versioned": versionedWasabiCredsEnv,
 }
 
 // startDockerMinioOrSkip starts ephemeral minio instance on a random port and returns the endpoint ("localhost:xxx").
