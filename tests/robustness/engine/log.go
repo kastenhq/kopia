@@ -5,7 +5,6 @@ package engine
 import (
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kopia/kopia/internal/clock"
@@ -15,7 +14,6 @@ import (
 type Log struct {
 	runOffset int
 	Log       []*LogEntry
-	mu        sync.RWMutex
 }
 
 // LogEntry is an entry for the engine log.
@@ -87,9 +85,6 @@ func (elog *Log) AddEntry(l *LogEntry) {
 // AddCompleted finalizes a log entry at the time it is called
 // and with the provided error, before adding it to the Log.
 func (elog *Log) AddCompleted(logEntry *LogEntry, err error) {
-	elog.mu.Lock()
-	defer elog.mu.Unlock()
-
 	logEntry.EndTime = clock.Now()
 	if err != nil {
 		logEntry.Error = err.Error()

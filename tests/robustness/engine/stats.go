@@ -5,7 +5,6 @@ package engine
 import (
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/kopia/kopia/internal/clock"
@@ -64,15 +63,10 @@ type Stats struct {
 	DataPurgeCount     int64
 	ErrorRecoveryCount int64
 	NoOpCount          int64
-
-	mu sync.RWMutex
 }
 
 // Stats returns a string report of the engine's stats.
 func (stats *Stats) Stats() string {
-	stats.mu.RLock()
-	defer stats.mu.RUnlock()
-
 	b := &strings.Builder{}
 
 	fmt.Fprintln(b, "=============")
@@ -101,82 +95,6 @@ func (stats *Stats) Stats() string {
 	}
 
 	return b.String()
-}
-
-// RecordAction records runtime statistics for an action.
-func (stats *Stats) RecordAction(actionKey ActionKey, st time.Time, err error) {
-	stats.mu.Lock()
-	defer stats.mu.Unlock()
-
-	if stats.PerActionStats != nil && stats.PerActionStats[actionKey] == nil {
-		stats.PerActionStats[actionKey] = new(ActionStats)
-	}
-
-	stats.PerActionStats[actionKey].Record(st, err)
-}
-
-// IncrementNoOpCount increments the no-op count.
-func (stats *Stats) IncrementNoOpCount() {
-	stats.mu.Lock()
-	defer stats.mu.Unlock()
-
-	stats.NoOpCount++
-}
-
-// IncrementActionCount increments the action count.
-func (stats *Stats) IncrementActionCount() {
-	stats.mu.Lock()
-	defer stats.mu.Unlock()
-
-	stats.ActionCounter++
-}
-
-// IncrementDataPurgeCount increments the data purge count.
-func (stats *Stats) IncrementDataPurgeCount() {
-	stats.mu.Lock()
-	defer stats.mu.Unlock()
-
-	stats.DataPurgeCount++
-}
-
-// IncrementDataRestoreCount increments the data restore count.
-func (stats *Stats) IncrementDataRestoreCount() {
-	stats.mu.Lock()
-	defer stats.mu.Unlock()
-
-	stats.DataRestoreCount++
-}
-
-// IncrementErrorRecoveryCount increments the error recovery count.
-func (stats *Stats) IncrementErrorRecoveryCount() {
-	stats.mu.Lock()
-	defer stats.mu.Unlock()
-
-	stats.ErrorRecoveryCount++
-}
-
-// GetActionCount gets the creation time.
-func (stats *Stats) GetActionCount() int64 {
-	stats.mu.RLock()
-	defer stats.mu.RUnlock()
-
-	return stats.ActionCounter
-}
-
-// GetCreationTime gets the creation time.
-func (stats *Stats) GetCreationTime() time.Time {
-	stats.mu.RLock()
-	defer stats.mu.RUnlock()
-
-	return stats.CreationTime
-}
-
-// GetRunTime gets the run time.
-func (stats *Stats) GetRunTime() time.Duration {
-	stats.mu.RLock()
-	defer stats.mu.RUnlock()
-
-	return stats.RunTime
 }
 
 // ActionStats tracks runtime statistics for an action.
@@ -215,7 +133,7 @@ func (s *ActionStats) Record(st time.Time, err error) {
 }
 
 func (stats *Stats) getLifetimeSeconds() int64 {
-	return durationToSec(clock.Since(stats.GetCreationTime()))
+	return durationToSec(clock.Since(stats.CreationTime))
 }
 
 func durationToSec(dur time.Duration) int64 {
@@ -235,5 +153,5 @@ func (e *Engine) getTimestampS() int64 {
 }
 
 func (e *Engine) getRuntimeSeconds() int64 {
-	return durationToSec(e.CumulativeStats.GetRunTime() + clock.Since(e.RunStats.GetCreationTime()))
+	return durationToSec(e.CumulativeStats.RunTime + clock.Since(e.RunStats.CreationTime))
 }
