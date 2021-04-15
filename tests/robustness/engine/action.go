@@ -22,9 +22,16 @@ func (e *Engine) ExecAction(ctx context.Context, actionKey ActionKey, opts map[s
 		opts = make(map[string]string)
 	}
 
-	e.RunStats.ActionCounter++
-	e.CumulativeStats.ActionCounter++
-	log.Printf("Engine executing ACTION: name=%q actionCount=%v totActCount=%v t=%vs (%vs)", actionKey, e.RunStats.ActionCounter, e.CumulativeStats.ActionCounter, e.RunStats.getLifetimeSeconds(), e.getRuntimeSeconds())
+	e.RunStats.IncrementActionCount()
+	e.CumulativeStats.IncrementActionCount()
+	log.Printf(
+		"Engine executing ACTION: name=%q actionCount=%v totActCount=%v t=%vs (%vs)",
+		actionKey,
+		e.RunStats.GetActionCount(),
+		e.CumulativeStats.GetActionCount(),
+		e.RunStats.getLifetimeSeconds(),
+		e.getRuntimeSeconds(),
+	)
 
 	action := actions[actionKey]
 	st := clock.Now()
@@ -53,8 +60,8 @@ func (e *Engine) ExecAction(ctx context.Context, actionKey ActionKey, opts map[s
 	// If error was just a no-op, don't bother logging the action
 	switch {
 	case errors.Is(err, robustness.ErrNoOp):
-		e.RunStats.NoOpCount++
-		e.CumulativeStats.NoOpCount++
+		e.RunStats.IncrementNoOpCount()
+		e.CumulativeStats.IncrementNoOpCount()
 
 		return out, err
 
@@ -62,16 +69,8 @@ func (e *Engine) ExecAction(ctx context.Context, actionKey ActionKey, opts map[s
 		log.Printf("error=%q", err.Error())
 	}
 
-	if e.RunStats.PerActionStats != nil && e.RunStats.PerActionStats[actionKey] == nil {
-		e.RunStats.PerActionStats[actionKey] = new(ActionStats)
-	}
-
-	if e.CumulativeStats.PerActionStats != nil && e.CumulativeStats.PerActionStats[actionKey] == nil {
-		e.CumulativeStats.PerActionStats[actionKey] = new(ActionStats)
-	}
-
-	e.RunStats.PerActionStats[actionKey].Record(st, err)
-	e.CumulativeStats.PerActionStats[actionKey].Record(st, err)
+	e.RunStats.RecordAction(actionKey, st, err)
+	e.CumulativeStats.RecordAction(actionKey, st, err)
 
 	e.EngineLog.AddCompleted(logEntry, err)
 
@@ -112,8 +111,8 @@ func (e *Engine) checkErrRecovery(ctx context.Context, incomingErr error, action
 			return outgoingErr
 		}
 
-		e.RunStats.DataPurgeCount++
-		e.CumulativeStats.DataPurgeCount++
+		e.RunStats.IncrementDataPurgeCount()
+		e.CumulativeStats.IncrementDataPurgeCount()
 
 		// Restore a previoius snapshot to the data directory
 		restoreActionKey := RestoreIntoDataDirectoryActionKey
@@ -122,14 +121,14 @@ func (e *Engine) checkErrRecovery(ctx context.Context, incomingErr error, action
 		if errors.Is(outgoingErr, robustness.ErrNoOp) {
 			outgoingErr = nil
 		} else {
-			e.RunStats.DataRestoreCount++
-			e.CumulativeStats.DataRestoreCount++
+			e.RunStats.IncrementDataRestoreCount()
+			e.CumulativeStats.IncrementDataRestoreCount()
 		}
 	}
 
 	if outgoingErr == nil {
-		e.RunStats.ErrorRecoveryCount++
-		e.CumulativeStats.ErrorRecoveryCount++
+		e.RunStats.IncrementErrorRecoveryCount()
+		e.CumulativeStats.IncrementErrorRecoveryCount()
 	}
 
 	return outgoingErr
