@@ -19,6 +19,7 @@ func addPointInTimeFlag(cmd *kingpin.CmdClause, pit *time.Time) {
 			}
 
 			*pit = t
+			connectReadonly = true
 		}
 
 		return nil
