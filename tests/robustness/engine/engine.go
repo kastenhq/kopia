@@ -59,7 +59,7 @@ func New(args *Args) (*Engine, error) {
 			TestRepo:    args.TestRepo,
 			FileWriter:  args.FileWriter,
 			baseDirPath: args.WorkingDir,
-			RunStats: Stats{
+			RunStats: &Stats{
 				RunCounter:     1,
 				CreationTime:   clock.Now(),
 				PerActionStats: make(map[ActionKey]*ActionStats),
@@ -95,9 +95,9 @@ type Engine struct {
 	cleanupRoutines []func()
 	baseDirPath     string
 
-	RunStats        Stats
-	CumulativeStats Stats
-	EngineLog       Log
+	RunStats        *Stats
+	CumulativeStats *Stats
+	EngineLog       *Log
 }
 
 // Shutdown makes a last snapshot then flushes the metadata and prints the final statistics.
