@@ -160,10 +160,10 @@ func (e *Engine) getRuntimeSeconds() int64 {
 type statsUpdatetype int
 
 const (
-	incrNoOp statsUpdatetype = iota
-	incrDataPurge
-	incrDataRestore
-	incrErrorRecovery
+	statsIncrNoOp statsUpdatetype = iota
+	statsIncrDataPurge
+	statsIncrDataRestore
+	statsIncrErrorRecovery
 )
 
 func (e *Engine) statsUpdateCounters(updateType statsUpdatetype) {
@@ -171,16 +171,16 @@ func (e *Engine) statsUpdateCounters(updateType statsUpdatetype) {
 	defer e.statsMux.Unlock()
 
 	switch updateType {
-	case incrNoOp:
+	case statsIncrNoOp:
 		e.RunStats.NoOpCount++
 		e.CumulativeStats.NoOpCount++
-	case incrDataPurge:
+	case statsIncrDataPurge:
 		e.RunStats.DataPurgeCount++
 		e.CumulativeStats.DataPurgeCount++
-	case incrDataRestore:
+	case statsIncrDataRestore:
 		e.RunStats.DataRestoreCount++
 		e.CumulativeStats.DataRestoreCount++
-	case incrErrorRecovery:
+	case statsIncrErrorRecovery:
 		e.RunStats.ErrorRecoveryCount++
 		e.CumulativeStats.ErrorRecoveryCount++
 	}

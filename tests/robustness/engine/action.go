@@ -51,7 +51,7 @@ func (e *Engine) ExecAction(ctx context.Context, actionKey ActionKey, opts map[s
 	// If error was just a no-op, don't bother logging the action
 	switch {
 	case errors.Is(err, robustness.ErrNoOp):
-		e.statsUpdateCounters(incrNoOp)
+		e.statsUpdateCounters(statsIncrNoOp)
 
 		return out, err
 
@@ -63,13 +63,6 @@ func (e *Engine) ExecAction(ctx context.Context, actionKey ActionKey, opts map[s
 	e.logCompleted(logEntry, err)
 
 	return out, err
-}
-
-func (e *Engine) logCompleted(logEntry *LogEntry, err error) {
-	e.logMux.Lock()
-	defer e.logMux.Unlock()
-
-	e.EngineLog.AddCompleted(logEntry, err)
 }
 
 // RandomAction executes a random action picked by the relative weights given
@@ -106,7 +99,7 @@ func (e *Engine) checkErrRecovery(ctx context.Context, incomingErr error, action
 			return outgoingErr
 		}
 
-		e.statsUpdateCounters(incrDataPurge)
+		e.statsUpdateCounters(statsIncrDataPurge)
 
 		// Restore a previoius snapshot to the data directory
 		restoreActionKey := RestoreIntoDataDirectoryActionKey
@@ -115,12 +108,12 @@ func (e *Engine) checkErrRecovery(ctx context.Context, incomingErr error, action
 		if errors.Is(outgoingErr, robustness.ErrNoOp) {
 			outgoingErr = nil
 		} else {
-			e.statsUpdateCounters(incrDataRestore)
+			e.statsUpdateCounters(statsIncrDataRestore)
 		}
 	}
 
 	if outgoingErr == nil {
-		e.statsUpdateCounters(incrErrorRecovery)
+		e.statsUpdateCounters(statsIncrErrorRecovery)
 	}
 
 	return outgoingErr
