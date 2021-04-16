@@ -16,6 +16,7 @@ import (
 
 	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo"
+	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/tests/testenv"
 )
@@ -96,6 +97,12 @@ func TestTagging(t *testing.T) {
 	if got, want := len(manifests), 1; got != want {
 		t.Fatalf("unexpected number of snapshots %v want %v", got, want)
 	}
+
+	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1, "--tags", "testkey1:testkey2", "--tags", "testkey1:testkey2")
+	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1, "--tags", snapshot.UsernameLabel+":testkey2")
+	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1, "--tags", snapshot.HostnameLabel+":testkey2")
+	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1, "--tags", snapshot.PathLabel+":testkey2")
+	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1, "--tags", manifest.TypeLabelKey+":testkey2")
 }
 
 func TestStartTimeOverride(t *testing.T) {
