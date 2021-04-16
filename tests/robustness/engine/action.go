@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/tests/robustness"
@@ -23,7 +22,7 @@ func (e *Engine) ExecAction(ctx context.Context, actionKey ActionKey, opts map[s
 		opts = make(map[string]string)
 	}
 
-	e.incrActionCountAndLog(actionKey)
+	e.statsIncrActionCountAndLog(actionKey)
 
 	action := actions[actionKey]
 	st := clock.Now()
@@ -52,8 +51,7 @@ func (e *Engine) ExecAction(ctx context.Context, actionKey ActionKey, opts map[s
 	// If error was just a no-op, don't bother logging the action
 	switch {
 	case errors.Is(err, robustness.ErrNoOp):
-		e.RunStats.NoOpCount++
-		e.CumulativeStats.NoOpCount++
+		e.statsUpdateCounters(incrNoOp)
 
 		return out, err
 
@@ -61,42 +59,10 @@ func (e *Engine) ExecAction(ctx context.Context, actionKey ActionKey, opts map[s
 		log.Printf("error=%q", err.Error())
 	}
 
-	e.updatePerActionStats(actionKey, st, err)
+	e.statsUpdatePerAction(actionKey, st, err)
 	e.logCompleted(logEntry, err)
 
 	return out, err
-}
-
-func (e *Engine) incrActionCountAndLog(actionKey ActionKey) {
-	e.statsMux.Lock()
-	defer e.statsMux.Unlock()
-
-	e.RunStats.ActionCounter++
-	e.CumulativeStats.ActionCounter++
-	log.Printf(
-		"Engine executing ACTION: name=%q actionCount=%v totActCount=%v t=%vs (%vs)",
-		actionKey,
-		e.RunStats.ActionCounter,
-		e.CumulativeStats.ActionCounter,
-		e.RunStats.getLifetimeSeconds(),
-		e.getRuntimeSeconds(),
-	)
-}
-
-func (e *Engine) updatePerActionStats(actionKey ActionKey, st time.Time, err error) {
-	e.statsMux.Lock()
-	defer e.statsMux.Unlock()
-
-	if e.RunStats.PerActionStats != nil && e.RunStats.PerActionStats[actionKey] == nil {
-		e.RunStats.PerActionStats[actionKey] = new(ActionStats)
-	}
-
-	if e.CumulativeStats.PerActionStats != nil && e.CumulativeStats.PerActionStats[actionKey] == nil {
-		e.CumulativeStats.PerActionStats[actionKey] = new(ActionStats)
-	}
-
-	e.RunStats.PerActionStats[actionKey].Record(st, err)
-	e.CumulativeStats.PerActionStats[actionKey].Record(st, err)
 }
 
 func (e *Engine) logCompleted(logEntry *LogEntry, err error) {
@@ -140,8 +106,7 @@ func (e *Engine) checkErrRecovery(ctx context.Context, incomingErr error, action
 			return outgoingErr
 		}
 
-		e.RunStats.DataPurgeCount++
-		e.CumulativeStats.DataPurgeCount++
+		e.statsUpdateCounters(incrDataPurge)
 
 		// Restore a previoius snapshot to the data directory
 		restoreActionKey := RestoreIntoDataDirectoryActionKey
@@ -150,14 +115,12 @@ func (e *Engine) checkErrRecovery(ctx context.Context, incomingErr error, action
 		if errors.Is(outgoingErr, robustness.ErrNoOp) {
 			outgoingErr = nil
 		} else {
-			e.RunStats.DataRestoreCount++
-			e.CumulativeStats.DataRestoreCount++
+			e.statsUpdateCounters(incrDataRestore)
 		}
 	}
 
 	if outgoingErr == nil {
-		e.RunStats.ErrorRecoveryCount++
-		e.CumulativeStats.ErrorRecoveryCount++
+		e.statsUpdateCounters(incrErrorRecovery)
 	}
 
 	return outgoingErr
