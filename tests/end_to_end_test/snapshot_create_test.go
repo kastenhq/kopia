@@ -87,6 +87,9 @@ func TestTagging(t *testing.T) {
 
 	e := testenv.NewCLITest(t)
 
+	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
+
+	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1, "--tags", "testkey1:testkey2")
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
 
