@@ -23,24 +23,26 @@ type Client struct {
 	ID string
 }
 
-func newClient() *Client {
+func init() {
 	petname.NonDeterministicMode()
+}
 
+func newClient() *Client {
 	return &Client{
 		ID: petname.Generate(nameLen, "-") + "-" + uuid.NewString(),
 	}
 }
 
-// WrapContext returns a copy of ctx with a new client.
-func WrapContext(ctx context.Context) context.Context {
+// NewClientContext returns a copy of ctx with a new client.
+func NewClientContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, clientKey, newClient())
 }
 
-// WrapContexts returns copies of ctx with n new clients.
-func WrapContexts(ctx context.Context, n int) []context.Context {
+// NewClientContexts returns copies of ctx with n new clients.
+func NewClientContexts(ctx context.Context, n int) []context.Context {
 	ctxs := make([]context.Context, n)
 	for i := range ctxs {
-		ctxs[i] = WrapContext(ctx)
+		ctxs[i] = NewClientContext(ctx)
 	}
 
 	return ctxs
