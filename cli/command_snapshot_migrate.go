@@ -197,7 +197,7 @@ func findPreviousSnapshotManifestWithStartTime(ctx context.Context, rep repo.Rep
 }
 
 func migrateSingleSource(ctx context.Context, uploader *snapshotfs.Uploader, sourceRepo repo.Repository, destRepo repo.RepositoryWriter, s snapshot.SourceInfo) error {
-	manifests, err := snapshot.ListSnapshotManifests(ctx, sourceRepo, &s)
+	manifests, err := snapshot.ListSnapshotManifests(ctx, sourceRepo, &s, nil)
 	if err != nil {
 		return errors.Wrapf(err, "error listing snapshot manifests for %v", s)
 	}
@@ -254,7 +254,7 @@ func migrateSingleSourceSnapshot(ctx context.Context, uploader *snapshotfs.Uploa
 
 	var policyTree *policy.Tree
 
-	newm, err := uploader.Upload(ctx, sourceEntry, policyTree, m.Source, nil, previous...)
+	newm, err := uploader.Upload(ctx, sourceEntry, policyTree, m.Source, previous...)
 	if err != nil {
 		return errors.Wrapf(err, "error migrating shapshot %v @ %v", m.Source, m.StartTime)
 	}

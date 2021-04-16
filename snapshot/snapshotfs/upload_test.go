@@ -216,9 +216,7 @@ func TestUploadWithTags(t *testing.T) {
 
 	policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
 
-	tags := map[string]string{"testkey": "testvalue"}
-
-	s1, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, tags)
+	s1, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
 	if err != nil {
 		t.Errorf("Upload error: %v", err)
 	}

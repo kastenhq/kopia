@@ -74,7 +74,12 @@ func runSnapshotCommand(ctx context.Context, rep repo.RepositoryWriter) error {
 
 	var finalErrors []string
 
-	tags, err := getTags()
+	tags, err := getTags(*snapshotCreateTags)
+	if err != nil {
+		return err
+	}
+
+	err = validateSnapshotTags(tags)
 	if err != nil {
 		return err
 	}
@@ -112,19 +117,33 @@ func runSnapshotCommand(ctx context.Context, rep repo.RepositoryWriter) error {
 	return errors.Errorf("encountered %v errors:\n%v", len(finalErrors), strings.Join(finalErrors, "\n"))
 }
 
-func getTags() (map[string]string, error) {
+func getTags(tagStrings []string) (map[string]string, error) {
 	tags := map[string]string{}
 
-	for _, tagkv := range *snapshotCreateTags {
-		tagFields := strings.Split(tagkv, ":")
-		if len(tagFields) != numTagFields {
+	for _, tagkv := range tagStrings {
+		parts := strings.SplitN(tagkv, ":", numTagFields)
+		if len(parts) != numTagFields {
 			return nil, errors.New("Invalid tag format. Requires <key>:<value>")
 		}
 
-		tags[tagFields[0]] = tagFields[1]
+		if _, ok := tags[parts[0]]; ok {
+			return nil, errors.Errorf("Duplicate tag <key> found. (%s)", parts[0])
+		}
+
+		tags[parts[0]] = parts[1]
 	}
 
 	return tags, nil
+}
+
+func validateSnapshotTags(tags map[string]string) error {
+	for key := range tags {
+		if snapshot.InvalidSnapshotLabelKey(key) {
+			return errors.Errorf("Invalid <key> for snapshot tag. (%s)", key)
+		}
+	}
+
+	return nil
 }
 
 func validateStartEndTime(st, et string) error {
@@ -221,7 +240,7 @@ func snapshotSingleSource(ctx context.Context, rep repo.RepositoryWriter, u *sna
 
 	log(ctx).Debugf("uploading %v using %v previous manifests", sourceInfo, len(previous))
 
-	manifest, err := u.Upload(ctx, fsEntry, policyTree, sourceInfo, tags, previous...)
+	manifest, err := u.Upload(ctx, fsEntry, policyTree, sourceInfo, previous...)
 	if err != nil {
 		// fail-fast uploads will fail here without recording a manifest, other uploads will
 		// possibly fail later.
@@ -229,6 +248,7 @@ func snapshotSingleSource(ctx context.Context, rep repo.RepositoryWriter, u *sna
 	}
 
 	manifest.Description = *snapshotCreateDescription
+	manifest.Tags = tags
 	startTimeOverride, _ := parseTimestamp(*snapshotCreateStartTime)
 	endTimeOverride, _ := parseTimestamp(*snapshotCreateEndTime)
 

@@ -81,6 +81,23 @@ func TestSnapshotCreate(t *testing.T) {
 	}
 }
 
+func TestTagging(t *testing.T) {
+	t.Parallel()
+
+	e := testenv.NewCLITest(t)
+
+	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1, "--tags", "testkey1:testkey2")
+	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
+
+	var manifests []snapshot.Manifest
+
+	mustParseJSONLines(t, e.RunAndExpectSuccess(t, "snapshot", "list", "-a", "--tags", "testkey1:testkey2", "--json"), &manifests)
+
+	if got, want := len(manifests), 1; got != want {
+		t.Fatalf("unexpected number of snapshots %v want %v", got, want)
+	}
+}
+
 func TestStartTimeOverride(t *testing.T) {
 	t.Parallel()
 
