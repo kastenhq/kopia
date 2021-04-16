@@ -204,29 +204,6 @@ func TestUpload(t *testing.T) {
 	}
 }
 
-func TestUploadWithTags(t *testing.T) {
-	ctx := testlogging.Context(t)
-	th := newUploadTestHarness(ctx, t)
-
-	defer th.cleanup()
-
-	log(ctx).Infof("Uploading s1")
-
-	u := NewUploader(th.repo)
-
-	policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
-
-	s1, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
-	if err != nil {
-		t.Errorf("Upload error: %v", err)
-	}
-
-	val, ok := s1.Tags["testkey"]
-	if !ok || val != "testvalue" {
-		t.Errorf("Tags not set correctly")
-	}
-}
-
 func TestUpload_TopLevelDirectoryReadFailure(t *testing.T) {
 	ctx := testlogging.Context(t)
 	th := newUploadTestHarness(ctx, t)
