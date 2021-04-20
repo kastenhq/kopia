@@ -11,12 +11,9 @@ import (
 	"github.com/google/uuid"
 )
 
-type key int
+const nameLen int = 2
 
-const (
-	clientKey key = 0
-	nameLen   int = 2
-)
+var clientKey = struct{}{}
 
 // Client is a unique client for use in multiclient robustness tests.
 type Client struct {
@@ -49,9 +46,9 @@ func NewClientContexts(ctx context.Context, n int) []context.Context {
 }
 
 // UnwrapContext returns a client from the given context.
-func UnwrapContext(ctx context.Context) (*Client, bool) {
-	c, ok := ctx.Value(clientKey).(*Client)
-	return c, ok
+func UnwrapContext(ctx context.Context) *Client {
+	c, _ := ctx.Value(clientKey).(*Client)
+	return c
 }
 
 // RunAllAndWait runs the provided function asynchronously for each of the
