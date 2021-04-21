@@ -1,7 +1,6 @@
 // +build darwin,amd64 linux,amd64
 
-// Package client manages client specific info
-package client
+package framework
 
 import (
 	"context"
