@@ -6,23 +6,19 @@ The Kopia multi-client robustness test is intended to verify the correct restora
 
 The multi-client Kopia robustness test has the following components:
 
-- `MultiClientFileWriter`
-
+- `MultiClientFileWriter`  
   This is an implementation of the `robustness.FileWriter` interface that creates and manages client `FileWriter`'s. In addition, the `MultiClientFileWriter` delegates `FileWriter` function calls to a client's specific `FileWriter`.
 
-- `MultiClientSnapshotter`
+- `MultiClientSnapshotter`  
+  This is an implementation of the `Snapshotter` interface that creates and manages a single `Server` and one `ClientSnapshotter` per client. In addition, the `MultiClientSnapshotter` delegates `Snapshotter` function calls to a client's specific `ClientSnapshotter`.
 
-  This is an implementation of the `Snapshotter` interface that creates and manages a single `Server ` and one `ClientSnapshotter` per client. In addition, the `MultiClientSnapshotter` delegates `Snapshotter` function calls to a client's specific `ClientSnapshotter`.
-
-- `Server`
-
+- `Server`  
   This is the component responsible for setting up and managing the Kopia server. It has the following functionality:
   - Set up or connect to a Kopia repository and create a server for clients to connect to
   - Add and remove permissions for new clients
   - Run commands directly on the Kopia repo, such as garbage collection
 
-- `ClientSnapshotter`
-
+- `ClientSnapshotter`  
   This is a `Snapshotter` with the added functionality of being able to connect to and disconnect from a server.
 
 The diagram below shows the standard Kopia robustness test framework on the left and the multi-client framework on the right. It illustrates how the components described above fit into the engine and delegate actions to client instantiations of the `FileWriter` and `ClientSnapshotter` components.
@@ -53,4 +49,3 @@ func TestExample(t *testing.T) {
 	framework.RunAllAndWait(ctxs, f)
 }
 ```
-
