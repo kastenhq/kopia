@@ -1,7 +1,5 @@
 // +build darwin,amd64 linux,amd64
 
-// Package framework contains tools to enable multiple clients to connect to a
-// central repository server and run robustness tests concurrently.
 package framework
 
 import (
