@@ -10,7 +10,6 @@ import (
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/tests/robustness/engine"
 	"github.com/kopia/kopia/tests/robustness/fiofilewriter"
-	"github.com/kopia/kopia/tests/robustness/multiclient_test/framework"
 	"github.com/kopia/kopia/tests/testenv"
 )
 
@@ -37,8 +36,8 @@ func TestExample(t *testing.T) {
 	ctx := testlogging.Context(t)
 
 	// Obtain a slice of derived contexts, each wrapped with a unique client
-	ctxs := framework.NewClientContexts(ctx, numClients)
+	// ctxs := framework.NewClientContexts(ctx, numClients)
 
 	// Run test actions for each client concurrently
-	framework.RunAllAndWait(ctxs, f)
+	th.RunN(ctx, numClients, f)
 }
