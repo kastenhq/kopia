@@ -16,7 +16,6 @@ import (
 	"github.com/kopia/kopia/tests/robustness"
 	"github.com/kopia/kopia/tests/robustness/engine"
 	"github.com/kopia/kopia/tests/robustness/fiofilewriter"
-	"github.com/kopia/kopia/tests/robustness/multiclient_test/framework"
 	"github.com/kopia/kopia/tests/testenv"
 )
 

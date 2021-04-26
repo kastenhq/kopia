@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"sync"
 	"syscall"
 
 	"github.com/kopia/kopia/tests/robustness/engine"
@@ -24,8 +25,13 @@ const (
 
 var repoPathPrefix = flag.String("repo-path-prefix", "", "Point the robustness tests at this path prefix")
 
-// NewHarness returns a test harness.
+// NewHarness returns a test harness. It requires a context that contains a client.
 func NewHarness(ctx context.Context) *TestHarness {
+	if *repoPathPrefix == "" {
+		log.Printf("Flag repo-path-prefix must be set")
+		os.Exit(1)
+	}
+
 	dataRepoPath := path.Join(*repoPathPrefix, dataSubPath)
 	metadataRepoPath := path.Join(*repoPathPrefix, metadataSubPath)
 
@@ -94,20 +100,17 @@ func (th *TestHarness) makeBaseDir() bool {
 }
 
 func (th *TestHarness) getFileWriter() bool {
-	fw, err := NewMultiClientFileWriter(
-		func() (FileWriter, error) { return fiofilewriter.New() },
-	)
-	if err != nil {
-		if errors.Is(err, fio.ErrEnvNotSet) {
-			log.Println("Skipping robustness tests because FIO environment is not set")
+	if os.Getenv(fio.FioExeEnvKey) == "" && os.Getenv(fio.FioDockerImageEnvKey) == "" {
+		log.Println("Skipping robustness tests because FIO environment is not set")
 
-			th.skipTest = true
-		} else {
-			log.Println("Error creating fio FileWriter:", err)
-		}
+		th.skipTest = true
 
 		return false
 	}
+
+	fw := NewMultiClientFileWriter(
+		func() (FileWriter, error) { return fiofilewriter.New() },
+	)
 
 	th.fileWriter = fw
 
@@ -115,26 +118,20 @@ func (th *TestHarness) getFileWriter() bool {
 }
 
 func (th *TestHarness) getSnapshotter() bool {
-	server, err := snapmeta.NewSnapshotter(th.baseDirPath)
+	newClientFn := func(baseDirPath string) (ClientSnapshotter, error) {
+		return snapmeta.NewSnapshotter(th.baseDirPath)
+	}
+
+	s, err := NewMultiClientSnapshotter(th.baseDirPath, newClientFn)
 	if err != nil {
 		if errors.Is(err, kopiarunner.ErrExeVariableNotSet) {
 			log.Println("Skipping robustness tests because KOPIA_EXE is not set")
 
 			th.skipTest = true
 		} else {
-			log.Println("Error creating kopia Snapshotter:", err)
+			log.Println("Error creating multiclient kopia Snapshotter:", err)
 		}
 
-		return false
-	}
-
-	newClientFn := func(baseDirPath string) (ClientSnapshotter, error) {
-		return snapmeta.NewSnapshotter(th.baseDirPath)
-	}
-
-	s, err := NewMultiClientSnapshotter(th.baseDirPath, newClientFn, server)
-	if err != nil {
-		log.Println("Error creating multiclient kopia Snapshotter:", err)
 		return false
 	}
 
@@ -192,7 +189,7 @@ func (th *TestHarness) getEngine(ctx context.Context) bool {
 	// flushed on cleanup in case there was an issue while loading.
 	err = eng.Init(ctx)
 	if err != nil {
-		log.Println("Error initializing engine for S3:", err)
+		log.Println("Error initializing engine:", err)
 		return false
 	}
 
@@ -206,7 +203,37 @@ func (th *TestHarness) Engine() *engine.Engine {
 	return th.engine
 }
 
-// Cleanup shuts down the engine and stops the test app.
+// Run runs the provided function asynchronously for each of the given client
+// contexts, waits for all of them to finish, and optionally cleans up clients.
+func (th *TestHarness) Run(ctxs []context.Context, cleanup bool, f func(context.Context)) {
+	var wg sync.WaitGroup
+
+	for _, ctx := range ctxs {
+		wg.Add(1)
+
+		go func(ctx context.Context) {
+			f(ctx)
+
+			if cleanup {
+				th.snapshotter.CleanupClient(ctx)
+			}
+
+			wg.Done()
+		}(ctx)
+	}
+
+	wg.Wait()
+}
+
+// RunN creates client contexts, runs the provided function asynchronously for
+// each client, waits for all of them to finish, and cleans up clients.
+func (th *TestHarness) RunN(ctx context.Context, numClients int, f func(context.Context)) {
+	ctxs := NewClientContexts(ctx, numClients)
+	th.Run(ctxs, true, f)
+}
+
+// Cleanup shuts down the engine and stops the test app. It requires a context
+// that contains the client that was used to initialize the harness.
 func (th *TestHarness) Cleanup(ctx context.Context) (retErr error) {
 	if th.engine != nil {
 		retErr = th.engine.Shutdown(ctx)

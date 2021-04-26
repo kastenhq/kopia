@@ -13,14 +13,19 @@ import (
 	"github.com/kopia/kopia/tests/robustness/multiclient_test/framework"
 )
 
-var eng *engine.Engine // for use in the test functions
+// Variables for use in the test functions.
+var (
+	eng *engine.Engine
+	th  *framework.TestHarness
+)
 
 func TestMain(m *testing.M) {
 	flag.Parse()
 
+	// A high-level client is required for harness initialization and cleanup steps.
 	ctx := framework.NewClientContext(context.Background())
 
-	th := framework.NewHarness(ctx)
+	th = framework.NewHarness(ctx)
 
 	eng = th.Engine()
 

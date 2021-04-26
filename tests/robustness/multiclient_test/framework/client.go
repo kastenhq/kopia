@@ -4,7 +4,6 @@ package framework
 
 import (
 	"context"
-	"sync"
 
 	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/google/uuid"
@@ -48,21 +47,4 @@ func NewClientContexts(ctx context.Context, n int) []context.Context {
 func UnwrapContext(ctx context.Context) *Client {
 	c, _ := ctx.Value(clientKey).(*Client)
 	return c
-}
-
-// RunAllAndWait runs the provided function asynchronously for each of the
-// given client contexts and waits for all of them to finish.
-func RunAllAndWait(ctxs []context.Context, f func(context.Context)) {
-	var wg sync.WaitGroup
-
-	for _, ctx := range ctxs {
-		wg.Add(1)
-
-		go func(ctx context.Context) {
-			f(ctx)
-			wg.Done()
-		}(ctx)
-	}
-
-	wg.Wait()
 }

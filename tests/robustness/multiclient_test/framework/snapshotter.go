@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/kopia/kopia/tests/robustness"
+	"github.com/kopia/kopia/tests/robustness/snapmeta"
 )
 
 // MultiClientSnapshotter manages a set of client Snapshotter instances and
@@ -38,7 +39,12 @@ type newClientFn func(string) (ClientSnapshotter, error)
 // NewMultiClientSnapshotter returns a MultiClientSnapshotter that is
 // responsible for delegating Snapshotter method calls to a specific client's
 // Snapshotter instance. ConnectOrCreateRepo must be invoked to start the server.
-func NewMultiClientSnapshotter(baseDirPath string, f newClientFn, s Server) (*MultiClientSnapshotter, error) {
+func NewMultiClientSnapshotter(baseDirPath string, f newClientFn) (*MultiClientSnapshotter, error) {
+	s, err := snapmeta.NewSnapshotter(baseDirPath)
+	if err != nil {
+		return nil, err
+	}
+
 	return &MultiClientSnapshotter{
 		newClientSnapshotter: f,
 		server:               s,
@@ -121,9 +127,10 @@ func (mcs *MultiClientSnapshotter) ListSnapshots(ctx context.Context) ([]string,
 	return ks.ListSnapshots(ctx)
 }
 
-// Cleanup delegates to a specific client's Snapshotter Cleanup method, but also
-// disconnects the client from the server, removes the client from the server's
-// user list, and removes the ClientSnapshotter from MultiClientSnapshotter.
+// Cleanup cleans up the server and all remaining clients. It delegates to a
+// specific client's Snapshotter Cleanup method, but also disconnects the client
+// from the server, removes the client from the server's user list, and removes
+// the ClientSnapshotter from MultiClientSnapshotter.
 func (mcs *MultiClientSnapshotter) Cleanup() {
 	for clientID, s := range mcs.clients {
 		s.DisconnectClient(clientID)
@@ -134,6 +141,31 @@ func (mcs *MultiClientSnapshotter) Cleanup() {
 	}
 
 	mcs.server.Cleanup()
+}
+
+// CleanupClient cleans up a given client. It delegates to the client's
+// Snapshotter Cleanup method, but also disconnects the client from the server,
+// removes the client from the server's user list, and removes the
+// ClientSnapshotter from MultiClientSnapshotter.
+func (mcs *MultiClientSnapshotter) CleanupClient(ctx context.Context) {
+	c := UnwrapContext(ctx)
+	if c == nil {
+		log.Println("Context does not contain a client")
+		return
+	}
+
+	mcs.mu.RLock()
+	s := mcs.clients[c.ID]
+	mcs.mu.RUnlock()
+
+	s.DisconnectClient(c.ID)
+	s.Cleanup()
+	mcs.server.RemoveClient(c.ID)
+
+	mcs.mu.Lock()
+	defer mcs.mu.Unlock()
+
+	delete(mcs.clients, c.ID)
 }
 
 // createOrGetSnapshotter gets a client's Snapshotter from the given context if
@@ -157,15 +189,6 @@ func (mcs *MultiClientSnapshotter) createOrGetSnapshotter(ctx context.Context) (
 	}
 
 	// Create new ClientSnapshotter
-	mcs.mu.Lock()
-	defer mcs.mu.Unlock()
-
-	// Check if ClientSnapshotter was created while lock was open
-	cs, ok = mcs.clients[c.ID]
-	if ok {
-		return cs, nil
-	}
-
 	clientDir, err := ioutil.TempDir(mcs.baseDirPath, "client-")
 	if err != nil {
 		return nil, err
@@ -185,7 +208,10 @@ func (mcs *MultiClientSnapshotter) createOrGetSnapshotter(ctx context.Context) (
 		return nil, err
 	}
 
-	// Register new client snapshotter with multi-client snapshotter
+	// Register new client snapshotter with MultiClientSnapshotter
+	mcs.mu.Lock()
+	defer mcs.mu.Unlock()
+
 	mcs.clients[c.ID] = cs
 
 	return cs, nil
