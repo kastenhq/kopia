@@ -42,10 +42,7 @@ func TestExample(t *testing.T) {
 	// Create or obtain root context
 	ctx := testlogging.Context(t)
 
-	// Obtain a slice of derived contexts, each wrapped with a unique client
-	ctxs := framework.NewClientContexts(ctx, numClients)
-
 	// Run test actions for each client concurrently
-	framework.RunAllAndWait(ctxs, f)
+	th.RunN(ctx, numClients, f)
 }
 ```
