@@ -27,16 +27,8 @@ var repoPathPrefix = flag.String("repo-path-prefix", "", "Point the robustness t
 
 // NewHarness returns a test harness. It requires a context that contains a client.
 func NewHarness(ctx context.Context) *TestHarness {
-	if *repoPathPrefix == "" {
-		log.Printf("Flag repo-path-prefix must be set")
-		os.Exit(1)
-	}
-
-	dataRepoPath := path.Join(*repoPathPrefix, dataSubPath)
-	metadataRepoPath := path.Join(*repoPathPrefix, metadataSubPath)
-
 	th := &TestHarness{}
-	th.init(ctx, dataRepoPath, metadataRepoPath)
+	th.init(ctx)
 
 	return th
 }
@@ -55,7 +47,15 @@ type TestHarness struct {
 	skipTest bool
 }
 
-func (th *TestHarness) init(ctx context.Context, dataRepoPath, metaRepoPath string) {
+func (th *TestHarness) init(ctx context.Context) {
+	if *repoPathPrefix == "" {
+		log.Printf("Skipping robustness tests because repo-path-prefix is not set")
+		os.Exit(0)
+	}
+
+	dataRepoPath := path.Join(*repoPathPrefix, dataSubPath)
+	metaRepoPath := path.Join(*repoPathPrefix, metadataSubPath)
+
 	th.dataRepoPath = dataRepoPath
 	th.metaRepoPath = metaRepoPath
 
