@@ -51,8 +51,7 @@ func TestManySmallFiles(t *testing.T) {
 	}
 
 	ctx := testlogging.Context(t)
-	ctxs := framework.NewClientContexts(ctx, numClients)
-	framework.RunAllAndWait(ctxs, f)
+	th.RunN(ctx, numClients, f)
 }
 
 func TestOneLargeFile(t *testing.T) {
@@ -83,8 +82,7 @@ func TestOneLargeFile(t *testing.T) {
 	}
 
 	ctx := testlogging.Context(t)
-	ctxs := framework.NewClientContexts(ctx, numClients)
-	framework.RunAllAndWait(ctxs, f)
+	th.RunN(ctx, numClients, f)
 }
 
 func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
@@ -119,8 +117,7 @@ func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
 	}
 
 	ctx := testlogging.Context(t)
-	ctxs := framework.NewClientContexts(ctx, numClients)
-	framework.RunAllAndWait(ctxs, f)
+	th.RunN(ctx, numClients, f)
 }
 
 func TestRandomizedSmall(t *testing.T) {
@@ -154,8 +151,7 @@ func TestRandomizedSmall(t *testing.T) {
 	}
 
 	ctx := testlogging.Context(t)
-	ctxs := framework.NewClientContexts(ctx, numClients)
-	framework.RunAllAndWait(ctxs, f)
+	th.RunN(ctx, numClients, f)
 }
 
 // tryExecAction runs eng.ExecAction on the given parameters and masks no-op errors.
