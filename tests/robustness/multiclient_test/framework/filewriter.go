@@ -30,11 +30,11 @@ type newFileWriterFn func() (FileWriter, error)
 
 // NewMultiClientFileWriter returns a MultiClientFileWriter that is responsible
 // for delegating FileWriter method calls to a specific client's FileWriter instance.
-func NewMultiClientFileWriter(f newFileWriterFn) (*MultiClientFileWriter, error) {
+func NewMultiClientFileWriter(f newFileWriterFn) *MultiClientFileWriter {
 	return &MultiClientFileWriter{
 		newFileWriter: f,
 		fileWriters:   map[string]FileWriter{},
-	}, nil
+	}
 }
 
 // DataDirectory delegates to a specific client's FileWriter.
@@ -118,19 +118,13 @@ func (mcfw *MultiClientFileWriter) createOrGetFileWriter(ctx context.Context) (r
 	}
 
 	// Create new FileWriter and register with MultiClientFileWriter
-	mcfw.mu.Lock()
-	defer mcfw.mu.Unlock()
-
-	// Check if FileWriter was created while lock was open
-	fw, ok = mcfw.fileWriters[c.ID]
-	if ok {
-		return fw, nil
-	}
-
 	fw, err := mcfw.newFileWriter()
 	if err != nil {
 		return nil, err
 	}
+
+	mcfw.mu.Lock()
+	defer mcfw.mu.Unlock()
 
 	mcfw.fileWriters[c.ID] = fw
 
