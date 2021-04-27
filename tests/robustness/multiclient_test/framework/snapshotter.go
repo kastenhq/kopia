@@ -154,18 +154,14 @@ func (mcs *MultiClientSnapshotter) CleanupClient(ctx context.Context) {
 		return
 	}
 
-	mcs.mu.RLock()
+	mcs.mu.Lock()
 	s := mcs.clients[c.ID]
-	mcs.mu.RUnlock()
+	delete(mcs.clients, c.ID)
+	mcs.mu.Unlock()
 
 	s.DisconnectClient(c.ID)
 	s.Cleanup()
 	mcs.server.RemoveClient(c.ID)
-
-	mcs.mu.Lock()
-	defer mcs.mu.Unlock()
-
-	delete(mcs.clients, c.ID)
 }
 
 // createOrGetSnapshotter gets a client's Snapshotter from the given context if
