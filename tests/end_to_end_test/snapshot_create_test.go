@@ -101,11 +101,34 @@ func TestTagging(t *testing.T) {
 		t.Fatalf("unexpected number of snapshots %v want %v", got, want)
 	}
 
-	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1, "--tags", "testkey1:testkey2", "--tags", "testkey1:testkey2")
-	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1, "--tags", snapshot.UsernameLabel+":testkey2")
-	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1, "--tags", snapshot.HostnameLabel+":testkey2")
-	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1, "--tags", snapshot.PathLabel+":testkey2")
-	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1, "--tags", manifest.TypeLabelKey+":testkey2")
+	mustParseJSONLines(t, e.RunAndExpectSuccess(t, "snapshot", "list", "-a", "--json"), &manifests)
+
+	if got, want := len(manifests), 2; got != want {
+		t.Fatalf("unexpected number of snapshots %v want %v", got, want)
+	}
+}
+
+func TestTaggingBadTags(t *testing.T) {
+	t.Parallel()
+
+	e := testenv.NewCLITest(t)
+
+	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
+
+	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
+
+	for _, tc := range [][]string{
+		{"--tags", "testkey1:testkey2", "--tags", "testkey1:testkey2"},
+		{"--tags", snapshot.UsernameLabel + ":testkey2"},
+		{"--tags", snapshot.HostnameLabel + ":testkey2"},
+		{"--tags", snapshot.PathLabel + ":testkey2"},
+		{"--tags", manifest.TypeLabelKey + ":testkey2"},
+		{"--tags", "badtag"},
+	} {
+		args := []string{"snapshot", "create", sharedTestDataDir1}
+		args = append(args, tc...)
+		e.RunAndExpectFailure(t, args...)
+	}
 }
 
 func TestStartTimeOverride(t *testing.T) {

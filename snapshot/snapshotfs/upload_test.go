@@ -124,7 +124,7 @@ func TestUpload(t *testing.T) {
 
 	policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
 
-	s1, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, nil)
+	s1, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
 	if err != nil {
 		t.Errorf("Upload error: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestUpload(t *testing.T) {
 
 	log(ctx).Infof("Uploading s2")
 
-	s2, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, nil, s1)
+	s2, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, s1)
 	if err != nil {
 		t.Errorf("Upload error: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestUpload(t *testing.T) {
 	// Add one more file, the s1.RootObjectID should change.
 	th.sourceDir.AddFile("d2/d1/f3", []byte{1, 2, 3, 4, 5}, defaultPermissions)
 
-	s3, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, nil, s1)
+	s3, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, s1)
 	if err != nil {
 		t.Errorf("upload failed: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestUpload(t *testing.T) {
 	// Now remove the added file, OID should be identical to the original before the file got added.
 	th.sourceDir.Subdir("d2", "d1").Remove("f3")
 
-	s4, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, nil, s1)
+	s4, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, s1)
 	if err != nil {
 		t.Errorf("upload failed: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestUpload(t *testing.T) {
 		t.Errorf("unexpected s4 stats: %+v", s4.Stats)
 	}
 
-	s5, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, nil, s3)
+	s5, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, s3)
 	if err != nil {
 		t.Errorf("upload failed: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestUpload_TopLevelDirectoryReadFailure(t *testing.T) {
 
 	policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
 
-	s, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, nil)
+	s, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
 	if err.Error() != errTest.Error() {
 		t.Errorf("expected error: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestUpload_SubDirectoryReadFailureFailFast(t *testing.T) {
 
 	policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
 
-	man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, nil)
+	man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestUpload_SubDirectoryReadFailureIgnoredNoFailFast(t *testing.T) {
 		},
 	})
 
-	man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, nil)
+	man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestUpload_ErrorEntries(t *testing.T) {
 				ErrorHandlingPolicy: tc.ehp,
 			})
 
-			man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, nil)
+			man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -405,7 +405,7 @@ func TestUpload_SubDirectoryReadFailureNoFailFast(t *testing.T) {
 
 	policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
 
-	man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, nil)
+	man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -469,7 +469,7 @@ func TestUpload_SubDirectoryReadFailureSomeIgnoredNoFailFast(t *testing.T) {
 		t.Fatalf("policy not effective")
 	}
 
-	man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{}, nil)
+	man, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -528,7 +528,7 @@ func TestUploadWithCheckpointing(t *testing.T) {
 		})
 	}
 
-	if _, err := u.Upload(ctx, th.sourceDir, policyTree, si, nil); err != nil {
+	if _, err := u.Upload(ctx, th.sourceDir, policyTree, si); err != nil {
 		t.Errorf("Upload error: %v", err)
 	}
 
@@ -643,7 +643,7 @@ func TestUpload_VirtualDirectoryWithStreamingFile(t *testing.T) {
 		virtualfs.StreamingFileFromReader("stream-file", r),
 	})
 
-	man, err := u.Upload(ctx, staticRoot, policyTree, snapshot.SourceInfo{}, nil)
+	man, err := u.Upload(ctx, staticRoot, policyTree, snapshot.SourceInfo{})
 	if err != nil {
 		t.Fatalf("Upload error: %v", err)
 	}

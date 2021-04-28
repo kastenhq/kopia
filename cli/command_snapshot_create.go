@@ -20,7 +20,7 @@ import (
 const (
 	maxSnapshotDescriptionLength = 1024
 	timeFormat                   = "2006-01-02 15:04:05 MST"
-	numTagFields                 = 2
+	numberOfPartsInTagString     = 2
 )
 
 var (
@@ -121,8 +121,8 @@ func getTags(tagStrings []string) (map[string]string, error) {
 	tags := map[string]string{}
 
 	for _, tagkv := range tagStrings {
-		parts := strings.SplitN(tagkv, ":", numTagFields)
-		if len(parts) != numTagFields {
+		parts := strings.SplitN(tagkv, ":", numberOfPartsInTagString)
+		if len(parts) != numberOfPartsInTagString {
 			return nil, errors.New("Invalid tag format. Requires <key>:<value>")
 		}
 

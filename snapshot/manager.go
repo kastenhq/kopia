@@ -144,7 +144,7 @@ func SaveSnapshot(ctx context.Context, rep repo.RepositoryWriter, man *Manifest)
 
 	for key, value := range man.Tags {
 		if _, ok := labels[key]; ok {
-			return "", errors.Errorf("Invalid/Duplicate tag <key> found in snapshot. (%s)", key)
+			return "", errors.Errorf("Invalid or duplicate tag <key> found in snapshot. (%s)", key)
 		}
 
 		labels[key] = value
