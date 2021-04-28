@@ -438,7 +438,7 @@ func (r *grpcRepositoryClient) ContentInfo(ctx context.Context, contentID conten
 		return sess.contentInfo(ctx, contentID)
 	})
 	if err != nil {
-		return content.Info{}, err
+		return nil, err
 	}
 
 	return v.(content.Info), nil
@@ -454,22 +454,23 @@ func (r *grpcInnerSession) contentInfo(ctx context.Context, contentID content.ID
 	}) {
 		switch rr := resp.Response.(type) {
 		case *apipb.SessionResponse_GetContentInfo:
-			return content.Info{
-				ID:               content.ID(rr.GetContentInfo.GetInfo().GetId()),
-				Length:           rr.GetContentInfo.GetInfo().GetLength(),
+			return &content.InfoStruct{
+				ContentID:        content.ID(rr.GetContentInfo.GetInfo().GetId()),
+				PackedLength:     rr.GetContentInfo.GetInfo().GetPackedLength(),
 				TimestampSeconds: rr.GetContentInfo.GetInfo().GetTimestampSeconds(),
 				PackBlobID:       blob.ID(rr.GetContentInfo.GetInfo().GetPackBlobId()),
 				PackOffset:       rr.GetContentInfo.GetInfo().GetPackOffset(),
 				Deleted:          rr.GetContentInfo.GetInfo().GetDeleted(),
 				FormatVersion:    byte(rr.GetContentInfo.GetInfo().GetFormatVersion()),
+				OriginalLength:   rr.GetContentInfo.GetInfo().GetOriginalLength(),
 			}, nil
 
 		default:
-			return content.Info{}, unhandledSessionResponse(resp)
+			return nil, unhandledSessionResponse(resp)
 		}
 	}
 
-	return content.Info{}, errNoSessionResponse()
+	return nil, errNoSessionResponse()
 }
 
 func errorFromSessionResponse(rr *apipb.ErrorResponse) error {

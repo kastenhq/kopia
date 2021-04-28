@@ -162,9 +162,9 @@ func dropContentsFromBuilder(ctx context.Context, bld packIndexBuilder, opt Comp
 		formatLog(ctx).Debugf("drop-content-deleted-before %v", opt.DropDeletedBefore)
 
 		for _, i := range bld {
-			if i.Deleted && i.Timestamp().Before(opt.DropDeletedBefore) {
-				formatLog(ctx).Debugf("drop-from-index-old-deleted %v %v", i.ID, i.Timestamp())
-				delete(bld, i.ID)
+			if i.GetDeleted() && i.Timestamp().Before(opt.DropDeletedBefore) {
+				formatLog(ctx).Debugf("drop-from-index-old-deleted %v %v", i.GetContentID(), i.Timestamp())
+				delete(bld, i.GetContentID())
 			}
 		}
 
@@ -178,7 +178,7 @@ func (sm *SharedManager) addIndexBlobsToBuilder(ctx context.Context, bld packInd
 		return errors.Wrapf(err, "error getting index %q", indexBlob.BlobID)
 	}
 
-	index, err := openPackIndex(bytes.NewReader(data))
+	index, err := openPackIndex(bytes.NewReader(data), uint32(sm.encryptor.Overhead()))
 	if err != nil {
 		return errors.Wrapf(err, "unable to open index blob %q", indexBlob)
 	}
@@ -198,7 +198,7 @@ func (sm *SharedManager) ParseIndexBlob(ctx context.Context, blobID blob.ID) ([]
 		return nil, errors.Wrapf(err, "error getting index %q", blobID)
 	}
 
-	index, err := openPackIndex(bytes.NewReader(data))
+	index, err := openPackIndex(bytes.NewReader(data), uint32(sm.encryptor.Overhead()))
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to open index blob")
 	}

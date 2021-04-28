@@ -120,8 +120,18 @@ endif
 
 # put NPM in the path
 PATH:=$(node_dir)$(path_separator)$(PATH)
+ifeq ($(GOOS),$(filter $(GOOS),openbsd freebsd))
+npm=/usr/local/bin/npm
+endif
 
 $(npm):
+ifeq ($(GOOS),openbsd)
+	@echo Use pkg_add to install node
+	@exit 1
+else ifeq ($(GOOS),freebsd)
+	@echo Use pkg to install npm
+	@exit 1
+else
 	@echo Downloading Node v$(NODE_VERSION) with NPM path $(npm)
 	$(mkdir) $(node_base_dir)$(slash)node
 
@@ -137,6 +147,7 @@ else
 	curl -LsS https://nodejs.org/dist/v$(NODE_VERSION)/node-v$(NODE_VERSION)-darwin-x64.tar.gz | tar zx -C $(node_base_dir)
 endif
 	mv $(node_base_dir)/node-v$(NODE_VERSION)*/* $(node_base_dir)/node
+endif
 endif
 
 # linter
@@ -275,9 +286,10 @@ windows_signing_dir=$(TOOLS_DIR)$(slash)win_signing
 
 # name of the temporary keychain to import signing keys into (will be deleted and re-created by 'signing-tools' target)
 MACOS_KEYCHAIN=kopia-build.keychain
+export CSC_KEYCHAIN:=$(MACOS_KEYCHAIN)
+export CSC_NAME:=$(MACOS_SIGNING_IDENTITY)
 
-signing-tools:
-
+windows-signing-tools:
 ifeq ($(GOOS)/$(CI),windows/true)
 ifneq ($(WINDOWS_SIGNING_TOOLS_URL),)
 	echo Installing Windows signing tools to $(windows_signing_dir)...
@@ -286,15 +298,16 @@ ifneq ($(WINDOWS_SIGNING_TOOLS_URL),)
 	unzip -a -q $(windows_signing_dir).zip -d $(windows_signing_dir)
 	pwsh -noprofile -executionpolicy bypass $(windows_signing_dir)\\setup.ps1
 else
-	echo Not installing Windows signing tools because WINDOWS_SIGNING_TOOLS_URL is not set
+	@echo Not installing Windows signing tools because WINDOWS_SIGNING_TOOLS_URL is not set
 endif
 endif
 
-ifeq ($(GOOS)/$(CI),darwin/true)
-ifneq ($(CSC_LINK),)
 # create and unlock a keychain with random strong password and import macOS signing certificate from .p12.
-signing-tools: KEYCHAIN_PASSWORD:=$(shell uuidgen)
-signing-tools:
+ifeq ($(GOOS)/$(CI),darwin/true)
+macos-certificates: KEYCHAIN_PASSWORD:=$(shell uuidgen)
+endif
+macos-certificates:
+ifneq ($(CSC_LINK),)
 	@rm -fv $(HOME)/Library/Keychains/$(MACOS_KEYCHAIN)-db
 	@echo "$(CSC_LINK)" | base64 -d > /tmp/certs.p12
 	@security create-keychain -p $(KEYCHAIN_PASSWORD) $(MACOS_KEYCHAIN)
@@ -304,7 +317,8 @@ signing-tools:
 	@security set-keychain-settings -u $(MACOS_KEYCHAIN)
 	@rm -f /tmp/certs.p12
 	@security set-key-partition-list -S apple: -s -k $(KEYCHAIN_PASSWORD) $(MACOS_KEYCHAIN) > /dev/null
-endif
+else
+	@echo Not installing macOS certificates because CSC_LINK is not set.
 endif
 
 # disable some tools on non-default architectures
