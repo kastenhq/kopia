@@ -58,11 +58,11 @@ require (
 	golang.org/x/exp v0.0.0-20210220032938-85be41e4509f
 	golang.org/x/mod v0.4.2
 	golang.org/x/net v0.0.0-20210505214959-0714010a04ed
-	golang.org/x/oauth2 v0.0.0-20210427180440-81ed05c6b58c
+	golang.org/x/oauth2 v0.0.0-20210514164344-f6687ab2804c
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20210503173754-0981d6026fa6
+	golang.org/x/sys v0.0.0-20210514084401-e8d321eab015
 	golang.org/x/term v0.0.0-20210317153231-de623e64d2a6
-	google.golang.org/api v0.46.0
+	google.golang.org/api v0.47.0
 	google.golang.org/grpc v1.37.1
 	google.golang.org/protobuf v1.26.0
 	gopkg.in/ini.v1 v1.62.0 // indirect
