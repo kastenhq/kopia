@@ -2,7 +2,7 @@ services:
     - docker
 deploy:
     provider: script
-    script: docker/push.sh kanisterio/kopia
+    script: docker/push.sh ghcr.io/kanisterio/kopia
     on:
       branch:
       - /^docker.*/

@@ -8,7 +8,7 @@ readonly COMMIT_TAG=$(git rev-parse --short=7 master)
 readonly DOCKER_DIR=docker/kopia-alpine
 readonly IMAGE_TYPE=alpine
 readonly IMAGE_VERSION="$(date +%Y%m%d-%H%M%S)-$(git describe --long --candidates=1 --always master)"
-readonly REPO=${1-kanisterio/kopia}
+readonly REPO=${1-ghcr.io/kanisterio/kopia}
 readonly TAG="alpine-${IMAGE_VERSION}"
 
 

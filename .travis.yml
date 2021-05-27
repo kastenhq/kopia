@@ -7,7 +7,7 @@ os:
 install:
 - git fetch origin master
 - git branch master FETCH_HEAD
-script: docker/kopia-alpine/build.sh kanisterio/kopia
+script: docker/kopia-alpine/build.sh ghcr.io/kanisterio/kopia
 git:
   depth: false
 env:
