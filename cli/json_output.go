@@ -2,6 +2,8 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 
 	"github.com/alecthomas/kingpin"
 
@@ -9,22 +11,26 @@ import (
 	"github.com/kopia/kopia/snapshot"
 )
 
-var (
-	jsonOutput  = false
-	jsonIndent  = false
-	jsonVerbose = false // output addnon-essential stats as part of JSON
-)
+type jsonOutput struct {
+	jsonOutput  bool
+	jsonIndent  bool
+	jsonVerbose bool // output non-essential stats as part of JSON
 
-func registerJSONOutputFlags(cmd *kingpin.CmdClause) {
-	cmd.Flag("json", "Output result in JSON format to stdout").BoolVar(&jsonOutput)
-	cmd.Flag("json-indent", "Output result in indented JSON format to stdout").Hidden().BoolVar(&jsonIndent)
-	cmd.Flag("json-verbose", "Output non-essential data (e.g. statistics) in JSON format").Hidden().BoolVar(&jsonVerbose)
+	out io.Writer
 }
 
-func cleanupSnapshotManifestForJSON(v *snapshot.Manifest) interface{} {
+func (c *jsonOutput) setup(svc appServices, cmd *kingpin.CmdClause) {
+	cmd.Flag("json", "Output result in JSON format to stdout").BoolVar(&c.jsonOutput)
+	cmd.Flag("json-indent", "Output result in indented JSON format to stdout").Hidden().BoolVar(&c.jsonIndent)
+	cmd.Flag("json-verbose", "Output non-essential data (e.g. statistics) in JSON format").Hidden().BoolVar(&c.jsonVerbose)
+
+	c.out = svc.stdout()
+}
+
+func (c *jsonOutput) cleanupSnapshotManifestForJSON(v *snapshot.Manifest) interface{} {
 	m := *v
 
-	if !jsonVerbose {
+	if !c.jsonVerbose {
 		return struct {
 			*snapshot.Manifest
 
@@ -36,42 +42,42 @@ func cleanupSnapshotManifestForJSON(v *snapshot.Manifest) interface{} {
 	return &m
 }
 
-func cleanupSnapshotManifestListForJSON(manifests []*snapshot.Manifest) interface{} {
+func (c *jsonOutput) cleanupSnapshotManifestListForJSON(manifests []*snapshot.Manifest) interface{} {
 	var res []interface{}
 
 	for _, m := range manifests {
-		res = append(res, cleanupSnapshotManifestForJSON(m))
+		res = append(res, c.cleanupSnapshotManifestForJSON(m))
 	}
 
 	return res
 }
 
-func cleanupForJSON(v interface{}) interface{} {
+func (c *jsonOutput) cleanupForJSON(v interface{}) interface{} {
 	switch v := v.(type) {
 	case content.Info:
 		return content.ToInfoStruct(v)
 	case *snapshot.Manifest:
-		return cleanupSnapshotManifestForJSON(v)
+		return c.cleanupSnapshotManifestForJSON(v)
 	case []*snapshot.Manifest:
-		return cleanupSnapshotManifestListForJSON(v)
+		return c.cleanupSnapshotManifestListForJSON(v)
 	default:
 		return v
 	}
 }
 
-func jsonBytes(v interface{}) []byte {
-	return jsonIndentedBytes(v, "")
+func (c *jsonOutput) jsonBytes(v interface{}) []byte {
+	return c.jsonIndentedBytes(v, "")
 }
 
-func jsonIndentedBytes(v interface{}, indent string) []byte {
-	v = cleanupForJSON(v)
+func (c *jsonOutput) jsonIndentedBytes(v interface{}, indent string) []byte {
+	v = c.cleanupForJSON(v)
 
 	var (
 		b   []byte
 		err error
 	)
 
-	if jsonIndent {
+	if c.jsonIndent {
 		b, err = json.MarshalIndent(v, indent+"", indent+"  ")
 	} else {
 		b, err = json.Marshal(v)
@@ -86,33 +92,36 @@ func jsonIndentedBytes(v interface{}, indent string) []byte {
 
 type jsonList struct {
 	separator string
+	o         *jsonOutput
 }
 
-func (l *jsonList) begin() {
-	if jsonOutput {
-		printStdout("[")
+func (l *jsonList) begin(o *jsonOutput) {
+	l.o = o
 
-		if !jsonIndent {
+	if o.jsonOutput {
+		fmt.Fprintf(l.o.out, "[")
+
+		if !o.jsonIndent {
 			l.separator = "\n "
 		}
 	}
 }
 
 func (l *jsonList) end() {
-	if jsonOutput {
-		if !jsonIndent {
-			printStdout("\n")
+	if l.o.jsonOutput {
+		if !l.o.jsonIndent {
+			fmt.Fprintf(l.o.out, "\n")
 		}
 
-		printStdout("]")
+		fmt.Fprintf(l.o.out, "]")
 	}
 }
 
 func (l *jsonList) emit(v interface{}) {
-	printStdout(l.separator)
-	printStdout("%s", jsonBytes(v))
+	fmt.Fprintf(l.o.out, l.separator)
+	fmt.Fprintf(l.o.out, "%s", l.o.jsonBytes(v))
 
-	if jsonIndent {
+	if l.o.jsonIndent {
 		l.separator = ","
 	} else {
 		l.separator = ",\n "

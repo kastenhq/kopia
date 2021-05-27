@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/net/webdav"
 
+	"github.com/kopia/kopia/tests/testdirtree"
 	"github.com/kopia/kopia/tests/testenv"
 )
 
@@ -59,7 +60,8 @@ func (d webdavDirWithFakeClock) OpenFile(ctx context.Context, fname string, flag
 }
 
 func TestEndurance(t *testing.T) {
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewExeRunner(t)
+	e := testenv.NewCLITest(t, runner)
 
 	tmpDir, err := ioutil.TempDir("", "endurance")
 	if err != nil {
@@ -73,7 +75,7 @@ func TestEndurance(t *testing.T) {
 	ft := httptest.NewServer(fts)
 	defer ft.Close()
 
-	e.Environment = append(e.Environment, "KOPIA_FAKE_CLOCK_ENDPOINT="+ft.URL)
+	runner.Environment = append(runner.Environment, "KOPIA_FAKE_CLOCK_ENDPOINT="+ft.URL)
 
 	sts := httptest.NewServer(&webdav.Handler{
 		FileSystem: webdavDirWithFakeClock{webdav.Dir(tmpDir), fts},
@@ -189,12 +191,12 @@ func actionAddNewSource(t *testing.T, e *testenv.CLITest, s *runnerState) {
 
 	s.dirs = append(s.dirs, srcDir)
 
-	testenv.CreateDirectoryTree(srcDir, testenv.MaybeSimplifyFilesystem(testenv.DirectoryTreeOptions{
+	testdirtree.CreateDirectoryTree(srcDir, testdirtree.MaybeSimplifyFilesystem(testdirtree.DirectoryTreeOptions{
 		Depth:                  3,
 		MaxSubdirsPerDirectory: 10,
 		MaxFilesPerDirectory:   10,
 		MaxFileSize:            100,
-	}), &testenv.DirectoryTreeCounters{})
+	}), &testdirtree.DirectoryTreeCounters{})
 }
 
 func actionMutateDirectoryTree(t *testing.T, e *testenv.CLITest, s *runnerState) {
@@ -202,12 +204,12 @@ func actionMutateDirectoryTree(t *testing.T, e *testenv.CLITest, s *runnerState)
 
 	randomPath := s.dirs[rand.Intn(len(s.dirs))]
 
-	testenv.CreateDirectoryTree(randomPath, testenv.DirectoryTreeOptions{
+	testdirtree.CreateDirectoryTree(randomPath, testdirtree.DirectoryTreeOptions{
 		Depth:                  2,
 		MaxSubdirsPerDirectory: 10,
 		MaxFilesPerDirectory:   10,
 		MaxFileSize:            100,
-	}, &testenv.DirectoryTreeCounters{})
+	}, &testdirtree.DirectoryTreeCounters{})
 }
 
 func pickRandomEnduranceTestAction() action {
@@ -231,9 +233,10 @@ func pickRandomEnduranceTestAction() action {
 func enduranceRunner(t *testing.T, runnerID int, fakeTimeServer, webdavServer string, failureCount *int32, nowFunc func() time.Time) {
 	t.Helper()
 
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewExeRunner(t)
+	e := testenv.NewCLITest(t, runner)
 
-	e.Environment = append(e.Environment,
+	runner.Environment = append(runner.Environment,
 		"KOPIA_FAKE_CLOCK_ENDPOINT="+fakeTimeServer,
 		"KOPIA_CHECK_FOR_UPDATES=false",
 	)

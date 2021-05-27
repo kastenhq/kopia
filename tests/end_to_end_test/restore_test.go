@@ -16,12 +16,15 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/kopia/kopia/fs/localfs"
 	"github.com/kopia/kopia/internal/diff"
 	"github.com/kopia/kopia/internal/fshasher"
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/internal/testutil"
+	"github.com/kopia/kopia/tests/clitestutil"
+	"github.com/kopia/kopia/tests/testdirtree"
 	"github.com/kopia/kopia/tests/testenv"
 )
 
@@ -36,12 +39,13 @@ const (
 func TestRestoreCommand(t *testing.T) {
 	t.Parallel()
 
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewInProcRunner(t)
+	e := testenv.NewCLITest(t, runner)
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 
 	source := filepath.Join(testutil.TempDirectory(t), "source")
-	testenv.MustCreateDirectoryTree(t, source, testenv.DirectoryTreeOptions{
+	testdirtree.MustCreateDirectoryTree(t, source, testdirtree.DirectoryTreeOptions{
 		Depth:                              1,
 		MaxFilesPerDirectory:               10,
 		MaxSymlinksPerDirectory:            4,
@@ -54,7 +58,7 @@ func TestRestoreCommand(t *testing.T) {
 	e.RunAndExpectSuccess(t, "snapshot", "create", source)
 
 	// obtain snapshot root id and use it for restore
-	si := e.ListSnapshotsAndExpectSuccess(t, source)
+	si := clitestutil.ListSnapshotsAndExpectSuccess(t, e, source)
 	if got, want := len(si), 1; got != want {
 		t.Fatalf("got %v sources, wanted %v", got, want)
 	}
@@ -85,7 +89,7 @@ func TestRestoreCommand(t *testing.T) {
 	// the way the top FS entry is created in snapshotfs. Force the permissions
 	// of the top directory to match those of the source so the recursive
 	// directory comparison has a chance of succeeding.
-	testenv.AssertNoError(t, os.Chmod(restoreDir, 0o700))
+	require.NoError(t, os.Chmod(restoreDir, 0o700))
 	compareDirs(t, source, restoreDir)
 
 	// Attempt to restore into a target directory that already exists
@@ -127,21 +131,21 @@ func compareDirs(t *testing.T, source, restoreDir string) {
 
 	// Restored contents should match source
 	s, err := localfs.Directory(source)
-	testenv.AssertNoError(t, err)
+	require.NoError(t, err)
 	wantHash, err := fshasher.Hash(testlogging.Context(t), s)
-	testenv.AssertNoError(t, err)
+	require.NoError(t, err)
 
 	// check restored contents
 	r, err := localfs.Directory(restoreDir)
-	testenv.AssertNoError(t, err)
+	require.NoError(t, err)
 
 	ctx := testlogging.Context(t)
 	gotHash, err := fshasher.Hash(ctx, r)
-	testenv.AssertNoError(t, err)
+	require.NoError(t, err)
 
 	if !assert.Equal(t, wantHash, gotHash, "restored directory hash does not match source's hash") {
 		cmp, err := diff.NewComparer(os.Stderr)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 
 		cmp.DiffCommand = "cmp"
 		_ = cmp.Compare(ctx, s, r)
@@ -151,20 +155,22 @@ func compareDirs(t *testing.T, source, restoreDir string) {
 func TestSnapshotRestore(t *testing.T) {
 	t.Parallel()
 
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewInProcRunner(t)
+	e := testenv.NewCLITest(t, runner)
+
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 
 	source := testutil.TempDirectory(t)
-	testenv.MustCreateDirectoryTree(t, filepath.Join(source, "subdir1"), testenv.MaybeSimplifyFilesystem(testenv.DirectoryTreeOptions{
+	testdirtree.MustCreateDirectoryTree(t, filepath.Join(source, "subdir1"), testdirtree.MaybeSimplifyFilesystem(testdirtree.DirectoryTreeOptions{
 		Depth:                              3,
 		MaxSubdirsPerDirectory:             3,
 		MaxFilesPerDirectory:               3,
 		MaxSymlinksPerDirectory:            4,
 		NonExistingSymlinkTargetPercentage: 50,
 	}))
-	testenv.MustCreateDirectoryTree(t, filepath.Join(source, "subdir2"), testenv.MaybeSimplifyFilesystem(testenv.DirectoryTreeOptions{
+	testdirtree.MustCreateDirectoryTree(t, filepath.Join(source, "subdir2"), testdirtree.MaybeSimplifyFilesystem(testdirtree.DirectoryTreeOptions{
 		Depth:                   2,
 		MaxSubdirsPerDirectory:  1,
 		MaxFilesPerDirectory:    5,
@@ -191,7 +197,7 @@ func TestSnapshotRestore(t *testing.T) {
 	e.RunAndExpectSuccess(t, "snapshot", "create", source)
 
 	// obtain snapshot root id and use it for restore
-	si := e.ListSnapshotsAndExpectSuccess(t, source)
+	si := clitestutil.ListSnapshotsAndExpectSuccess(t, e, source)
 	if got, want := len(si), 1; got != want {
 		t.Fatalf("got %v sources, wanted %v", got, want)
 	}
@@ -326,7 +332,9 @@ func TestSnapshotRestore(t *testing.T) {
 func TestRestoreSymlinkWithoutTarget(t *testing.T) {
 	t.Parallel()
 
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewInProcRunner(t)
+	e := testenv.NewCLITest(t, runner)
+
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
@@ -342,7 +350,7 @@ func TestRestoreSymlinkWithoutTarget(t *testing.T) {
 	e.RunAndExpectSuccess(t, "snapshot", "create", source)
 
 	// obtain snapshot root id and use it for restore
-	si := e.ListSnapshotsAndExpectSuccess(t, source)
+	si := clitestutil.ListSnapshotsAndExpectSuccess(t, e, source)
 	if got, want := len(si), 1; got != want {
 		t.Fatalf("got %v sources, wanted %v", got, want)
 	}
@@ -360,7 +368,9 @@ func TestRestoreSymlinkWithoutTarget(t *testing.T) {
 func TestRestoreSymlinkWithNonSymlinkOverwrite(t *testing.T) {
 	t.Parallel()
 
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewInProcRunner(t)
+	e := testenv.NewCLITest(t, runner)
+
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
@@ -377,7 +387,7 @@ func TestRestoreSymlinkWithNonSymlinkOverwrite(t *testing.T) {
 	e.RunAndExpectSuccess(t, "snapshot", "create", source)
 
 	// obtain snapshot root id and use it for restore
-	si := e.ListSnapshotsAndExpectSuccess(t, source)
+	si := clitestutil.ListSnapshotsAndExpectSuccess(t, e, source)
 	if got, want := len(si), 1; got != want {
 		t.Fatalf("got %v sources, wanted %v", got, want)
 	}
@@ -403,7 +413,9 @@ func TestRestoreSymlinkWithNonSymlinkOverwrite(t *testing.T) {
 func TestRestoreSnapshotOfSingleFile(t *testing.T) {
 	t.Parallel()
 
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewInProcRunner(t)
+	e := testenv.NewCLITest(t, runner)
+
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
@@ -425,7 +437,7 @@ func TestRestoreSnapshotOfSingleFile(t *testing.T) {
 	e.RunAndExpectSuccess(t, "snapshot", "create", sourceFile)
 
 	// obtain snapshot root id and use it for restore
-	si := e.ListSnapshotsAndExpectSuccess(t, sourceFile)
+	si := clitestutil.ListSnapshotsAndExpectSuccess(t, e, sourceFile)
 	if got, want := len(si), 1; got != want {
 		t.Fatalf("got %v sources, wanted %v", got, want)
 	}

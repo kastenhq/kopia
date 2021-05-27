@@ -8,21 +8,25 @@ import (
 	"github.com/kopia/kopia/repo"
 )
 
-var sessionListCommand = sessionCommands.Command("list", "List sessions").Alias("ls")
+type commandSessionList struct {
+	out textOutput
+}
 
-func runSessionList(ctx context.Context, rep repo.DirectRepository) error {
+func (c *commandSessionList) setup(svc appServices, parent commandParent) {
+	cmd := parent.Command("list", "List sessions").Alias("ls")
+	cmd.Action(svc.directRepositoryReadAction(c.run))
+	c.out.setup(svc)
+}
+
+func (c *commandSessionList) run(ctx context.Context, rep repo.DirectRepository) error {
 	sessions, err := rep.ContentReader().ListActiveSessions(ctx)
 	if err != nil {
 		return errors.Wrap(err, "error listing sessions")
 	}
 
 	for _, s := range sessions {
-		printStdout("%v %v@%v %v %v\n", s.ID, s.User, s.Host, formatTimestamp(s.StartTime), formatTimestamp(s.CheckpointTime))
+		c.out.printStdout("%v %v@%v %v %v\n", s.ID, s.User, s.Host, formatTimestamp(s.StartTime), formatTimestamp(s.CheckpointTime))
 	}
 
 	return nil
-}
-
-func init() {
-	sessionListCommand.Action(directRepositoryReadAction(runSessionList))
 }

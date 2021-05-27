@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"os"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -13,23 +12,35 @@ import (
 	"github.com/kopia/kopia/snapshot/snapshotfs"
 )
 
-var (
-	diffCommand          = app.Command("diff", "Displays differences between two repository objects (files or directories)").Alias("compare")
-	diffFirstObjectPath  = diffCommand.Arg("object-path1", "First object/path").Required().String()
-	diffSecondObjectPath = diffCommand.Arg("object-path2", "Second object/path").Required().String()
-	diffCompareFiles     = diffCommand.Flag("files", "Compare files by launching diff command for all pairs of (old,new)").Short('f').Bool()
-	diffCommandCommand   = diffCommand.Flag("diff-command", "Displays differences between two repository objects (files or directories)").Default(defaultDiffCommand()).Envar("KOPIA_DIFF").String()
-)
+type commandDiff struct {
+	diffFirstObjectPath  string
+	diffSecondObjectPath string
+	diffCompareFiles     bool
+	diffCommandCommand   string
 
-func runDiffCommand(ctx context.Context, rep repo.Repository) error {
-	ent1, err := snapshotfs.FilesystemEntryFromIDWithPath(ctx, rep, *diffFirstObjectPath, false)
+	out textOutput
+}
+
+func (c *commandDiff) setup(svc appServices, parent commandParent) {
+	cmd := parent.Command("diff", "Displays differences between two repository objects (files or directories)").Alias("compare")
+	cmd.Arg("object-path1", "First object/path").Required().StringVar(&c.diffFirstObjectPath)
+	cmd.Arg("object-path2", "Second object/path").Required().StringVar(&c.diffSecondObjectPath)
+	cmd.Flag("files", "Compare files by launching diff command for all pairs of (old,new)").Short('f').BoolVar(&c.diffCompareFiles)
+	cmd.Flag("diff-command", "Displays differences between two repository objects (files or directories)").Default(defaultDiffCommand()).Envar("KOPIA_DIFF").StringVar(&c.diffCommandCommand)
+	cmd.Action(svc.repositoryReaderAction(c.run))
+
+	c.out.setup(svc)
+}
+
+func (c *commandDiff) run(ctx context.Context, rep repo.Repository) error {
+	ent1, err := snapshotfs.FilesystemEntryFromIDWithPath(ctx, rep, c.diffFirstObjectPath, false)
 	if err != nil {
-		return errors.Wrapf(err, "error getting filesystem entry for %v", *diffFirstObjectPath)
+		return errors.Wrapf(err, "error getting filesystem entry for %v", c.diffFirstObjectPath)
 	}
 
-	ent2, err := snapshotfs.FilesystemEntryFromIDWithPath(ctx, rep, *diffSecondObjectPath, false)
+	ent2, err := snapshotfs.FilesystemEntryFromIDWithPath(ctx, rep, c.diffSecondObjectPath, false)
 	if err != nil {
-		return errors.Wrapf(err, "error getting filesystem entry for %v", *diffSecondObjectPath)
+		return errors.Wrapf(err, "error getting filesystem entry for %v", c.diffSecondObjectPath)
 	}
 
 	_, isDir1 := ent1.(fs.Directory)
@@ -39,20 +50,20 @@ func runDiffCommand(ctx context.Context, rep repo.Repository) error {
 		return errors.New("arguments do diff must both be directories or both non-directories")
 	}
 
-	d, err := diff.NewComparer(os.Stdout)
+	d, err := diff.NewComparer(c.out.stdout())
 	if err != nil {
 		return errors.Wrap(err, "error creating comparer")
 	}
 	defer d.Close() //nolint:errcheck
 
-	if *diffCompareFiles {
-		parts := strings.Split(*diffCommandCommand, " ")
+	if c.diffCompareFiles {
+		parts := strings.Split(c.diffCommandCommand, " ")
 		d.DiffCommand = parts[0]
 		d.DiffArguments = parts[1:]
 	}
 
 	if isDir1 {
-		return d.Compare(ctx, ent1, ent2)
+		return errors.Wrap(d.Compare(ctx, ent1, ent2), "error comparing directories")
 	}
 
 	return errors.New("comparing files not implemented yet")
@@ -64,8 +75,4 @@ func defaultDiffCommand() string {
 	}
 
 	return "diff -u"
-}
-
-func init() {
-	diffCommand.Action(repositoryReaderAction(runDiffCommand))
 }

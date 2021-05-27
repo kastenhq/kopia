@@ -11,8 +11,11 @@ import (
 	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/serverapi"
 	"github.com/kopia/kopia/internal/testlogging"
+	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/tests/clitestutil"
+	"github.com/kopia/kopia/tests/testdirtree"
 	"github.com/kopia/kopia/tests/testenv"
 )
 
@@ -52,14 +55,16 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 		connectArgs = []string{"--no-grpc"}
 	}
 
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewExeRunner(t)
+	e := testenv.NewCLITest(t, runner)
+
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	// create one snapshot as foo@bar
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir, "--override-username", "foo", "--override-hostname", "bar")
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
 
-	e1 := testenv.NewCLITest(t)
+	e1 := testenv.NewCLITest(t, runner)
 	defer e1.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	// create one snapshot as not-foo@bar
@@ -68,8 +73,8 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 
 	var pBlobsBefore, qBlobsBefore []blob.Metadata
 
-	mustParseJSONLines(t, e1.RunAndExpectSuccess(t, "blob", "list", "--prefix=p", "--json"), &pBlobsBefore)
-	mustParseJSONLines(t, e1.RunAndExpectSuccess(t, "blob", "list", "--prefix=q", "--json"), &qBlobsBefore)
+	testutil.MustParseJSONLines(t, e1.RunAndExpectSuccess(t, "blob", "list", "--prefix=p", "--json"), &pBlobsBefore)
+	testutil.MustParseJSONLines(t, e1.RunAndExpectSuccess(t, "blob", "list", "--prefix=q", "--json"), &qBlobsBefore)
 
 	originalPBlobCount := len(pBlobsBefore)
 	originalQBlobCount := len(qBlobsBefore)
@@ -198,7 +203,9 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 		verifyFindManifestCount(ctx, t, writeSess, someLabels, 1)
 	}
 
-	e2 := testenv.NewCLITest(t)
+	runner2 := testenv.NewExeRunner(t)
+	e2 := testenv.NewCLITest(t, runner2)
+
 	defer e2.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	e2.RunAndExpectSuccess(t, append([]string{
@@ -213,10 +220,10 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 	// we are providing custom password to connect, make sure we won't be providing
 	// (different) default password via environment variable, as command-line password
 	// takes precedence over persisted password.
-	e2.RemoveDefaultPassword()
+	runner2.RemoveDefaultPassword()
 
 	// should see one snapshot
-	snapshots := e2.ListSnapshotsAndExpectSuccess(t)
+	snapshots := clitestutil.ListSnapshotsAndExpectSuccess(t, e2)
 	if got, want := len(snapshots), 1; got != want {
 		t.Errorf("invalid number of snapshots for foo@bar")
 	}
@@ -224,7 +231,7 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 	// create very small directory
 	smallDataDir := filepath.Join(sharedTestDataDirBase, "dir-small")
 
-	testenv.CreateDirectoryTree(smallDataDir, testenv.DirectoryTreeOptions{
+	testdirtree.CreateDirectoryTree(smallDataDir, testdirtree.DirectoryTreeOptions{
 		Depth:                  1,
 		MaxSubdirsPerDirectory: 1,
 		MaxFilesPerDirectory:   1,
@@ -248,7 +255,7 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 	e2.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir2)
 
 	// now should see two snapshots
-	snapshots = e2.ListSnapshotsAndExpectSuccess(t)
+	snapshots = clitestutil.ListSnapshotsAndExpectSuccess(t, e2)
 	if got, want := len(snapshots), 3; got != want {
 		t.Errorf("invalid number of snapshots for foo@bar")
 	}

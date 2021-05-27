@@ -358,7 +358,7 @@ func (bm *WriteManager) flushPackIndexesLocked(ctx context.Context) error {
 	if len(bm.packIndexBuilder) > 0 {
 		var b bytes.Buffer
 
-		if err := bm.packIndexBuilder.Build(&b); err != nil {
+		if err := bm.packIndexBuilder.Build(&b, bm.indexVersion); err != nil {
 			return errors.Wrap(err, "unable to build pack index")
 		}
 
@@ -755,6 +755,7 @@ func (bm *WriteManager) SyncMetadataCache(ctx context.Context) error {
 
 // DecryptBlob returns the contents of an encrypted blob that can be decrypted (n,m,l).
 func (bm *WriteManager) DecryptBlob(ctx context.Context, blobID blob.ID) ([]byte, error) {
+	// nolint:wrapcheck
 	return bm.indexBlobManager.getIndexBlob(ctx, blobID)
 }
 

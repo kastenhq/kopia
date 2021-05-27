@@ -12,19 +12,30 @@ import (
 	"github.com/kopia/kopia/repo"
 )
 
-var (
-	cacheInfoCommand  = cacheCommands.Command("info", "Displays cache information and statistics").Default()
-	cacheInfoPathOnly = cacheInfoCommand.Flag("path", "Only display cache path").Bool()
-)
+type commandCacheInfo struct {
+	onlyShowPath bool
 
-func runCacheInfoCommand(ctx context.Context, rep repo.Repository) error {
-	opts, err := repo.GetCachingOptions(ctx, repositoryConfigFileName())
+	svc appServices
+	out textOutput
+}
+
+func (c *commandCacheInfo) setup(svc appServices, parent commandParent) {
+	cmd := parent.Command("info", "Displays cache information and statistics").Default()
+	cmd.Flag("path", "Only display cache path").BoolVar(&c.onlyShowPath)
+	cmd.Action(svc.repositoryReaderAction(c.run))
+
+	c.svc = svc
+	c.out.setup(svc)
+}
+
+func (c *commandCacheInfo) run(ctx context.Context, rep repo.Repository) error {
+	opts, err := repo.GetCachingOptions(ctx, c.svc.repositoryConfigFileName())
 	if err != nil {
 		return errors.Wrap(err, "error getting cache options")
 	}
 
-	if *cacheInfoPathOnly {
-		fmt.Println(opts.CacheDirectory)
+	if c.onlyShowPath {
+		c.out.printStdout("%v\n", opts.CacheDirectory)
 		return nil
 	}
 
@@ -60,15 +71,11 @@ func runCacheInfoCommand(ctx context.Context, rep repo.Repository) error {
 			maybeLimit = fmt.Sprintf(" (duration %vs)", opts.MaxListCacheDurationSec)
 		}
 
-		fmt.Printf("%v: %v files %v%v\n", subdir, fileCount, units.BytesStringBase10(totalFileSize), maybeLimit)
+		c.out.printStdout("%v: %v files %v%v\n", subdir, fileCount, units.BytesStringBase10(totalFileSize), maybeLimit)
 	}
 
-	printStderr("To adjust cache sizes use 'kopia cache set'.\n")
-	printStderr("To clear caches use 'kopia cache clear'.\n")
+	c.out.printStderr("To adjust cache sizes use 'kopia cache set'.\n")
+	c.out.printStderr("To clear caches use 'kopia cache clear'.\n")
 
 	return nil
-}
-
-func init() {
-	cacheInfoCommand.Action(repositoryReaderAction(runCacheInfoCommand))
 }

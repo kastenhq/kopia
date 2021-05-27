@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -12,13 +11,22 @@ import (
 	"github.com/kopia/kopia/repo/blob"
 )
 
-var (
-	blobStatsCommand = blobCommands.Command("stats", "Content statistics")
-	blobStatsRaw     = blobStatsCommand.Flag("raw", "Raw numbers").Short('r').Bool()
-	blobStatsPrefix  = blobStatsCommand.Flag("prefix", "Blob name prefix").String()
-)
+type commandBlobStats struct {
+	raw    bool
+	prefix string
 
-func runBlobStatsCommand(ctx context.Context, rep repo.DirectRepository) error {
+	out textOutput
+}
+
+func (c *commandBlobStats) setup(svc appServices, parent commandParent) {
+	cmd := parent.Command("stats", "Content statistics")
+	cmd.Flag("raw", "Raw numbers").Short('r').BoolVar(&c.raw)
+	cmd.Flag("prefix", "Blob name prefix").StringVar(&c.prefix)
+	cmd.Action(svc.directRepositoryReadAction(c.run))
+	c.out.setup(svc)
+}
+
+func (c *commandBlobStats) run(ctx context.Context, rep repo.DirectRepository) error {
 	var sizeThreshold int64 = 10
 
 	countMap := map[int64]int{}
@@ -36,7 +44,7 @@ func runBlobStatsCommand(ctx context.Context, rep repo.DirectRepository) error {
 
 	if err := rep.BlobReader().ListBlobs(
 		ctx,
-		blob.ID(*blobStatsPrefix),
+		blob.ID(c.prefix),
 		func(b blob.Metadata) error {
 			totalSize += b.Length
 			count++
@@ -55,25 +63,25 @@ func runBlobStatsCommand(ctx context.Context, rep repo.DirectRepository) error {
 	}
 
 	sizeToString := units.BytesStringBase10
-	if *blobStatsRaw {
+	if c.raw {
 		sizeToString = func(l int64) string { return strconv.FormatInt(l, 10) }
 	}
 
-	fmt.Println("Count:", count)
-	fmt.Println("Total:", sizeToString(totalSize))
+	c.out.printStdout("Count: %v\n", count)
+	c.out.printStdout("Total: %v\n", sizeToString(totalSize))
 
 	if count == 0 {
 		return nil
 	}
 
-	fmt.Println("Average:", sizeToString(totalSize/count))
+	c.out.printStdout("Average: %v\n", sizeToString(totalSize/count))
 
-	fmt.Printf("Histogram:\n\n")
+	c.out.printStdout("Histogram:\n\n")
 
 	var lastSize int64
 
 	for _, size := range sizeThresholds {
-		fmt.Printf("%9v between %v and %v (total %v)\n",
+		c.out.printStdout("%9v between %v and %v (total %v)\n",
 			countMap[size]-countMap[lastSize],
 			sizeToString(lastSize),
 			sizeToString(size),
@@ -84,8 +92,4 @@ func runBlobStatsCommand(ctx context.Context, rep repo.DirectRepository) error {
 	}
 
 	return nil
-}
-
-func init() {
-	blobStatsCommand.Action(directRepositoryReadAction(runBlobStatsCommand))
 }

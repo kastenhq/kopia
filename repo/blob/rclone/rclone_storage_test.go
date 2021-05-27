@@ -26,6 +26,7 @@ const defaultCleanupAge = time.Hour
 
 var rcloneExternalProviders = map[string]string{
 	"GoogleDrive": "gdrive:/kopia",
+	// "OneDrive":    "onedrive:/kopia", broken
 }
 
 func mustGetRcloneExeOrSkip(t *testing.T) string {
@@ -180,9 +181,10 @@ func TestRCloneProviders(t *testing.T) {
 				t.Fatalf("unable to connect to rclone backend: %v", err)
 			}
 
+			defer st.Close(ctx)
+
 			// at the end of a test delete all blobs that were created.
 			defer cleanupAllBlobs(ctx, t, st, 0)
-			defer st.Close(ctx)
 
 			blobtesting.VerifyStorage(ctx, t, logging.NewWrapper(st, t.Logf, "[RCLONE-STORAGE] "))
 			blobtesting.AssertConnectionInfoRoundTrips(ctx, t, st)

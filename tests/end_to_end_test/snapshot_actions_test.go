@@ -12,6 +12,7 @@ import (
 
 	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/testutil"
+	"github.com/kopia/kopia/tests/clitestutil"
 	"github.com/kopia/kopia/tests/testenv"
 )
 
@@ -20,17 +21,18 @@ func TestSnapshotActionsBeforeSnapshotRoot(t *testing.T) {
 
 	th := os.Getenv("TESTING_ACTION_EXE")
 	if th == "" {
-		t.Skip("TESTING_ACTION_EXE verifyNoError be set")
+		t.Skip("TESTING_ACTION_EXE must be set")
 	}
 
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewExeRunner(t)
+	e := testenv.NewCLITest(t, runner)
 
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir, "--override-hostname=foo", "--override-username=foo", "--enable-actions")
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir2)
 
-	envFile1 := filepath.Join(e.LogsDir, "env1.txt")
+	envFile1 := filepath.Join(runner.LogsDir, "env1.txt")
 
 	// set a action before-snapshot-root that fails and which saves the environment to a file.
 	e.RunAndExpectSuccess(t,
@@ -41,7 +43,7 @@ func TestSnapshotActionsBeforeSnapshotRoot(t *testing.T) {
 	// this prevents the snapshot from being created
 	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1)
 
-	envFile2 := filepath.Join(e.LogsDir, "env2.txt")
+	envFile2 := filepath.Join(runner.LogsDir, "env2.txt")
 
 	// now set a action before-snapshot-root that succeeds and saves environment to a different file
 	e.RunAndExpectSuccess(t,
@@ -122,8 +124,8 @@ func TestSnapshotActionsBeforeSnapshotRoot(t *testing.T) {
 
 	// since we redirected to sharedTestDataDir2 the object ID of last snapshot of sharedTestDataDir1
 	// will be the same as snapshots of sharedTestDataDir2
-	snaps1 := e.ListSnapshotsAndExpectSuccess(t, sharedTestDataDir1)[0].Snapshots
-	snaps2 := e.ListSnapshotsAndExpectSuccess(t, sharedTestDataDir2)[0].Snapshots
+	snaps1 := clitestutil.ListSnapshotsAndExpectSuccess(t, e, sharedTestDataDir1)[0].Snapshots
+	snaps2 := clitestutil.ListSnapshotsAndExpectSuccess(t, e, sharedTestDataDir2)[0].Snapshots
 
 	if snaps1[0].ObjectID == snaps2[0].ObjectID {
 		t.Fatal("failed sanity check - snapshots are the same")
@@ -143,7 +145,7 @@ func TestSnapshotActionsBeforeSnapshotRoot(t *testing.T) {
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
 
 	// verify redirection had no effect - last snapshot will be the same as the first one
-	snaps1 = e.ListSnapshotsAndExpectSuccess(t, sharedTestDataDir1)[0].Snapshots
+	snaps1 = clitestutil.ListSnapshotsAndExpectSuccess(t, e, sharedTestDataDir1)[0].Snapshots
 	if got, want := snaps1[len(snaps1)-1].ObjectID, snaps1[0].ObjectID; got != want {
 		t.Fatalf("invalid snapshot ID after async action %v, wanted %v", got, want)
 	}
@@ -154,10 +156,11 @@ func TestSnapshotActionsBeforeAfterFolder(t *testing.T) {
 
 	th := os.Getenv("TESTING_ACTION_EXE")
 	if th == "" {
-		t.Skip("TESTING_ACTION_EXE verifyNoError be set")
+		t.Skip("TESTING_ACTION_EXE must be set")
 	}
 
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewExeRunner(t)
+	e := testenv.NewCLITest(t, runner)
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir, "--enable-actions")
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
@@ -225,7 +228,8 @@ func TestSnapshotActionsBeforeAfterFolder(t *testing.T) {
 func TestSnapshotActionsEmbeddedScript(t *testing.T) {
 	t.Parallel()
 
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewInProcRunner(t)
+	e := testenv.NewCLITest(t, runner)
 
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir, "--enable-actions")
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
@@ -255,7 +259,7 @@ func TestSnapshotActionsEmbeddedScript(t *testing.T) {
 	e.RunAndExpectSuccess(t, "policy", "set", sharedTestDataDir1, "--before-folder-action", successScript2, "--persist-action-script")
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
 
-	snaps1 := e.ListSnapshotsAndExpectSuccess(t, sharedTestDataDir1)[0].Snapshots
+	snaps1 := clitestutil.ListSnapshotsAndExpectSuccess(t, e, sharedTestDataDir1)[0].Snapshots
 	if snaps1[0].ObjectID == snaps1[1].ObjectID {
 		t.Fatalf("redirection did not happen!")
 	}
@@ -272,7 +276,7 @@ func TestSnapshotActionsEnable(t *testing.T) {
 
 	th := os.Getenv("TESTING_ACTION_EXE")
 	if th == "" {
-		t.Skip("TESTING_ACTION_EXE verifyNoError be set")
+		t.Skip("TESTING_ACTION_EXE must be set")
 	}
 
 	cases := []struct {
@@ -296,13 +300,14 @@ func TestSnapshotActionsEnable(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			t.Parallel()
 
-			e := testenv.NewCLITest(t)
+			runner := testenv.NewExeRunner(t)
+			e := testenv.NewCLITest(t, runner)
 
 			defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
 			e.RunAndExpectSuccess(t, append([]string{"repo", "create", "filesystem", "--path", e.RepoDir}, tc.connectFlags...)...)
 
-			envFile := filepath.Join(e.LogsDir, "env1.txt")
+			envFile := filepath.Join(runner.LogsDir, "env1.txt")
 
 			// set an action before-snapshot-root that fails and which saves the environment to a file.
 			e.RunAndExpectSuccess(t,

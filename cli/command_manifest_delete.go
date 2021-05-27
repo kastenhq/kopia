@@ -8,23 +8,28 @@ import (
 	"github.com/kopia/kopia/repo"
 )
 
-var (
-	manifestRemoveCommand = manifestCommands.Command("delete", "Remove manifest items").Alias("remove").Alias("rm")
-	manifestRemoveItems   = manifestRemoveCommand.Arg("item", "Items to remove").Required().Strings()
-)
+type commandManifestDelete struct {
+	manifestRemoveItems []string
 
-func runManifestRemoveCommand(ctx context.Context, rep repo.RepositoryWriter) error {
-	advancedCommand(ctx)
+	svc appServices
+}
 
-	for _, it := range toManifestIDs(*manifestRemoveItems) {
+func (c *commandManifestDelete) setup(svc appServices, parent commandParent) {
+	cmd := parent.Command("delete", "Remove manifest items").Alias("remove").Alias("rm")
+	cmd.Arg("item", "Items to remove").Required().StringsVar(&c.manifestRemoveItems)
+	cmd.Action(svc.repositoryWriterAction(c.run))
+
+	c.svc = svc
+}
+
+func (c *commandManifestDelete) run(ctx context.Context, rep repo.RepositoryWriter) error {
+	c.svc.advancedCommand(ctx)
+
+	for _, it := range toManifestIDs(c.manifestRemoveItems) {
 		if err := rep.DeleteManifest(ctx, it); err != nil {
 			return errors.Wrapf(err, "unable to delete manifest %v", it)
 		}
 	}
 
 	return nil
-}
-
-func init() {
-	manifestRemoveCommand.Action(repositoryWriterAction(runManifestRemoveCommand))
 }

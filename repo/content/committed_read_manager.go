@@ -40,6 +40,7 @@ type SharedManager struct {
 	maxPreambleLength       int
 	paddingUnit             int
 	repositoryFormatBytes   []byte
+	indexVersion            int
 
 	encryptionBufferPool *buf.Pool
 }
@@ -241,6 +242,7 @@ func (sm *SharedManager) decryptAndVerify(encrypted, iv []byte) ([]byte, error) 
 
 // IndexBlobs returns the list of active index blobs.
 func (sm *SharedManager) IndexBlobs(ctx context.Context, includeInactive bool) ([]IndexBlobInfo, error) {
+	// nolint:wrapcheck
 	return sm.indexBlobManager.listIndexBlobs(ctx, includeInactive)
 }
 
@@ -281,7 +283,7 @@ func (sm *SharedManager) setupReadManagerCaches(ctx context.Context, caching *Ca
 		return errors.Wrap(err, "unable to initialize own writes cache")
 	}
 
-	contentIndex := newCommittedContentIndex(caching, uint32(sm.encryptor.Overhead()))
+	contentIndex := newCommittedContentIndex(caching, uint32(sm.encryptor.Overhead()), sm.indexVersion)
 
 	// once everything is ready, set it up
 	sm.contentCache = dataCache
@@ -323,14 +325,14 @@ func (sm *SharedManager) release(ctx context.Context) error {
 	log(ctx).Debugf("closing shared manager")
 
 	if err := sm.committedContents.close(); err != nil {
-		return errors.Wrap(err, "error closed committed content index")
+		return errors.Wrap(err, "error closing committed content index")
 	}
 
 	sm.contentCache.close(ctx)
 	sm.metadataCache.close(ctx)
 	sm.encryptionBufferPool.Close()
 
-	return sm.st.Close(ctx)
+	return errors.Wrap(sm.st.Close(ctx), "error closing storage")
 }
 
 // NewSharedManager returns SharedManager that is used by SessionWriteManagers on top of a repository.
@@ -368,6 +370,7 @@ func NewSharedManager(ctx context.Context, st blob.Storage, f *FormattingOptions
 		checkInvariantsOnUnlock: os.Getenv("KOPIA_VERIFY_INVARIANTS") != "",
 		writeFormatVersion:      int32(f.Version),
 		encryptionBufferPool:    buf.NewPool(ctx, defaultEncryptionBufferPoolSegmentSize+encryptor.Overhead(), "content-manager-encryption"),
+		indexVersion:            v1IndexVersion,
 	}
 
 	caching = caching.CloneOrDefault()

@@ -50,18 +50,23 @@ const policyEditSchedulingHelpText = `
   #   "manual": false /* Only create snapshots manually if set to true. NOTE: cannot be used with the above two fields */
 `
 
-var (
-	policyEditCommand = policyCommands.Command("edit", "Set snapshot policy for a single directory, user@host or a global policy.")
-	policyEditTargets = policyEditCommand.Arg("target", "Target of a policy ('global','user@host','@host') or a path").Strings()
-	policyEditGlobal  = policyEditCommand.Flag("global", "Set global policy").Bool()
-)
+type commandPolicyEdit struct {
+	targets []string
+	global  bool
 
-func init() {
-	policyEditCommand.Action(repositoryWriterAction(editPolicy))
+	out textOutput
 }
 
-func editPolicy(ctx context.Context, rep repo.RepositoryWriter) error {
-	targets, err := policyTargets(ctx, rep, policyEditGlobal, policyEditTargets)
+func (c *commandPolicyEdit) setup(svc appServices, parent commandParent) {
+	cmd := parent.Command("edit", "Set snapshot policy for a single directory, user@host or a global policy.")
+	cmd.Arg("target", "Target of a policy ('global','user@host','@host') or a path").StringsVar(&c.targets)
+	cmd.Flag("global", "Set global policy").BoolVar(&c.global)
+	cmd.Action(svc.repositoryWriterAction(c.run))
+	c.out.setup(svc)
+}
+
+func (c *commandPolicyEdit) run(ctx context.Context, rep repo.RepositoryWriter) error {
+	targets, err := policyTargets(ctx, rep, c.global, c.targets)
 	if err != nil {
 		return err
 	}
@@ -85,6 +90,7 @@ func editPolicy(ctx context.Context, rep repo.RepositoryWriter) error {
 			updated = &policy.Policy{}
 			d := json.NewDecoder(bytes.NewBufferString(edited))
 			d.DisallowUnknownFields()
+			// nolint:wrapcheck
 			return d.Decode(updated)
 		}); err != nil {
 			return errors.Wrap(err, "unable to launch editor")
@@ -97,7 +103,7 @@ func editPolicy(ctx context.Context, rep repo.RepositoryWriter) error {
 
 		log(ctx).Infof("Updated policy for %v\n%v", target, prettyJSON(updated))
 
-		fmt.Print("Save updated policy? (y/N) ")
+		c.out.printStdout("Save updated policy? (y/N) ")
 
 		var shouldSave string
 

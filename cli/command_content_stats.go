@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -12,12 +11,21 @@ import (
 	"github.com/kopia/kopia/repo/content"
 )
 
-var (
-	contentStatsCommand = contentCommands.Command("stats", "Content statistics")
-	contentStatsRaw     = contentStatsCommand.Flag("raw", "Raw numbers").Short('r').Bool()
-)
+type commandContentStats struct {
+	raw          bool
+	contentRange contentRangeFlags
+	out          textOutput
+}
 
-func runContentStatsCommand(ctx context.Context, rep repo.DirectRepository) error {
+func (c *commandContentStats) setup(svc appServices, parent commandParent) {
+	cmd := parent.Command("stats", "Content statistics")
+	cmd.Flag("raw", "Raw numbers").Short('r').BoolVar(&c.raw)
+	c.contentRange.setup(cmd)
+	c.out.setup(svc)
+	cmd.Action(svc.directRepositoryReadAction(c.run))
+}
+
+func (c *commandContentStats) run(ctx context.Context, rep repo.DirectRepository) error {
 	var sizeThreshold uint32 = 10
 
 	countMap := map[uint32]int{}
@@ -36,7 +44,7 @@ func runContentStatsCommand(ctx context.Context, rep repo.DirectRepository) erro
 	if err := rep.ContentReader().IterateContents(
 		ctx,
 		content.IterateOptions{
-			Range: contentIDRange(),
+			Range: c.contentRange.contentIDRange(),
 		},
 		func(b content.Info) error {
 			totalSize += int64(b.GetPackedLength())
@@ -53,25 +61,25 @@ func runContentStatsCommand(ctx context.Context, rep repo.DirectRepository) erro
 	}
 
 	sizeToString := units.BytesStringBase10
-	if *contentStatsRaw {
+	if c.raw {
 		sizeToString = func(l int64) string { return strconv.FormatInt(l, 10) }
 	}
 
-	fmt.Println("Count:", count)
-	fmt.Println("Total:", sizeToString(totalSize))
+	c.out.printStdout("Count: %v\n", count)
+	c.out.printStdout("Total: %v\n", sizeToString(totalSize))
 
 	if count == 0 {
 		return nil
 	}
 
-	fmt.Println("Average:", sizeToString(totalSize/count))
+	c.out.printStdout("Average: %v\n", sizeToString(totalSize/count))
 
-	fmt.Printf("Histogram:\n\n")
+	c.out.printStdout("Histogram:\n\n")
 
 	var lastSize uint32
 
 	for _, size := range sizeThresholds {
-		fmt.Printf("%9v between %v and %v (total %v)\n",
+		c.out.printStdout("%9v between %v and %v (total %v)\n",
 			countMap[size]-countMap[lastSize],
 			sizeToString(int64(lastSize)),
 			sizeToString(int64(size)),
@@ -82,9 +90,4 @@ func runContentStatsCommand(ctx context.Context, rep repo.DirectRepository) erro
 	}
 
 	return nil
-}
-
-func init() {
-	contentStatsCommand.Action(directRepositoryReadAction(runContentStatsCommand))
-	setupContentIDRangeFlags(contentStatsCommand)
 }

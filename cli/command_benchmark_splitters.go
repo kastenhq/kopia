@@ -8,21 +8,36 @@ import (
 	"strings"
 	"time"
 
+	atunits "github.com/alecthomas/units"
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/timetrack"
 	"github.com/kopia/kopia/repo/splitter"
 )
 
-var (
-	benchmarkSplitterCommand     = benchmarkCommands.Command("splitter", "Run splitter benchmarks")
-	benchmarkSplitterRandSeed    = benchmarkSplitterCommand.Flag("rand-seed", "Random seed").Default("42").Int64()
-	benchmarkSplitterBlockSize   = benchmarkSplitterCommand.Flag("data-size", "Size of a data to split").Default("32MB").Bytes()
-	benchmarkSplitterBlockCount  = benchmarkSplitterCommand.Flag("block-count", "Number of data blocks to split").Default("16").Int()
-	benchmarkSplitterPrintOption = benchmarkSplitterCommand.Flag("print-options", "Print out fastest dynamic splitter option").Bool()
-)
+type commandBenchmarkSplitters struct {
+	randSeed    int64
+	blockSize   atunits.Base2Bytes
+	blockCount  int
+	printOption bool
 
-func runBenchmarkSplitterAction(ctx context.Context) error { //nolint:funlen
+	out textOutput
+}
+
+func (c *commandBenchmarkSplitters) setup(svc appServices, parent commandParent) {
+	cmd := parent.Command("splitter", "Run splitter benchmarks")
+
+	cmd.Flag("rand-seed", "Random seed").Default("42").Int64Var(&c.randSeed)
+	cmd.Flag("data-size", "Size of a data to split").Default("32MB").BytesVar(&c.blockSize)
+	cmd.Flag("block-count", "Number of data blocks to split").Default("16").IntVar(&c.blockCount)
+	cmd.Flag("print-options", "Print out fastest dynamic splitter option").BoolVar(&c.printOption)
+
+	cmd.Action(svc.noRepositoryAction(c.run))
+
+	c.out.setup(svc)
+}
+
+func (c *commandBenchmarkSplitters) run(ctx context.Context) error { //nolint:funlen
 	type benchResult struct {
 		splitter     string
 		duration     time.Duration
@@ -45,10 +60,10 @@ func runBenchmarkSplitterAction(ctx context.Context) error { //nolint:funlen
 	// generate data blocks
 	var dataBlocks [][]byte
 
-	rnd := rand.New(rand.NewSource(*benchmarkSplitterRandSeed)) //nolint:gosec
+	rnd := rand.New(rand.NewSource(c.randSeed)) //nolint:gosec
 
-	for i := 0; i < *benchmarkSplitterBlockCount; i++ {
-		b := make([]byte, *benchmarkSplitterBlockSize)
+	for i := 0; i < c.blockCount; i++ {
+		b := make([]byte, c.blockSize)
 		if _, err := rnd.Read(b); err != nil {
 			return errors.Wrap(err, "error generating random data")
 		}
@@ -56,7 +71,7 @@ func runBenchmarkSplitterAction(ctx context.Context) error { //nolint:funlen
 		dataBlocks = append(dataBlocks, b)
 	}
 
-	log(ctx).Infof("splitting %v blocks of %v each", *benchmarkSplitterBlockCount, *benchmarkSplitterBlockSize)
+	log(ctx).Infof("splitting %v blocks of %v each", c.blockCount, c.blockSize)
 
 	for _, sp := range splitter.SupportedAlgorithms() {
 		fact := splitter.GetFactory(sp)
@@ -98,7 +113,7 @@ func runBenchmarkSplitterAction(ctx context.Context) error { //nolint:funlen
 			segmentLengths[len(segmentLengths)-1],
 		}
 
-		printStdout("%-25v %6v ms count:%v min:%v 10th:%v 25th:%v 50th:%v 75th:%v 90th:%v max:%v\n",
+		c.out.printStdout("%-25v %6v ms count:%v min:%v 10th:%v 25th:%v 50th:%v 75th:%v 90th:%v max:%v\n",
 			r.splitter,
 			r.duration.Nanoseconds()/1e6,
 			r.segmentCount,
@@ -110,10 +125,10 @@ func runBenchmarkSplitterAction(ctx context.Context) error { //nolint:funlen
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].duration < results[j].duration
 	})
-	printStdout("-----------------------------------------------------------------\n")
+	c.out.printStdout("-----------------------------------------------------------------\n")
 
 	for ndx, r := range results {
-		printStdout("%3v. %-25v %6v ms count:%v min:%v 10th:%v 25th:%v 50th:%v 75th:%v 90th:%v max:%v\n",
+		c.out.printStdout("%3v. %-25v %6v ms count:%v min:%v 10th:%v 25th:%v 50th:%v 75th:%v 90th:%v max:%v\n",
 			ndx,
 			r.splitter,
 			r.duration.Nanoseconds()/1e6,
@@ -125,13 +140,9 @@ func runBenchmarkSplitterAction(ctx context.Context) error { //nolint:funlen
 		}
 	}
 
-	if *benchmarkSplitterPrintOption {
-		printStdout("Fastest option for this machine is: --object-splitter=%s\n", best.splitter)
+	if c.printOption {
+		c.out.printStdout("Fastest option for this machine is: --object-splitter=%s\n", best.splitter)
 	}
 
 	return nil
-}
-
-func init() {
-	benchmarkSplitterCommand.Action(noRepositoryAction(runBenchmarkSplitterAction))
 }

@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"contrib.go.opencensus.io/exporter/prometheus"
 	"github.com/pkg/errors"
@@ -25,50 +26,98 @@ import (
 	"github.com/kopia/kopia/repo"
 )
 
-var (
-	serverStartCommand  = serverCommands.Command("start", "Start Kopia server").Default()
-	serverStartHTMLPath = serverStartCommand.Flag("html", "Server the provided HTML at the root URL").ExistingDir()
-	serverStartUI       = serverStartCommand.Flag("ui", "Start the server with HTML UI").Default("true").Bool()
+type commandServerStart struct {
+	co connectOptions
 
-	serverStartLegacyRepositoryAPI = serverStartCommand.Flag("legacy-api", "Start the legacy server API").Default("true").Bool()
-	serverStartGRPC                = serverStartCommand.Flag("grpc", "Start the GRPC server").Default("true").Bool()
+	serverStartHTMLPath string
+	serverStartUI       bool
 
-	serverStartRefreshInterval = serverStartCommand.Flag("refresh-interval", "Frequency for refreshing repository status").Default("300s").Duration()
-	serverStartInsecure        = serverStartCommand.Flag("insecure", "Allow insecure configurations (do not use in production)").Hidden().Bool()
-	serverStartMaxConcurrency  = serverStartCommand.Flag("max-concurrency", "Maximum number of server goroutines").Default("0").Int()
+	serverStartLegacyRepositoryAPI bool
+	serverStartGRPC                bool
 
-	serverStartWithoutPassword = serverStartCommand.Flag("without-password", "Start the server without a password").Hidden().Bool()
-	serverStartRandomPassword  = serverStartCommand.Flag("random-password", "Generate random password and print to stderr").Hidden().Bool()
-	serverStartHtpasswdFile    = serverStartCommand.Flag("htpasswd-file", "Path to htpasswd file that contains allowed user@hostname entries").Hidden().ExistingFile()
+	serverStartRefreshInterval time.Duration
+	serverStartInsecure        bool
+	serverStartMaxConcurrency  int
 
-	serverAuthCookieSingingKey = serverStartCommand.Flag("auth-cookie-signing-key", "Force particular auth cookie signing key").Envar("KOPIA_AUTH_COOKIE_SIGNING_KEY").Hidden().String()
+	serverStartWithoutPassword bool
+	serverStartRandomPassword  bool
+	serverStartHtpasswdFile    string
 
-	serverStartShutdownWhenStdinClosed = serverStartCommand.Flag("shutdown-on-stdin", "Shut down the server when stdin handle has closed.").Hidden().Bool()
-)
+	serverAuthCookieSingingKey string
 
-func init() {
-	setupConnectOptions(serverStartCommand)
-	serverStartCommand.Action(maybeRepositoryAction(runServer, repositoryAccessMode{
+	serverStartShutdownWhenStdinClosed bool
+
+	serverStartTLSGenerateCert          bool
+	serverStartTLSCertFile              string
+	serverStartTLSKeyFile               string
+	serverStartTLSGenerateRSAKeySize    int
+	serverStartTLSGenerateCertValidDays int
+	serverStartTLSGenerateCertNames     []string
+	serverStartTLSPrintFullServerCert   bool
+	uiTitlePrefix                       string
+
+	sf  serverFlags
+	svc advancedAppServices
+	out textOutput
+}
+
+func (c *commandServerStart) setup(svc advancedAppServices, parent commandParent) {
+	cmd := parent.Command("start", "Start Kopia server").Default()
+	cmd.Flag("html", "Server the provided HTML at the root URL").ExistingDirVar(&c.serverStartHTMLPath)
+	cmd.Flag("ui", "Start the server with HTML UI").Default("true").BoolVar(&c.serverStartUI)
+
+	cmd.Flag("legacy-api", "Start the legacy server API").Default("true").BoolVar(&c.serverStartLegacyRepositoryAPI)
+	cmd.Flag("grpc", "Start the GRPC server").Default("true").BoolVar(&c.serverStartGRPC)
+
+	cmd.Flag("refresh-interval", "Frequency for refreshing repository status").Default("300s").DurationVar(&c.serverStartRefreshInterval)
+	cmd.Flag("insecure", "Allow insecure configurations (do not use in production)").Hidden().BoolVar(&c.serverStartInsecure)
+	cmd.Flag("max-concurrency", "Maximum number of server goroutines").Default("0").IntVar(&c.serverStartMaxConcurrency)
+
+	cmd.Flag("without-password", "Start the server without a password").Hidden().BoolVar(&c.serverStartWithoutPassword)
+	cmd.Flag("random-password", "Generate random password and print to stderr").Hidden().BoolVar(&c.serverStartRandomPassword)
+	cmd.Flag("htpasswd-file", "Path to htpasswd file that contains allowed user@hostname entries").Hidden().ExistingFileVar(&c.serverStartHtpasswdFile)
+
+	cmd.Flag("auth-cookie-signing-key", "Force particular auth cookie signing key").Envar("KOPIA_AUTH_COOKIE_SIGNING_KEY").Hidden().StringVar(&c.serverAuthCookieSingingKey)
+
+	cmd.Flag("shutdown-on-stdin", "Shut down the server when stdin handle has closed.").Hidden().BoolVar(&c.serverStartShutdownWhenStdinClosed)
+
+	cmd.Flag("tls-generate-cert", "Generate TLS certificate").Hidden().BoolVar(&c.serverStartTLSGenerateCert)
+	cmd.Flag("tls-cert-file", "TLS certificate PEM").StringVar(&c.serverStartTLSCertFile)
+	cmd.Flag("tls-key-file", "TLS key PEM file").StringVar(&c.serverStartTLSKeyFile)
+	cmd.Flag("tls-generate-rsa-key-size", "TLS RSA Key size (bits)").Hidden().Default("4096").IntVar(&c.serverStartTLSGenerateRSAKeySize)
+	cmd.Flag("tls-generate-cert-valid-days", "How long should the TLS certificate be valid").Default("3650").Hidden().IntVar(&c.serverStartTLSGenerateCertValidDays)
+	cmd.Flag("tls-generate-cert-name", "Host names/IP addresses to generate TLS certificate for").Default("127.0.0.1").Hidden().StringsVar(&c.serverStartTLSGenerateCertNames)
+	cmd.Flag("tls-print-server-cert", "Print server certificate").Hidden().BoolVar(&c.serverStartTLSPrintFullServerCert)
+
+	cmd.Flag("ui-title-prefix", "UI title prefix").Hidden().Envar("KOPIA_UI_TITLE_PREFIX").StringVar(&c.uiTitlePrefix)
+
+	c.sf.setup(cmd)
+	c.co.setup(cmd)
+	c.svc = svc
+	c.out.setup(svc)
+
+	cmd.Action(svc.maybeRepositoryAction(c.run, repositoryAccessMode{
 		mustBeConnected:    false,
 		disableMaintenance: true, // server closes the repository so maintenance can't run.
 	}))
 }
 
-func runServer(ctx context.Context, rep repo.Repository) error {
-	authn, err := getAuthenticator(ctx)
+func (c *commandServerStart) run(ctx context.Context, rep repo.Repository) error {
+	authn, err := c.getAuthenticator(ctx)
 	if err != nil {
 		return errors.Wrap(err, "unable to initialize authentication")
 	}
 
 	srv, err := server.New(ctx, server.Options{
-		ConfigFile:           repositoryConfigFileName(),
-		ConnectOptions:       connectOptions(),
-		RefreshInterval:      *serverStartRefreshInterval,
-		MaxConcurrency:       *serverStartMaxConcurrency,
+		ConfigFile:           c.svc.repositoryConfigFileName(),
+		ConnectOptions:       c.co.toRepoConnectOptions(),
+		RefreshInterval:      c.serverStartRefreshInterval,
+		MaxConcurrency:       c.serverStartMaxConcurrency,
 		Authenticator:        authn,
 		Authorizer:           auth.DefaultAuthorizer(),
-		AuthCookieSigningKey: *serverAuthCookieSingingKey,
-		UIUser:               *serverUsername,
+		AuthCookieSigningKey: c.serverAuthCookieSingingKey,
+		UIUser:               c.sf.serverUsername,
+		PasswordPersist:      c.svc.passwordPersistenceStrategy(),
 	})
 	if err != nil {
 		return errors.Wrap(err, "unable to initialize server")
@@ -84,16 +133,16 @@ func runServer(ctx context.Context, rep repo.Repository) error {
 
 	mux := http.NewServeMux()
 
-	mux.Handle("/api/", srv.APIHandlers(*serverStartLegacyRepositoryAPI))
+	mux.Handle("/api/", srv.APIHandlers(c.serverStartLegacyRepositoryAPI))
 
-	if *serverStartHTMLPath != "" {
-		fileServer := srv.RequireUIUserAuth(serveIndexFileForKnownUIRoutes(http.Dir(*serverStartHTMLPath)))
+	if c.serverStartHTMLPath != "" {
+		fileServer := srv.RequireUIUserAuth(c.serveIndexFileForKnownUIRoutes(http.Dir(c.serverStartHTMLPath)))
 		mux.Handle("/", fileServer)
-	} else if *serverStartUI {
-		mux.Handle("/", srv.RequireUIUserAuth(serveIndexFileForKnownUIRoutes(server.AssetFile())))
+	} else if c.serverStartUI {
+		mux.Handle("/", srv.RequireUIUserAuth(c.serveIndexFileForKnownUIRoutes(server.AssetFile())))
 	}
 
-	httpServer := &http.Server{Addr: stripProtocol(*serverAddress)}
+	httpServer := &http.Server{Addr: stripProtocol(c.sf.serverAddress)}
 	srv.OnShutdown = httpServer.Shutdown
 
 	onCtrlC(func() {
@@ -112,13 +161,13 @@ func runServer(ctx context.Context, rep repo.Repository) error {
 
 	var handler http.Handler = mux
 
-	if *serverStartGRPC {
+	if c.serverStartGRPC {
 		handler = srv.GRPCRouterHandler(handler)
 	}
 
 	httpServer.Handler = handler
 
-	if *serverStartShutdownWhenStdinClosed {
+	if c.serverStartShutdownWhenStdinClosed {
 		log(ctx).Infof("Server will close when stdin is closed...")
 
 		go func() {
@@ -135,12 +184,12 @@ func runServer(ctx context.Context, rep repo.Repository) error {
 		}
 	})
 
-	err = startServerWithOptionalTLS(ctx, httpServer)
+	err = c.startServerWithOptionalTLS(ctx, httpServer)
 	if !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 
-	return srv.SetRepository(ctx, nil)
+	return errors.Wrap(srv.SetRepository(ctx, nil), "error setting active repository")
 }
 
 func initPrometheus(mux *http.ServeMux) error {
@@ -169,16 +218,16 @@ func stripProtocol(addr string) string {
 	return strings.TrimPrefix(strings.TrimPrefix(addr, "https://"), "http://")
 }
 
-func isKnownUIRoute(path string) bool {
+func (c *commandServerStart) isKnownUIRoute(path string) bool {
 	return strings.HasPrefix(path, "/snapshots") ||
 		strings.HasPrefix(path, "/policies") ||
 		strings.HasPrefix(path, "/tasks") ||
 		strings.HasPrefix(path, "/repo")
 }
 
-func patchIndexBytes(b []byte) []byte {
-	if prefix := os.Getenv("KOPIA_UI_TITLE_PREFIX"); prefix != "" {
-		b = bytes.ReplaceAll(b, []byte("<title>"), []byte("<title>"+html.EscapeString(prefix)))
+func (c *commandServerStart) patchIndexBytes(b []byte) []byte {
+	if c.uiTitlePrefix != "" {
+		b = bytes.ReplaceAll(b, []byte("<title>"), []byte("<title>"+html.EscapeString(c.uiTitlePrefix)))
 	}
 
 	return b
@@ -200,14 +249,14 @@ func maybeReadIndexBytes(fs http.FileSystem) []byte {
 	return rd
 }
 
-func serveIndexFileForKnownUIRoutes(fs http.FileSystem) http.Handler {
+func (c *commandServerStart) serveIndexFileForKnownUIRoutes(fs http.FileSystem) http.Handler {
 	h := http.FileServer(fs)
 
 	// read bytes from 'index.html' and patch based on optional environment variables.
-	indexBytes := patchIndexBytes(maybeReadIndexBytes(fs))
+	indexBytes := c.patchIndexBytes(maybeReadIndexBytes(fs))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isKnownUIRoute(r.URL.Path) {
+		if c.isKnownUIRoute(r.URL.Path) {
 			r2 := new(http.Request)
 			*r2 = *r
 			r2.URL = new(url.URL)
@@ -217,7 +266,6 @@ func serveIndexFileForKnownUIRoutes(fs http.FileSystem) http.Handler {
 		}
 
 		if r.URL.Path == "/" && indexBytes != nil {
-			fmt.Println("serving patched index")
 			http.ServeContent(w, r, "/", clock.Now(), bytes.NewReader(indexBytes))
 			return
 		}
@@ -226,12 +274,12 @@ func serveIndexFileForKnownUIRoutes(fs http.FileSystem) http.Handler {
 	})
 }
 
-func getAuthenticator(ctx context.Context) (auth.Authenticator, error) {
+func (c *commandServerStart) getAuthenticator(ctx context.Context) (auth.Authenticator, error) {
 	var authenticators []auth.Authenticator
 
 	// handle passwords (UI and remote) from htpasswd file.
-	if *serverStartHtpasswdFile != "" {
-		f, err := htpasswd.New(*serverStartHtpasswdFile, htpasswd.DefaultSystems, nil)
+	if c.serverStartHtpasswdFile != "" {
+		f, err := htpasswd.New(c.serverStartHtpasswdFile, htpasswd.DefaultSystems, nil)
 		if err != nil {
 			return nil, errors.Wrap(err, "error initializing htpasswd")
 		}
@@ -241,17 +289,17 @@ func getAuthenticator(ctx context.Context) (auth.Authenticator, error) {
 
 	// handle UI password (--without-password, --password or --random-password)
 	switch {
-	case *serverStartWithoutPassword:
-		if !*serverStartInsecure {
+	case c.serverStartWithoutPassword:
+		if !c.serverStartInsecure {
 			return nil, errors.Errorf("--without-password specified without --insecure, refusing to start server.")
 		}
 
 		return nil, nil
 
-	case *serverPassword != "":
-		authenticators = append(authenticators, auth.AuthenticateSingleUser(*serverUsername, *serverPassword))
+	case c.sf.serverPassword != "":
+		authenticators = append(authenticators, auth.AuthenticateSingleUser(c.sf.serverUsername, c.sf.serverPassword))
 
-	case *serverStartRandomPassword:
+	case c.serverStartRandomPassword:
 		// generate very long random one-time password
 		b := make([]byte, 32)
 		io.ReadFull(rand.Reader, b) //nolint:errcheck
@@ -259,9 +307,9 @@ func getAuthenticator(ctx context.Context) (auth.Authenticator, error) {
 		randomPassword := hex.EncodeToString(b)
 
 		// print it to the stderr bypassing any log file so that the user or calling process can connect
-		fmt.Fprintln(os.Stderr, "SERVER PASSWORD:", randomPassword)
+		fmt.Fprintln(c.out.stderr(), "SERVER PASSWORD:", randomPassword)
 
-		authenticators = append(authenticators, auth.AuthenticateSingleUser(*serverUsername, randomPassword))
+		authenticators = append(authenticators, auth.AuthenticateSingleUser(c.sf.serverUsername, randomPassword))
 	}
 
 	log(ctx).Infof(`

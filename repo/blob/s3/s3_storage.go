@@ -80,6 +80,7 @@ func (s *s3Storage) GetBlobWithVersion(ctx context.Context, b blob.ID, version s
 		return nil, translateError(err)
 	}
 
+	// nolint:wrapcheck
 	return blob.EnsureLengthExactly(fetched, length)
 }
 

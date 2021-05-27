@@ -9,6 +9,7 @@ import (
 
 	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo/content"
+	"github.com/kopia/kopia/tests/testdirtree"
 	"github.com/kopia/kopia/tests/testenv"
 )
 
@@ -30,7 +31,8 @@ import (
 func TestRestoreFail(t *testing.T) {
 	t.Parallel()
 
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewExeRunner(t)
+	e := testenv.NewCLITest(t, runner)
 
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
@@ -40,7 +42,7 @@ func TestRestoreFail(t *testing.T) {
 	sourceDir := filepath.Join(scratchDir, "source")
 	targetDir := filepath.Join(scratchDir, "target")
 
-	testenv.MustCreateDirectoryTree(t, sourceDir, testenv.MaybeSimplifyFilesystem(testenv.DirectoryTreeOptions{
+	testdirtree.MustCreateDirectoryTree(t, sourceDir, testdirtree.MaybeSimplifyFilesystem(testdirtree.DirectoryTreeOptions{
 		Depth:                  2,
 		MaxSubdirsPerDirectory: 5,
 		MaxFilesPerDirectory:   5,

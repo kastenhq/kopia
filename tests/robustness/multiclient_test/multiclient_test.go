@@ -11,12 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/tests/robustness"
 	"github.com/kopia/kopia/tests/robustness/engine"
 	"github.com/kopia/kopia/tests/robustness/fiofilewriter"
-	"github.com/kopia/kopia/tests/testenv"
 )
 
 const defaultTestDur = 5 * time.Minute
@@ -36,22 +37,22 @@ func TestManySmallFiles(t *testing.T) {
 		fiofilewriter.MinNumFilesPerWriteField: strconv.Itoa(numFiles),
 	}
 
-	f := func(ctx context.Context) {
+	f := func(ctx context.Context, t *testing.T) { //nolint:thelper
 		err := tryRestoreIntoDataDirectory(ctx, t)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 
 		_, err = eng.ExecAction(ctx, engine.WriteRandomFilesActionKey, fileWriteOpts)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 
 		_, err = eng.ExecAction(ctx, engine.SnapshotDirActionKey, nil)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 
 		_, err = eng.ExecAction(ctx, engine.RestoreSnapshotActionKey, nil)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 	}
 
 	ctx := testlogging.Context(t)
-	th.RunN(ctx, numClients, f)
+	th.RunN(ctx, t, numClients, f)
 }
 
 func TestOneLargeFile(t *testing.T) {
@@ -67,22 +68,22 @@ func TestOneLargeFile(t *testing.T) {
 		fiofilewriter.MinNumFilesPerWriteField: strconv.Itoa(numFiles),
 	}
 
-	f := func(ctx context.Context) {
+	f := func(ctx context.Context, t *testing.T) { //nolint:thelper
 		err := tryRestoreIntoDataDirectory(ctx, t)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 
 		_, err = eng.ExecAction(ctx, engine.WriteRandomFilesActionKey, fileWriteOpts)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 
 		snapOut, err := eng.ExecAction(ctx, engine.SnapshotDirActionKey, nil)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 
 		_, err = eng.ExecAction(ctx, engine.RestoreSnapshotActionKey, snapOut)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 	}
 
 	ctx := testlogging.Context(t)
-	th.RunN(ctx, numClients, f)
+	th.RunN(ctx, t, numClients, f)
 }
 
 func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
@@ -102,22 +103,22 @@ func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
 		engine.ActionRepeaterField:             strconv.Itoa(actionRepeats),
 	}
 
-	f := func(ctx context.Context) {
+	f := func(ctx context.Context, t *testing.T) { //nolint:thelper
 		err := tryRestoreIntoDataDirectory(ctx, t)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 
 		_, err = eng.ExecAction(ctx, engine.WriteRandomFilesActionKey, fileWriteOpts)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 
 		snapOut, err := eng.ExecAction(ctx, engine.SnapshotDirActionKey, nil)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 
 		_, err = eng.ExecAction(ctx, engine.RestoreSnapshotActionKey, snapOut)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 	}
 
 	ctx := testlogging.Context(t)
-	th.RunN(ctx, numClients, f)
+	th.RunN(ctx, t, numClients, f)
 }
 
 func TestRandomizedSmall(t *testing.T) {
@@ -140,24 +141,22 @@ func TestRandomizedSmall(t *testing.T) {
 		},
 	}
 
-	f := func(ctx context.Context) {
+	f := func(ctx context.Context, t *testing.T) { //nolint:thelper
 		err := tryRestoreIntoDataDirectory(ctx, t)
-		testenv.AssertNoError(t, err)
+		require.NoError(t, err)
 
 		for clock.Since(st) <= *randomizedTestDur {
 			err := tryRandomAction(ctx, t, opts)
-			testenv.AssertNoError(t, err)
+			require.NoError(t, err)
 		}
 	}
 
 	ctx := testlogging.Context(t)
-	th.RunN(ctx, numClients, f)
+	th.RunN(ctx, t, numClients, f)
 }
 
-// tryExecAction runs eng.ExecAction on the given parameters and masks no-op errors.
-func tryRestoreIntoDataDirectory(ctx context.Context, t *testing.T) error {
-	t.Helper()
-
+// tryRestoreIntoDataDirectory runs eng.ExecAction on the given parameters and masks no-op errors.
+func tryRestoreIntoDataDirectory(ctx context.Context, t *testing.T) error { //nolint:thelper
 	_, err := eng.ExecAction(ctx, engine.RestoreIntoDataDirectoryActionKey, nil)
 	if errors.Is(err, robustness.ErrNoOp) {
 		t.Log("Action resulted in no-op")
@@ -168,9 +167,7 @@ func tryRestoreIntoDataDirectory(ctx context.Context, t *testing.T) error {
 }
 
 // tryRandomAction runs eng.ExecAction on the given parameters and masks no-op errors.
-func tryRandomAction(ctx context.Context, t *testing.T, opts engine.ActionOpts) error {
-	t.Helper()
-
+func tryRandomAction(ctx context.Context, t *testing.T, opts engine.ActionOpts) error { //nolint:thelper
 	err := eng.RandomAction(ctx, opts)
 	if errors.Is(err, robustness.ErrNoOp) {
 		t.Log("Random action resulted in no-op")

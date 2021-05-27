@@ -3,84 +3,86 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/pkg/errors"
 	"golang.org/x/term"
 
-	"github.com/kopia/kopia/repo"
+	"github.com/kopia/kopia/internal/passwordpersist"
 )
 
-var password = app.Flag("password", "Repository password.").Envar("KOPIA_PASSWORD").Short('p').String()
-
-func askForNewRepositoryPassword() (string, error) {
+func askForNewRepositoryPassword(out io.Writer) (string, error) {
 	for {
-		p1, err := askPass("Enter password to create new repository: ")
+		p1, err := askPass(out, "Enter password to create new repository: ")
 		if err != nil {
 			return "", errors.Wrap(err, "password entry")
 		}
 
-		p2, err := askPass("Re-enter password for verification: ")
+		p2, err := askPass(out, "Re-enter password for verification: ")
 		if err != nil {
 			return "", errors.Wrap(err, "password verification")
 		}
 
 		if p1 != p2 {
-			fmt.Println("Passwords don't match!")
+			fmt.Fprintln(out, "Passwords don't match!")
 		} else {
 			return p1, nil
 		}
 	}
 }
 
-func askForExistingRepositoryPassword() (string, error) {
-	p1, err := askPass("Enter password to open repository: ")
+func askForExistingRepositoryPassword(out io.Writer) (string, error) {
+	p1, err := askPass(out, "Enter password to open repository: ")
 	if err != nil {
 		return "", err
 	}
 
-	fmt.Println()
+	fmt.Fprintln(out)
 
 	return p1, nil
 }
 
-var passwordFromToken string
+func (c *App) setPasswordFromToken(pwd string) {
+	c.password = pwd
+}
 
-func getPasswordFromFlags(ctx context.Context, isNew, allowPersistent bool) (string, error) {
+func (c *App) getPasswordFromFlags(ctx context.Context, isNew, allowPersistent bool) (string, error) {
 	switch {
-	case passwordFromToken != "":
-		// password extracted from connection token
-		return passwordFromToken, nil
-	case *password != "":
+	case c.password != "":
 		// password provided via --password flag or KOPIA_PASSWORD environment variable
-		return strings.TrimSpace(*password), nil
+		return strings.TrimSpace(c.password), nil
 	case isNew:
 		// this is a new repository, ask for password
-		return askForNewRepositoryPassword()
+		return askForNewRepositoryPassword(c.stdoutWriter)
 	case allowPersistent:
 		// try fetching the password from persistent storage specific to the configuration file.
-		pass, ok := repo.GetPersistedPassword(ctx, repositoryConfigFileName())
-		if ok {
+		pass, err := c.passwordPersistenceStrategy().GetPassword(ctx, c.repositoryConfigFileName())
+		if err == nil {
 			return pass, nil
+		}
+
+		if !errors.Is(err, passwordpersist.ErrPasswordNotFound) {
+			return "", errors.Wrap(err, "error getting persistent password")
 		}
 	}
 
 	// fall back to asking for existing password
-	return askForExistingRepositoryPassword()
+	return askForExistingRepositoryPassword(c.stdoutWriter)
 }
 
 // askPass presents a given prompt and asks the user for password.
-func askPass(prompt string) (string, error) {
+func askPass(out io.Writer, prompt string) (string, error) {
 	for i := 0; i < 5; i++ {
-		fmt.Print(prompt)
+		fmt.Fprint(out, prompt)
 
 		passBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
 			return "", errors.Wrap(err, "password prompt error")
 		}
 
-		fmt.Println()
+		fmt.Fprintln(out)
 
 		if len(passBytes) == 0 {
 			continue

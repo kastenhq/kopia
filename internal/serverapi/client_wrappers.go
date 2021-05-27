@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/apiclient"
+	"github.com/kopia/kopia/internal/uitask"
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot"
 )
@@ -16,6 +17,26 @@ func CreateSnapshotSource(ctx context.Context, c *apiclient.KopiaAPIClient, req 
 	resp := &CreateSnapshotSourceResponse{}
 	if err := c.Post(ctx, "sources", req, resp); err != nil {
 		return nil, errors.Wrap(err, "CreateSnapshotSource")
+	}
+
+	return resp, nil
+}
+
+// Estimate starts snapshot estimation task for a given directory.
+func Estimate(ctx context.Context, c *apiclient.KopiaAPIClient, req *EstimateRequest) (*uitask.Info, error) {
+	resp := &uitask.Info{}
+	if err := c.Post(ctx, "estimate", req, resp); err != nil {
+		return nil, errors.Wrap(err, "Estimate")
+	}
+
+	return resp, nil
+}
+
+// GetTask starts snapshot estimation task for a given directory.
+func GetTask(ctx context.Context, c *apiclient.KopiaAPIClient, taskID string) (*uitask.Info, error) {
+	resp := &uitask.Info{}
+	if err := c.Get(ctx, "tasks/"+taskID, nil, resp); err != nil {
+		return nil, errors.Wrap(err, "GetTask")
 	}
 
 	return resp, nil
@@ -43,21 +64,25 @@ func CancelUpload(ctx context.Context, c *apiclient.KopiaAPIClient, match *snaps
 
 // CreateRepository invokes the 'repo/create' API.
 func CreateRepository(ctx context.Context, c *apiclient.KopiaAPIClient, req *CreateRepositoryRequest) error {
+	// nolint:wrapcheck
 	return c.Post(ctx, "repo/create", req, &StatusResponse{})
 }
 
 // ConnectToRepository invokes the 'repo/connect' API.
 func ConnectToRepository(ctx context.Context, c *apiclient.KopiaAPIClient, req *ConnectRepositoryRequest) error {
+	// nolint:wrapcheck
 	return c.Post(ctx, "repo/connect", req, &StatusResponse{})
 }
 
 // DisconnectFromRepository invokes the 'repo/disconnect' API.
 func DisconnectFromRepository(ctx context.Context, c *apiclient.KopiaAPIClient) error {
+	// nolint:wrapcheck
 	return c.Post(ctx, "repo/disconnect", &Empty{}, &Empty{})
 }
 
 // Shutdown invokes the 'repo/shutdown' API.
 func Shutdown(ctx context.Context, c *apiclient.KopiaAPIClient) error {
+	// nolint:wrapcheck
 	return c.Post(ctx, "shutdown", &Empty{}, &Empty{})
 }
 

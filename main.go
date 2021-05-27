@@ -66,19 +66,19 @@ Commands (use --help-full to list all commands):
 `
 
 func main() {
-	app := cli.App()
-
-	kingpin.EnableFileExpansion = false
+	app := cli.NewApp()
+	kp := kingpin.New("kopia", "Kopia - Fast And Secure Open-Source Backup").Author("http://kopia.github.io/")
 
 	logging.SetDefault(func(module string) logging.Logger {
 		return gologging.MustGetLogger(module)
 	})
 
-	app.Version(repo.BuildVersion + " build: " + repo.BuildInfo + " from: " + repo.BuildGitHubRepo)
-	app.PreAction(logfile.Initialize)
-	app.ErrorWriter(os.Stderr)
-	app.UsageWriter(os.Stdout)
-	app.UsageTemplate(usageTemplate)
+	kp.Version(repo.BuildVersion + " build: " + repo.BuildInfo + " from: " + repo.BuildGitHubRepo)
+	logfile.Attach(kp)
+	kp.ErrorWriter(os.Stderr)
+	kp.UsageWriter(os.Stdout)
+	kp.UsageTemplate(usageTemplate)
 
-	kingpin.MustParse(app.Parse(os.Args[1:]))
+	app.Attach(kp)
+	kingpin.MustParse(kp.Parse(os.Args[1:]))
 }

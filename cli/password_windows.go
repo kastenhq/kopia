@@ -1,7 +1,9 @@
 package cli
 
-import "github.com/kopia/kopia/repo"
+import (
+	"github.com/alecthomas/kingpin"
+)
 
-func init() {
-	app.Flag("use-credential-manager", "Use Windows Credential Manager for storing repository password.").Default("true").BoolVar(&repo.KeyRingEnabled)
+func (c *App) setupOSSpecificKeychainFlags(app *kingpin.Application) {
+	app.Flag("use-credential-manager", "Use Windows Credential Manager for storing repository password.").Default("true").BoolVar(&c.keyRingEnabled)
 }

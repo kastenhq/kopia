@@ -11,14 +11,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kopia/kopia/internal/testutil"
+	"github.com/kopia/kopia/tests/testdirtree"
 	"github.com/kopia/kopia/tests/testenv"
 )
 
 func TestSnapshotNonexistent(t *testing.T) {
 	t.Parallel()
 
-	e := testenv.NewCLITest(t)
+	runner := testenv.NewInProcRunner(t)
+	e := testenv.NewCLITest(t, runner)
 
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
@@ -236,7 +240,8 @@ func testSnapshotFail(t *testing.T, isFailFast bool, snapshotCreateFlags, snapsh
 				t.Run(tname, func(t *testing.T) {
 					t.Parallel()
 
-					e := testenv.NewCLITest(t)
+					runner := testenv.NewExeRunner(t)
+					e := testenv.NewCLITest(t, runner)
 
 					defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
@@ -255,7 +260,7 @@ func testSnapshotFail(t *testing.T, isFailFast bool, snapshotCreateFlags, snapsh
 
 					e.RunAndExpectSuccess(t, "policy", "set", snapSource, "--ignore-dir-errors", tcIgnoreDirErr, "--ignore-file-errors", tcIgnoreFileErr)
 					restoreDir := fmt.Sprintf("%s%d_%v_%v", restoreDirPrefix, tcIdx, tcIgnoreDirErr, tcIgnoreFileErr)
-					testPermissions(t, e, snapSource, modifyEntry, restoreDir, tc.expectSuccess, snapshotCreateFlags, snapshotCreateEnv)
+					testPermissions(t, runner, e, snapSource, modifyEntry, restoreDir, tc.expectSuccess, snapshotCreateFlags, snapshotCreateEnv)
 
 					e.RunAndExpectSuccess(t, "policy", "remove", snapSource)
 				})
@@ -270,19 +275,19 @@ func createSimplestFileTree(t *testing.T, dirDepth, currDepth int, currPath stri
 	dirname := fmt.Sprintf("dir%d", currDepth)
 	dirPath := filepath.Join(currPath, dirname)
 	err := os.MkdirAll(dirPath, 0o700)
-	testenv.AssertNoError(t, err)
+	require.NoError(t, err)
 
 	// Put an empty directory in the new directory
 	emptyDirName := fmt.Sprintf("emptyDir%v", currDepth+1)
 	emptyDirPath := filepath.Join(dirPath, emptyDirName)
 	err = os.MkdirAll(emptyDirPath, 0o700)
-	testenv.AssertNoError(t, err)
+	require.NoError(t, err)
 
 	// Put a file in the new directory
 	fileName := fmt.Sprintf("file%d", currDepth+1)
 	filePath := filepath.Join(dirPath, fileName)
 
-	testenv.MustCreateRandomFile(t, filePath, testenv.DirectoryTreeOptions{}, nil)
+	testdirtree.MustCreateRandomFile(t, filePath, testdirtree.DirectoryTreeOptions{}, nil)
 
 	if dirDepth > currDepth+1 {
 		createSimplestFileTree(t, dirDepth, currDepth+1, dirPath)
@@ -294,11 +299,11 @@ func createSimplestFileTree(t *testing.T, dirDepth, currDepth int, currPath stri
 // against "source" and will test permissions against all entries in "parentDir".
 // It returns the number of successful snapshot operations.
 // nolint:thelper
-func testPermissions(t *testing.T, e *testenv.CLITest, source, modifyEntry, restoreDir string, expect map[os.FileMode]expectedSnapshotResult, snapshotCreateFlags, snapshotCreateEnv []string) int {
+func testPermissions(t *testing.T, runner *testenv.CLIExeRunner, e *testenv.CLITest, source, modifyEntry, restoreDir string, expect map[os.FileMode]expectedSnapshotResult, snapshotCreateFlags, snapshotCreateEnv []string) int {
 	var numSuccessfulSnapshots int
 
 	changeFile, err := os.Stat(modifyEntry)
-	testenv.AssertNoError(t, err)
+	require.NoError(t, err)
 
 	// Iterate over all permission bit configurations
 	for chmod, expected := range expect {
@@ -309,23 +314,23 @@ func testPermissions(t *testing.T, e *testenv.CLITest, source, modifyEntry, rest
 			// restore permissions even if we fail to avoid leaving non-deletable files behind.
 			defer func() {
 				t.Logf("restoring file mode on %s to %v", modifyEntry, mode)
-				testenv.AssertNoError(t, os.Chmod(modifyEntry, mode.Perm()))
+				require.NoError(t, os.Chmod(modifyEntry, mode.Perm()))
 			}()
 
 			t.Logf("Chmod: path: %s, isDir: %v, prevMode: %v, newMode: %v", modifyEntry, changeFile.IsDir(), mode, chmod)
 
 			err := os.Chmod(modifyEntry, chmod)
-			testenv.AssertNoError(t, err)
+			require.NoError(t, err)
 
 			// set up environment for the child process.
-			oldEnv := e.Environment
-			e.Environment = append(append([]string{}, e.Environment...), snapshotCreateEnv...)
+			oldEnv := runner.Environment
+			runner.Environment = append(append([]string{}, runner.Environment...), snapshotCreateEnv...)
 
-			defer func() { e.Environment = oldEnv }()
+			defer func() { runner.Environment = oldEnv }()
 
 			snapshotCreateWithArgs := append([]string{"snapshot", "create", source}, snapshotCreateFlags...)
 
-			_, errOut, runErr := e.Run(t, expected.success, snapshotCreateWithArgs...)
+			_, errOut, runErr := e.Run(t, !expected.success, snapshotCreateWithArgs...)
 
 			if got, want := (runErr == nil), expected.success; got != want {
 				t.Fatalf("unexpected success %v, want %v", got, want)

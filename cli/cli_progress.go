@@ -2,11 +2,12 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/alecthomas/kingpin"
 	"github.com/fatih/color"
 
 	"github.com/kopia/kopia/internal/timetrack"
@@ -14,14 +15,21 @@ import (
 	"github.com/kopia/kopia/snapshot/snapshotfs"
 )
 
-var (
-	enableProgress         = app.Flag("progress", "Enable progress bar").Hidden().Default("true").Bool()
-	progressUpdateInterval = app.Flag("progress-update-interval", "How ofter to update progress information").Hidden().Default("300ms").Duration()
-)
-
 const (
 	spinner = `|/-\`
 )
+
+type progressFlags struct {
+	enableProgress         bool
+	progressUpdateInterval time.Duration
+	out                    textOutput
+}
+
+func (p *progressFlags) setup(svc appServices, app *kingpin.Application) {
+	app.Flag("progress", "Enable progress bar").Hidden().Default("true").BoolVar(&p.enableProgress)
+	app.Flag("progress-update-interval", "How ofter to update progress information").Hidden().Default("300ms").DurationVar(&p.progressUpdateInterval)
+	p.out.setup(svc)
+}
 
 type cliProgress struct {
 	snapshotfs.NullUploadProgress
@@ -53,6 +61,8 @@ type cliProgress struct {
 	shared bool
 
 	outputMutex sync.Mutex
+
+	progressFlags
 }
 
 func (p *cliProgress) HashingFile(fname string) {
@@ -98,7 +108,7 @@ func (p *cliProgress) maybeOutput() {
 		return
 	}
 
-	if p.outputThrottle.ShouldOutput(*progressUpdateInterval) {
+	if p.outputThrottle.ShouldOutput(p.progressUpdateInterval) {
 		p.output(defaultColor, "")
 	}
 }
@@ -141,14 +151,14 @@ func (p *cliProgress) output(col *color.Color, msg string) {
 
 	if msg != "" {
 		prefix := "\n ! "
-		if !*enableProgress {
+		if !p.enableProgress {
 			prefix = ""
 		}
 
-		col.Fprintf(os.Stderr, "%v%v", prefix, msg) // nolint:errcheck
+		col.Fprintf(p.out.stderr(), "%v%v", prefix, msg) // nolint:errcheck
 	}
 
-	if !*enableProgress {
+	if !p.enableProgress {
 		return
 	}
 
@@ -168,7 +178,7 @@ func (p *cliProgress) output(col *color.Color, msg string) {
 	}
 
 	p.lastLineLength = len(line)
-	printStderr("\r%v%v", line, extraSpaces)
+	p.out.printStderr("\r%v%v", line, extraSpaces)
 }
 
 func (p *cliProgress) spinnerCharacter() string {
@@ -188,6 +198,7 @@ func (p *cliProgress) StartShared() {
 		uploading:       1,
 		uploadStartTime: timetrack.Start(),
 		shared:          true,
+		progressFlags:   p.progressFlags,
 	}
 }
 
@@ -205,6 +216,7 @@ func (p *cliProgress) UploadStarted() {
 	*p = cliProgress{
 		uploading:       1,
 		uploadStartTime: timetrack.Start(),
+		progressFlags:   p.progressFlags,
 	}
 }
 
@@ -236,11 +248,9 @@ func (p *cliProgress) Finish() {
 
 	p.output(defaultColor, "")
 
-	if *enableProgress {
-		printStderr("\n")
+	if p.enableProgress {
+		p.out.printStderr("\n")
 	}
 }
-
-var progress = &cliProgress{}
 
 var _ snapshotfs.UploadProgress = (*cliProgress)(nil)

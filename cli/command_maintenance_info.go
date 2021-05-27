@@ -11,9 +11,19 @@ import (
 	"github.com/kopia/kopia/repo/maintenance"
 )
 
-var maintenanceInfoCommand = maintenanceCommands.Command("info", "Display maintenance information").Alias("status")
+type commandMaintenanceInfo struct {
+	jo  jsonOutput
+	out textOutput
+}
 
-func runMaintenanceInfoCommand(ctx context.Context, rep repo.DirectRepository) error {
+func (c *commandMaintenanceInfo) setup(svc appServices, parent commandParent) {
+	cmd := parent.Command("info", "Display maintenance information").Alias("status")
+	c.jo.setup(svc, cmd)
+	cmd.Action(svc.directRepositoryReadAction(c.run))
+	c.out.setup(svc)
+}
+
+func (c *commandMaintenanceInfo) run(ctx context.Context, rep repo.DirectRepository) error {
 	p, err := maintenance.GetParams(ctx, rep)
 	if err != nil {
 		return errors.Wrap(err, "unable to get maintenance params")
@@ -24,22 +34,22 @@ func runMaintenanceInfoCommand(ctx context.Context, rep repo.DirectRepository) e
 		return errors.Wrap(err, "unable to get maintenance schedule")
 	}
 
-	if jsonOutput {
-		printStdout("%s\n", jsonBytes(s))
+	if c.jo.jsonOutput {
+		c.out.printStdout("%s\n", c.jo.jsonBytes(s))
 		return nil
 	}
 
-	printStdout("Owner: %v\n", p.Owner)
-	printStdout("Quick Cycle:\n")
-	displayCycleInfo(&p.QuickCycle, s.NextQuickMaintenanceTime, rep)
+	c.out.printStdout("Owner: %v\n", p.Owner)
+	c.out.printStdout("Quick Cycle:\n")
+	c.displayCycleInfo(&p.QuickCycle, s.NextQuickMaintenanceTime, rep)
 
-	printStdout("Full Cycle:\n")
-	displayCycleInfo(&p.FullCycle, s.NextFullMaintenanceTime, rep)
+	c.out.printStdout("Full Cycle:\n")
+	c.displayCycleInfo(&p.FullCycle, s.NextFullMaintenanceTime, rep)
 
-	printStdout("Recent Maintenance Runs:\n")
+	c.out.printStdout("Recent Maintenance Runs:\n")
 
 	for run, timings := range s.Runs {
-		printStdout("  %v:\n", run)
+		c.out.printStdout("  %v:\n", run)
 
 		for _, t := range timings {
 			var errInfo string
@@ -49,7 +59,7 @@ func runMaintenanceInfoCommand(ctx context.Context, rep repo.DirectRepository) e
 				errInfo = "ERROR: " + t.Error
 			}
 
-			printStdout(
+			c.out.printStdout(
 				"    %v (%v) %v\n",
 				formatTimestamp(t.Start),
 				t.End.Sub(t.Start).Truncate(time.Second),
@@ -60,21 +70,16 @@ func runMaintenanceInfoCommand(ctx context.Context, rep repo.DirectRepository) e
 	return nil
 }
 
-func displayCycleInfo(c *maintenance.CycleParams, t time.Time, rep repo.DirectRepository) {
-	printStdout("  scheduled: %v\n", c.Enabled)
+func (c *commandMaintenanceInfo) displayCycleInfo(cp *maintenance.CycleParams, t time.Time, rep repo.DirectRepository) {
+	c.out.printStdout("  scheduled: %v\n", cp.Enabled)
 
-	if c.Enabled {
-		printStdout("  interval: %v\n", c.Interval)
+	if cp.Enabled {
+		c.out.printStdout("  interval: %v\n", cp.Interval)
 
 		if rep.Time().Before(t) {
-			printStdout("  next run: %v (in %v)\n", formatTimestamp(t), clock.Until(t).Truncate(time.Second))
+			c.out.printStdout("  next run: %v (in %v)\n", formatTimestamp(t), clock.Until(t).Truncate(time.Second))
 		} else {
-			printStdout("  next run: now\n")
+			c.out.printStdout("  next run: now\n")
 		}
 	}
-}
-
-func init() {
-	registerJSONOutputFlags(maintenanceInfoCommand)
-	maintenanceInfoCommand.Action(directRepositoryReadAction(runMaintenanceInfoCommand))
 }
