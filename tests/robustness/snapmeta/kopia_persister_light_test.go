@@ -40,15 +40,19 @@ func TestConcurrency(t *testing.T) {
 	keys := []string{"key1", "key2", "key3"}
 	vals := [][]byte{[]byte("val1"), []byte("val2"), []byte("val3")}
 
-	t.Run("group", func(t *testing.T) {
+	t.Run("storeLoad", func(t *testing.T) {
 		for i := 0; i < 9; i++ {
 			j := i
-
 			t.Run(fmt.Sprint(i), func(t *testing.T) {
 				t.Parallel()
 				kpl.testStoreLoad(t, keys[j%3], vals[j%3])
 			})
+		}
+	})
 
+	t.Run("delete", func(t *testing.T) {
+		for i := 0; i < 9; i++ {
+			j := i
 			t.Run(fmt.Sprint(i), func(t *testing.T) {
 				t.Parallel()
 				kpl.testDelete(t, keys[j%3], vals[j%3])
