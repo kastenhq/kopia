@@ -25,7 +25,7 @@ func TestStoreLoadDelete(t *testing.T) {
 	defer kpl.Cleanup()
 
 	kpl.testStoreLoad(t, key, val)
-	kpl.testDelete(t, key, val)
+	kpl.testDelete(t, key)
 }
 
 func TestConcurrency(t *testing.T) {
@@ -55,14 +55,14 @@ func TestConcurrency(t *testing.T) {
 			j := i
 			t.Run(fmt.Sprint(i), func(t *testing.T) {
 				t.Parallel()
-				kpl.testDelete(t, keys[j%3], vals[j%3])
+				kpl.testDelete(t, keys[j%3])
 			})
 		}
 	})
 }
 
 // Store and test that subsequent Load succeeds.
-func (kpl *KopiaPersisterLight) testStoreLoad(t *testing.T, key string, val []byte) {
+func (kpl *KopiaPersisterLight) testStoreLoad(t *testing.T, key string, val []byte) { //nolint:thelper
 	err := kpl.Store(key, val)
 	assertNoError(t, err)
 
@@ -75,7 +75,7 @@ func (kpl *KopiaPersisterLight) testStoreLoad(t *testing.T, key string, val []by
 }
 
 // Delete and test that subsequent Load fails.
-func (kpl *KopiaPersisterLight) testDelete(t *testing.T, key string, val []byte) {
+func (kpl *KopiaPersisterLight) testDelete(t *testing.T, key string) { //nolint:thelper
 	kpl.Delete(key)
 
 	_, err := kpl.Load(key)
@@ -111,9 +111,7 @@ func TestPersistence(t *testing.T) {
 	os.RemoveAll(repoPath)
 }
 
-func initKPL(t *testing.T, repoPath string) *KopiaPersisterLight {
-	t.Helper()
-
+func initKPL(t *testing.T, repoPath string) *KopiaPersisterLight { //nolint:thelper
 	os.Unsetenv(S3BucketNameEnvKey)
 
 	kpl, err := NewPersisterLight("")

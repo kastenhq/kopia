@@ -22,10 +22,6 @@ type KopiaPersisterLight struct {
 	baseDir       string
 }
 
-type kmu struct {
-	mu sync.Mutex
-}
-
 var _ robustness.Persister = (*KopiaPersisterLight)(nil)
 
 const fileName = "data"
