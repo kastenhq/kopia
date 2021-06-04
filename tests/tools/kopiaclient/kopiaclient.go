@@ -4,6 +4,7 @@
 package kopiaclient
 
 import (
+	"bytes"
 	"context"
 	"log"
 	"os"
@@ -11,7 +12,8 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/kopia/kopia/fs/localfs"
+	"github.com/kopia/kopia/fs"
+	"github.com/kopia/kopia/fs/virtualfs"
 	"github.com/kopia/kopia/internal/units"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
@@ -69,7 +71,7 @@ func (kc *KopiaClient) CreateOrConnectRepo(ctx context.Context, repoDir, bucketN
 }
 
 // SnapshotCreate creates a snapshot for the given path.
-func (kc *KopiaClient) SnapshotCreate(ctx context.Context, path string) error {
+func (kc *KopiaClient) SnapshotCreate(ctx context.Context, key string, val []byte) error {
 	r, err := repo.Open(ctx, kc.configPath, kc.pw, &repo.Options{})
 	if err != nil {
 		return errors.Wrap(err, "cannot get new repository writer")
@@ -80,21 +82,14 @@ func (kc *KopiaClient) SnapshotCreate(ctx context.Context, path string) error {
 		return errors.Wrap(err, "cannot get new repository writer")
 	}
 
-	si, err := kc.getSourceInfoFromPath(r, filepath.Base(path))
-	if err != nil {
-		return errors.Wrap(err, "cannot get source info from path")
-	}
+	si := kc.getSourceInfoFromKey(r, key)
 
 	policyTree, err := policy.TreeForSource(ctx, r, si)
 	if err != nil {
 		return errors.Wrap(err, "cannot get policy tree for source")
 	}
 
-	source, err := localfs.NewEntry(path)
-	if err != nil {
-		return errors.Wrap(err, "cannot get filesystem entry from path")
-	}
-
+	source := kc.getSourceForKeyVal(key, val)
 	u := snapshotfs.NewUploader(rw)
 
 	man, err := u.Upload(ctx, source, policyTree, si)
@@ -116,38 +111,42 @@ func (kc *KopiaClient) SnapshotCreate(ctx context.Context, path string) error {
 }
 
 // SnapshotRestore restores the latests snapshot for the given path.
-func (kc *KopiaClient) SnapshotRestore(ctx context.Context, path string) error {
+func (kc *KopiaClient) SnapshotRestore(ctx context.Context, key string) ([]byte, error) {
 	r, err := repo.Open(ctx, kc.configPath, kc.pw, &repo.Options{})
 	if err != nil {
-		return errors.Wrap(err, "cannot get new repository writer")
+		return nil, errors.Wrap(err, "cannot get new repository writer")
 	}
 
-	mans, err := kc.getSnapshotsFromPath(ctx, r, filepath.Base(path))
+	mans, err := kc.getSnapshotsFromKey(ctx, r, key)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	man := kc.latestManifest(mans)
 
 	rootEntry, err := snapshotfs.FilesystemEntryFromIDWithPath(ctx, r, string(man.ID), false)
 	if err != nil {
-		return errors.Wrap(err, "cannot get filesystem entry from ID with path")
+		return nil, errors.Wrap(err, "cannot get filesystem entry from ID with path")
 	}
 
-	output := &restore.FilesystemOutput{TargetPath: path}
+	output := NewSimpleOutput()
 
 	st, err := restore.Entry(ctx, r, output, rootEntry, restore.Options{})
 	if err != nil {
-		return errors.Wrap(err, "cannot restore snapshot")
+		return nil, errors.Wrap(err, "cannot restore snapshot")
 	}
 
 	log.Printf("restored %v", units.BytesStringBase10(st.RestoredTotalFileSize))
 
-	return r.Close(ctx)
+	if err := r.Close(ctx); err != nil {
+		return nil, err
+	}
+
+	return output.data, nil
 }
 
 // SnapshotDelete deletes all snapshots for a given path.
-func (kc *KopiaClient) SnapshotDelete(ctx context.Context, path string) error {
+func (kc *KopiaClient) SnapshotDelete(ctx context.Context, key string) error {
 	r, err := repo.Open(ctx, kc.configPath, kc.pw, &repo.Options{})
 	if err != nil {
 		return errors.Wrap(err, "cannot get new repository writer")
@@ -158,14 +157,13 @@ func (kc *KopiaClient) SnapshotDelete(ctx context.Context, path string) error {
 		return errors.Wrap(err, "cannot get new repository writer")
 	}
 
-	mans, err := kc.getSnapshotsFromPath(ctx, r, filepath.Base(path))
+	mans, err := kc.getSnapshotsFromKey(ctx, r, key)
 	if err != nil {
 		return err
 	}
 
 	for _, man := range mans {
-		err = rw.DeleteManifest(ctx, man.ID)
-		if err != nil {
+		if err := rw.DeleteManifest(ctx, man.ID); err != nil {
 			return errors.Wrap(err, "cannot delete manifest")
 		}
 	}
@@ -201,11 +199,16 @@ func (kc *KopiaClient) getStorage(ctx context.Context, repoDir, bucketName strin
 	return st, errors.Wrap(err, "unable to get storage")
 }
 
-func (kc *KopiaClient) getSnapshotsFromPath(ctx context.Context, r repo.Repository, path string) ([]*snapshot.Manifest, error) {
-	si, err := kc.getSourceInfoFromPath(r, path)
-	if err != nil {
-		return nil, err
-	}
+// getSourceForKeyVal creates a virtual directory for `key` that contains a single virtual file that
+// reads its contents from `val`.
+func (kc *KopiaClient) getSourceForKeyVal(key string, val []byte) fs.Entry {
+	return virtualfs.NewStaticDirectory(key, fs.Entries{
+		virtualfs.StreamingFileFromReader("data", bytes.NewReader(val)),
+	})
+}
+
+func (kc *KopiaClient) getSnapshotsFromKey(ctx context.Context, r repo.Repository, key string) ([]*snapshot.Manifest, error) {
+	si := kc.getSourceInfoFromKey(r, key)
 
 	manifests, err := snapshot.ListSnapshots(ctx, r, si)
 	if err != nil {
@@ -219,17 +222,12 @@ func (kc *KopiaClient) getSnapshotsFromPath(ctx context.Context, r repo.Reposito
 	return manifests, nil
 }
 
-func (kc *KopiaClient) getSourceInfoFromPath(r repo.Repository, path string) (snapshot.SourceInfo, error) {
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return snapshot.SourceInfo{}, errors.Wrap(err, "cannot get absolute path")
-	}
-
+func (kc *KopiaClient) getSourceInfoFromKey(r repo.Repository, key string) snapshot.SourceInfo {
 	return snapshot.SourceInfo{
 		Host:     r.ClientOptions().Hostname,
 		UserName: r.ClientOptions().Username,
-		Path:     absPath,
-	}, nil
+		Path:     key,
+	}
 }
 
 func (kc *KopiaClient) latestManifest(mans []*snapshot.Manifest) *snapshot.Manifest {
