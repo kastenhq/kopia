@@ -4,7 +4,7 @@ package kopiaclient
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 
 	"github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/snapshot/restore"
@@ -47,7 +47,7 @@ func (o *SimpleOutput) WriteFile(ctx context.Context, relativePath string, f fs.
 
 	defer r.Close()
 
-	o.data, err = ioutil.ReadAll(r)
+	o.data, err = io.ReadAll(r)
 	if err != nil {
 		return err
 	}
