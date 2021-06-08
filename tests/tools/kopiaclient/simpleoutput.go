@@ -40,10 +40,17 @@ func (o *SimpleOutput) FinishDirectory(ctx context.Context, relativePath string,
 
 // WriteFile implements restore.Output interface.
 func (o *SimpleOutput) WriteFile(ctx context.Context, relativePath string, f fs.File) error {
-	r, _ := f.Open(ctx)
+	r, err := f.Open(ctx)
+	if err != nil {
+		return err
+	}
+
 	defer r.Close()
 
-	o.data, _ = ioutil.ReadAll(r)
+	o.data, err = ioutil.ReadAll(r)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
