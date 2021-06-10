@@ -72,7 +72,7 @@ func (kc *KopiaClient) CreateOrConnectRepo(ctx context.Context, repoDir, bucketN
 func (kc *KopiaClient) SnapshotCreate(ctx context.Context, path string) error {
 	r, err := repo.Open(ctx, kc.configPath, kc.pw, &repo.Options{})
 	if err != nil {
-		return errors.Wrap(err, "cannot get new repository writer")
+		return errors.Wrap(err, "cannot open repository")
 	}
 
 	rw, err := r.NewWriter(ctx, repo.WriteSessionOptions{})
@@ -115,11 +115,11 @@ func (kc *KopiaClient) SnapshotCreate(ctx context.Context, path string) error {
 	return r.Close(ctx)
 }
 
-// SnapshotRestore restores the latests snapshot for the given path.
+// SnapshotRestore restores the latest snapshot for the given path.
 func (kc *KopiaClient) SnapshotRestore(ctx context.Context, path string) error {
 	r, err := repo.Open(ctx, kc.configPath, kc.pw, &repo.Options{})
 	if err != nil {
-		return errors.Wrap(err, "cannot get new repository writer")
+		return errors.Wrap(err, "cannot open repository")
 	}
 
 	mans, err := kc.getSnapshotsFromPath(ctx, r, filepath.Base(path))
@@ -150,7 +150,7 @@ func (kc *KopiaClient) SnapshotRestore(ctx context.Context, path string) error {
 func (kc *KopiaClient) SnapshotDelete(ctx context.Context, path string) error {
 	r, err := repo.Open(ctx, kc.configPath, kc.pw, &repo.Options{})
 	if err != nil {
-		return errors.Wrap(err, "cannot get new repository writer")
+		return errors.Wrap(err, "cannot open repository")
 	}
 
 	rw, err := r.NewWriter(ctx, repo.WriteSessionOptions{})
