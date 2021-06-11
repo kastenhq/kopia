@@ -88,16 +88,15 @@ func (kpl *KopiaPersisterLight) Load(key string) ([]byte, error) {
 }
 
 // Delete deletes all snapshots associated with the given key.
-func (kpl *KopiaPersisterLight) Delete(key string) {
+func (kpl *KopiaPersisterLight) Delete(key string) error {
 	kpl.waitFor(key)
 	defer kpl.doneWith(key)
 
 	log.Println("deleting metadata for", key)
 
 	dirPath, _ := kpl.getPathsFromKey(key)
-	if err := kpl.kc.SnapshotDelete(context.Background(), dirPath); err != nil {
-		log.Printf("cannot delete metadata for %s, err: %s", key, err)
-	}
+
+	return kpl.kc.SnapshotDelete(context.Background(), dirPath)
 }
 
 // LoadMetadata is a no-op. It is included to satisfy the Persister interface.
