@@ -48,6 +48,8 @@ func (s *Simple) Load(ctx context.Context, key string) ([]byte, error) {
 }
 
 // Delete implements the Storer interface Delete method.
-func (s *Simple) Delete(ctx context.Context, key string) {
+func (s *Simple) Delete(ctx context.Context, key string) error {
 	delete(s.Data, key)
+
+	return nil
 }

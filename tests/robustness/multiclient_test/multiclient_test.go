@@ -45,10 +45,10 @@ func TestManySmallFiles(t *testing.T) {
 		require.NoError(t, err)
 
 		snapOut, err := eng.ExecAction(ctx, engine.SnapshotDirActionKey, nil)
-		assertNoError(t, err)
+		require.NoError(t, err)
 
 		_, err = eng.ExecAction(ctx, engine.RestoreSnapshotActionKey, snapOut)
-		assertNoError(t, err)
+		require.NoError(t, err)
 	}
 
 	ctx := testlogging.Context(t)
@@ -175,12 +175,4 @@ func tryRandomAction(ctx context.Context, t *testing.T, opts engine.ActionOpts) 
 	}
 
 	return err
-}
-
-func assertNoError(t *testing.T, err error) {
-	t.Helper()
-
-	if err != nil {
-		t.Errorf("err: %v", err)
-	}
 }
