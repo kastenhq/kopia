@@ -9,7 +9,7 @@ import "context"
 type Store interface {
 	Store(ctx context.Context, key string, val []byte) error
 	Load(ctx context.Context, key string) ([]byte, error)
-	Delete(ctx context.Context, key string)
+	Delete(ctx context.Context, key string) error
 }
 
 // Persister describes the ability to flush metadata
