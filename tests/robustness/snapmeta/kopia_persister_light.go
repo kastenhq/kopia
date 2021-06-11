@@ -62,11 +62,13 @@ func (kpl *KopiaPersisterLight) Store(key string, val []byte) error {
 		return err
 	}
 
-	defer kpl.removeOrLog(dirPath)
-
 	log.Println("pushing metadata for", key)
 
-	return kpl.kc.SnapshotCreate(context.Background(), dirPath)
+	if err := kpl.kc.SnapshotCreate(context.Background(), dirPath); err != nil {
+		return err
+	}
+
+	return os.RemoveAll(dirPath)
 }
 
 // Load pulls the key value pair from the Kopia repo and returns the value.
@@ -82,22 +84,28 @@ func (kpl *KopiaPersisterLight) Load(key string) ([]byte, error) {
 		return nil, err
 	}
 
-	defer kpl.removeOrLog(dirPath)
+	val, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
 
-	return os.ReadFile(filePath)
+	if err := os.RemoveAll(dirPath); err != nil {
+		return nil, err
+	}
+
+	return val, nil
 }
 
 // Delete deletes all snapshots associated with the given key.
-func (kpl *KopiaPersisterLight) Delete(key string) {
+func (kpl *KopiaPersisterLight) Delete(key string) error {
 	kpl.waitFor(key)
 	defer kpl.doneWith(key)
 
 	log.Println("deleting metadata for", key)
 
 	dirPath, _ := kpl.getPathsFromKey(key)
-	if err := kpl.kc.SnapshotDelete(context.Background(), dirPath); err != nil {
-		log.Printf("cannot delete metadata for %s, err: %s", key, err)
-	}
+
+	return kpl.kc.SnapshotDelete(context.Background(), dirPath)
 }
 
 // LoadMetadata is a no-op. It is included to satisfy the Persister interface.
@@ -127,12 +135,6 @@ func (kpl *KopiaPersisterLight) getPathsFromKey(key string) (dirPath, filePath s
 	filePath = filepath.Join(dirPath, fileName)
 
 	return dirPath, filePath
-}
-
-func (kpl *KopiaPersisterLight) removeOrLog(path string) {
-	if err := os.RemoveAll(path); err != nil {
-		log.Println("cannot remove path ", path)
-	}
 }
 
 func (kpl *KopiaPersisterLight) waitFor(key string) {
