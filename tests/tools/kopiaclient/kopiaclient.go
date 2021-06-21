@@ -6,6 +6,7 @@ package kopiaclient
 import (
 	"bytes"
 	"context"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -21,7 +22,6 @@ import (
 	"github.com/kopia/kopia/repo/blob/s3"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
-	"github.com/kopia/kopia/snapshot/restore"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
 	"github.com/kopia/kopia/tests/robustness"
 )
@@ -38,6 +38,7 @@ const (
 	s3Endpoint               = "s3.amazonaws.com"
 	awsAccessKeyIDEnvKey     = "AWS_ACCESS_KEY_ID"
 	awsSecretAccessKeyEnvKey = "AWS_SECRET_ACCESS_KEY" //nolint:gosec
+	dataFileName             = "data"
 )
 
 // NewKopiaClient returns a new KopiaClient.
@@ -119,30 +120,34 @@ func (kc *KopiaClient) SnapshotRestore(ctx context.Context, key string) ([]byte,
 
 	mans, err := kc.getSnapshotsFromKey(ctx, r, key)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "cannot get snapshots from key")
 	}
 
 	man := kc.latestManifest(mans)
+	rootOIDWithPath := string(man.RootObjectID()) + "/" + dataFileName
 
-	rootEntry, err := snapshotfs.FilesystemEntryFromIDWithPath(ctx, r, string(man.ID), false)
+	oid, err := snapshotfs.ParseObjectIDWithPath(ctx, r, rootOIDWithPath)
 	if err != nil {
-		return nil, errors.Wrap(err, "cannot get filesystem entry from ID with path")
+		return nil, errors.Wrapf(err, "cannot parse object ID %s", rootOIDWithPath)
 	}
 
-	output := NewSimpleOutput()
-
-	st, err := restore.Entry(ctx, r, output, rootEntry, restore.Options{})
+	or, err := r.OpenObject(ctx, oid)
 	if err != nil {
-		return nil, errors.Wrap(err, "cannot restore snapshot")
+		return nil, errors.Wrapf(err, "cannot open object %s", string(oid))
 	}
 
-	log.Printf("restored %v", units.BytesStringBase10(st.RestoredTotalFileSize))
+	val, err := io.ReadAll(or)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("restored %v", units.BytesStringBase10(int64(len(val))))
 
 	if err := r.Close(ctx); err != nil {
 		return nil, err
 	}
 
-	return output.data, nil
+	return val, nil
 }
 
 // SnapshotDelete deletes all snapshots for a given path.
@@ -159,7 +164,7 @@ func (kc *KopiaClient) SnapshotDelete(ctx context.Context, key string) error {
 
 	mans, err := kc.getSnapshotsFromKey(ctx, r, key)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "cannot get snapshots from key")
 	}
 
 	for _, man := range mans {
@@ -203,7 +208,7 @@ func (kc *KopiaClient) getStorage(ctx context.Context, repoDir, bucketName strin
 // reads its contents from `val`.
 func (kc *KopiaClient) getSourceForKeyVal(key string, val []byte) fs.Entry {
 	return virtualfs.NewStaticDirectory(key, fs.Entries{
-		virtualfs.StreamingFileFromReader("data", bytes.NewReader(val)),
+		virtualfs.StreamingFileFromReader(dataFileName, bytes.NewReader(val)),
 	})
 }
 
