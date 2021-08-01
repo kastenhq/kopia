@@ -8,7 +8,7 @@
     "bootstrap": "^4.6.0",
     "electron-first-run": "^3.0.0",
     "electron-is-dev": "^2.0.0",
-    "electron-log": "^4.3.5",
+    "electron-log": "^4.4.1",
     "electron-updater": "^4.3.9",
     "react": "^17.0.2",
     "react-bootstrap": "^1.6.0",
