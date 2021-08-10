@@ -97,11 +97,13 @@ func (s pitStorage) getMetadata(ctx context.Context, blobID blob.ID) (VersionMet
 func newestAtUnlessDeleted(vs []VersionMetadata, t time.Time) (v VersionMetadata, found bool) {
 	vs = getOlderThan(vs, t)
 
-	if wasBlobDeleted(vs) {
+	if len(vs) == 0 {
 		return VersionMetadata{}, false
 	}
 
-	return vs[len(vs)-1], true
+	v = vs[0]
+
+	return v, !v.IsDeleteMarker
 }
 
 // Removes versions that are newer than t. The filtering is done in place and
@@ -115,23 +117,6 @@ func getOlderThan(vs []VersionMetadata, t time.Time) []VersionMetadata {
 	}
 
 	return nil
-}
-
-// A blob is considered deleted if either there is no version for it, that is,
-// vs is empty; or there is at least one deletion marker in vs, even if it is
-// not the most recent version.
-func wasBlobDeleted(vs []VersionMetadata) bool {
-	if len(vs) == 0 {
-		return true
-	}
-
-	for _, v := range vs {
-		if v.IsDeleteMarker {
-			return true
-		}
-	}
-
-	return false
 }
 
 // NewWrapper wraps s with a PiT store when s is versioned and pit is non-zero.
