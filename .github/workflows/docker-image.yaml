@@ -1,0 +1,52 @@
+name: Package Docker
+on: [push]
+jobs:
+  Docker-Image:
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v2
+      - name: Log in to the Container registry
+        uses: docker/login-action@v1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generate image version
+        id: image-version-gen
+        run: |
+          echo "image: ${REGISTRY}/${IMAGE_NAME}"
+          echo "::set-output name=IMAGE_VERSION::$(date +%Y%m%d-%H%M%S)-$(git describe --long --candidates=1 --always HEAD)"
+      - name: Extract metadata for image
+        id: meta
+        uses: docker/metadata-action@v3
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: prefix=alpine-
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=alpine-sha-
+            type=schedule,pattern={{date 'YYYYMMDD'}}
+            ${{ steps.image-version-gen.outputs.IMAGE_VERSION }}
+      - name: Build and push image
+        uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+        with:
+          context: .
+          file: docker/kopia-alpine/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: PiT smoke test
+        run: |
+          docker run --rm \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:alpine-${{ steps.image-version-gen.outputs.IMAGE_VERSION }}" \
+            repo connect s3 --point-in-time 2021-07-01 2>&1 |
+            grep -q -v "unknown long flag '--point-in-time'"
