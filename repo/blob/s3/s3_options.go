@@ -1,6 +1,10 @@
 package s3
 
-import "time"
+import (
+	"time"
+
+	"github.com/minio/minio-go/v7"
+)
 
 // Options defines options for S3-based storage.
 type Options struct {
@@ -27,4 +31,9 @@ type Options struct {
 
 	// PointInTime specifies a view of the (versioned) store at that time
 	PointInTime *time.Time `json:"pointInTime,omitempty"`
+
+	// Unexported field for internal use only, the retention mode/period is always
+	// pulled from the repository format blob.
+	retentionMode   minio.RetentionMode
+	retentionPeriod time.Duration
 }

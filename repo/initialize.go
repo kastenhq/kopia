@@ -124,6 +124,8 @@ func repositoryObjectFormatFromOptions(opt *NewRepositoryOptions) (*repositoryOb
 				MaxPackSize:     applyDefaultInt(opt.BlockFormat.MaxPackSize, 20<<20), //nolint:gomnd
 				IndexVersion:    applyDefaultInt(opt.BlockFormat.IndexVersion, content.DefaultIndexVersion),
 				EpochParameters: opt.BlockFormat.EpochParameters,
+				RetentionMode:   opt.BlockFormat.RetentionMode,
+				RetentionPeriod: opt.BlockFormat.RetentionPeriod,
 			},
 			EnablePasswordChange: opt.BlockFormat.EnablePasswordChange,
 		},

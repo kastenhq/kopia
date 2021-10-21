@@ -1,6 +1,8 @@
 package content
 
 import (
+	"time"
+
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/epoch"
@@ -61,6 +63,11 @@ type MutableParameters struct {
 	MaxPackSize     int              `json:"maxPackSize,omitempty"`     // maximum size of a pack object
 	IndexVersion    int              `json:"indexVersion,omitempty"`    // force particular index format version (1,2,..)
 	EpochParameters epoch.Parameters `json:"epochParameters,omitempty"` // epoch manager parameters
+
+	// Object-Store Retention Mode/Period (applicable only to storage backends which
+	// support various retention modes / locked buckets)
+	RetentionMode   string        `json:"retentionMode,omitempty"`
+	RetentionPeriod time.Duration `json:"retentionPeriod,omitempty"`
 }
 
 // Validate validates the parameters.
@@ -75,6 +82,14 @@ func (v *MutableParameters) Validate() error {
 
 	if v.IndexVersion < 0 || v.IndexVersion > v2IndexVersion {
 		return errors.Errorf("invalid index version, supported versions are 1 & 2")
+	}
+
+	if (v.RetentionMode == "") != (v.RetentionPeriod == 0) {
+		return errors.Errorf("both retention mode and period must be provided when setting blob retention properties")
+	}
+
+	if v.RetentionPeriod != 0 && v.RetentionPeriod < 24*time.Hour {
+		return errors.Errorf("invalid retention-period, the minimum required is 1-day and there is no maximum limit")
 	}
 
 	if err := v.EpochParameters.Validate(); err != nil {

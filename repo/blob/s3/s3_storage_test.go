@@ -178,6 +178,78 @@ func TestS3StorageAWSSTS(t *testing.T) {
 	testStorage(t, options)
 }
 
+func TestS3StorageAWSRetention(t *testing.T) {
+	t.Parallel()
+
+	// skip the test if AWS creds are not provided
+	options := &Options{
+		Endpoint:        getEnv(testEndpointEnv, awsEndpoint),
+		AccessKeyID:     getEnvOrSkip(t, testAccessKeyIDEnv),
+		SecretAccessKey: getEnvOrSkip(t, testSecretAccessKeyEnv),
+		BucketName:      getEnvOrSkip(t, testBucketEnv),
+		Region:          getEnvOrSkip(t, testRegionEnv),
+		retentionMode:   minio.Governance,
+		retentionPeriod: time.Hour * 24,
+	}
+
+	createBucket(t, options)
+	testStorage(t, options)
+}
+
+func TestS3StorageAWSRetentionLockedBucket(t *testing.T) {
+	t.Parallel()
+
+	// skip the test if AWS creds are not provided
+	options := &Options{
+		Endpoint:        getEnv(testEndpointEnv, awsEndpoint),
+		AccessKeyID:     getEnvOrSkip(t, testAccessKeyIDEnv),
+		SecretAccessKey: getEnvOrSkip(t, testSecretAccessKeyEnv),
+		BucketName:      getEnvOrSkip(t, testLockedBucketEnv),
+		Region:          getEnvOrSkip(t, testRegionEnv),
+		retentionMode:   minio.Governance,
+		retentionPeriod: time.Hour * 24,
+	}
+
+	createBucket(t, options)
+	testStorage(t, options)
+}
+
+func TestS3StorageAWSInvalidRetention(t *testing.T) {
+	t.Parallel()
+
+	// skip the test if AWS creds are not provided
+	options := &Options{
+		Endpoint:        getEnv(testEndpointEnv, awsEndpoint),
+		AccessKeyID:     getEnvOrSkip(t, testAccessKeyIDEnv),
+		SecretAccessKey: getEnvOrSkip(t, testSecretAccessKeyEnv),
+		BucketName:      getEnvOrSkip(t, testBucketEnv),
+		Region:          getEnvOrSkip(t, testRegionEnv),
+		retentionMode:   minio.Governance,
+		retentionPeriod: time.Nanosecond,
+	}
+
+	createBucket(t, options)
+	testStorage(t, options)
+}
+
+func TestS3StorageAWSInvalidRetentionLockedBucket(t *testing.T) {
+	t.Parallel()
+
+	// skip the test if AWS creds are not provided
+	options := &Options{
+		Endpoint:        getEnv(testEndpointEnv, awsEndpoint),
+		AccessKeyID:     getEnvOrSkip(t, testAccessKeyIDEnv),
+		SecretAccessKey: getEnvOrSkip(t, testSecretAccessKeyEnv),
+		BucketName:      getEnvOrSkip(t, testLockedBucketEnv),
+		Region:          getEnvOrSkip(t, testRegionEnv),
+		retentionMode:   minio.Governance,
+		retentionPeriod: time.Nanosecond,
+	}
+
+	createBucket(t, options)
+	testStorage(t, options)
+}
+
 func TestS3StorageMinio(t *testing.T) {
 	t.Parallel()
 	testutil.ProviderTest(t)

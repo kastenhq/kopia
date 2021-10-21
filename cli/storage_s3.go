@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kingpin"
+	"github.com/minio/minio-go/v7"
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/repo/blob"
@@ -12,7 +13,9 @@ import (
 )
 
 type storageS3Flags struct {
-	s3options s3.Options
+	s3options       s3.Options
+	retentionMode   string
+	retentionPeriod time.Duration
 }
 
 func (c *storageS3Flags) setup(_ storageProviderServices, cmd *kingpin.CmdClause) {
@@ -27,6 +30,8 @@ func (c *storageS3Flags) setup(_ storageProviderServices, cmd *kingpin.CmdClause
 	cmd.Flag("disable-tls-verification", "Disable TLS (HTTPS) certificate verification").BoolVar(&c.s3options.DoNotVerifyTLS)
 	cmd.Flag("max-download-speed", "Limit the download speed.").PlaceHolder("BYTES_PER_SEC").IntVar(&c.s3options.MaxDownloadSpeedBytesPerSecond)
 	cmd.Flag("max-upload-speed", "Limit the upload speed.").PlaceHolder("BYTES_PER_SEC").IntVar(&c.s3options.MaxUploadSpeedBytesPerSecond)
+	cmd.Flag("retention-mode", "S3 blob retention mode").EnumVar(&c.retentionMode, minio.Governance.String(), minio.Compliance.String())
+	cmd.Flag("retention-period", "S3 blob retention period").DurationVar(&c.retentionPeriod)
 
 	var pointInTimeStr string
 
@@ -51,6 +56,16 @@ func (c *storageS3Flags) connect(ctx context.Context, isNew bool) (blob.Storage,
 		return nil, errors.New("Cannot specify a 'point-in-time' option when creating a repository")
 	}
 
-	// nolint:wrapcheck
-	return s3.New(ctx, &c.s3options)
+	st, err := s3.New(ctx, &c.s3options)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to initialize S3 storage")
+	}
+
+	if c.retentionPeriod != 0 {
+		if err = st.(blob.WORMStorage).SetRetentionMode(ctx, c.retentionMode, c.retentionPeriod); err != nil {
+			return nil, errors.Wrap(err, "failed to set retention mode on S3 storage")
+		}
+	}
+
+	return st, nil
 }

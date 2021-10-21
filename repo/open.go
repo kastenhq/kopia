@@ -206,6 +206,12 @@ func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 
 	fo := &repoConfig.FormattingOptions
 
+	if wormSt, ok := st.(blob.WORMStorage); ok {
+		if err = wormSt.SetRetentionMode(ctx, fo.MutableParameters.RetentionMode, fo.MutableParameters.RetentionPeriod); err != nil {
+			return nil, errors.Wrapf(err, "unable to set retention-mode")
+		}
+	}
+
 	if fo.MaxPackSize == 0 {
 		// legacy only, apply default
 		fo.MaxPackSize = 20 << 20 // nolint:gomnd

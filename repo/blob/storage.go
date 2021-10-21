@@ -82,6 +82,16 @@ type Storage interface {
 	FlushCaches(ctx context.Context) error
 }
 
+// WORMStorage defines Write-Once-Read-Many configuration API to the underlying
+// blob storage that supports it.
+type WORMStorage interface {
+	Storage
+
+	// SetRetentionMode sets the default retention period for all new blobs
+	// that need to be written with the storage backend.
+	SetRetentionMode(ctx context.Context, mode string, period time.Duration) error
+}
+
 // ID is a string that represents blob identifier.
 type ID string
 

@@ -17,6 +17,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/iocopy"
 	"github.com/kopia/kopia/repo/blob"
@@ -29,7 +30,9 @@ const (
 )
 
 type s3Storage struct {
-	sendMD5 int32
+	sendMD5         int32
+	retentionMode   minio.RetentionMode
+	retentionPeriod int64
 	Options
 
 	cli *minio.Client
@@ -142,18 +145,45 @@ func (s *s3Storage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes) (ve
 		return versionMetadata{}, errors.Wrap(err, "AddReader")
 	}
 
-	storageClass := s.storageConfig.getStorageClassForBlobID(b)
+	var (
+		storageClass    = s.storageConfig.getStorageClassForBlobID(b)
+		retentionMode   minio.RetentionMode
+		retainUntilDate time.Time
+	)
+	{
+		retentionPeriod := time.Duration(atomic.LoadInt64(&s.retentionPeriod))
+		if retentionPeriod != 0 {
+			retainUntilDate = clock.Now().Add(retentionPeriod).UTC()
+			retentionMode = s.retentionMode
+		}
+	}
 
 	uploadInfo, err := s.cli.PutObject(ctx, s.BucketName, s.getObjectNameString(b), throttled, int64(data.Length()), minio.PutObjectOptions{
-		ContentType:    "application/x-kopia",
-		SendContentMd5: atomic.LoadInt32(&s.sendMD5) > 0,
-		StorageClass:   storageClass,
+		ContentType: "application/x-kopia",
+		SendContentMd5: atomic.LoadInt32(&s.sendMD5) > 0 ||
+			// The Content-MD5 header is required for any request to upload an object
+			// with a retention period configured using Amazon S3 Object Lock
+			!retainUntilDate.IsZero(),
+		StorageClass:    storageClass,
+		RetainUntilDate: retainUntilDate,
+		Mode:            retentionMode,
 	})
 
 	var er minio.ErrorResponse
-
-	if errors.As(err, &er) && er.Code == "InvalidRequest" && strings.Contains(strings.ToLower(er.Message), "content-md5") {
-		atomic.StoreInt32(&s.sendMD5, 1) // set sendMD5 on retry
+	if errors.As(err, &er) {
+		switch {
+		case er.Code == "InvalidRequest" && strings.Contains(strings.ToLower(er.Message), "content-md5"):
+			atomic.StoreInt32(&s.sendMD5, 1) // set sendMD5 on retry
+		case (er.Code == "InvalidRequest" &&
+			// this can happen when object-locking is not enabled on the target
+			// bucket
+			strings.Contains(er.Message, "Bucket is missing ObjectLockConfiguration")) ||
+			(er.Code == "InvalidArgument" &&
+				// this can happen when the retention-period is too small (less
+				// than 1-day)
+				strings.Contains(er.Message, "The retain until date must be in the future")):
+			atomic.StoreInt64(&s.retentionPeriod, 0) // set retentionPeriod to zero on retry
+		}
 
 		return versionMetadata{}, err // nolint:wrapcheck
 	}
@@ -161,8 +191,10 @@ func (s *s3Storage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes) (ve
 	if errors.Is(err, io.EOF) && uploadInfo.Size == 0 {
 		// special case empty stream
 		_, err = s.cli.PutObject(ctx, s.BucketName, s.getObjectNameString(b), bytes.NewBuffer(nil), 0, minio.PutObjectOptions{
-			ContentType:  "application/x-kopia",
-			StorageClass: storageClass,
+			ContentType:     "application/x-kopia",
+			StorageClass:    storageClass,
+			RetainUntilDate: retainUntilDate,
+			Mode:            retentionMode,
 		})
 	}
 
@@ -182,6 +214,17 @@ func (s *s3Storage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes) (ve
 
 func (s *s3Storage) SetTime(ctx context.Context, b blob.ID, t time.Time) error {
 	return blob.ErrSetTimeUnsupported
+}
+
+func (s *s3Storage) SetRetentionMode(ctx context.Context, mode string, period time.Duration) error {
+	if !minio.RetentionMode(mode).IsValid() {
+		return errors.Errorf("invalid retention mode %s", mode)
+	}
+
+	s.retentionMode = minio.RetentionMode(mode)
+	s.retentionPeriod = int64(period)
+
+	return nil
 }
 
 func (s *s3Storage) DeleteBlob(ctx context.Context, b blob.ID) error {
@@ -321,6 +364,10 @@ func newStorage(ctx context.Context, opt *Options) (*s3Storage, error) {
 		downloadThrottler: downloadThrottler,
 		uploadThrottler:   uploadThrottler,
 		storageConfig:     &StorageConfig{},
+	}
+
+	if err = s.SetRetentionMode(ctx, opt.retentionMode.String(), opt.retentionPeriod); err != nil {
+		return nil, errors.Wrapf(err, "error setting retention mode")
 	}
 
 	var scOutput gather.WriteBuffer
