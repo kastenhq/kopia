@@ -163,38 +163,47 @@ func openDirect(ctx context.Context, configFile string, lc *LocalConfig, passwor
 	return r, nil
 }
 
-// openWithConfig opens the repository with a given configuration, avoiding the need for a config file.
-func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, password string, options *Options, caching *content.CachingOptions, configFile string) (DirectRepository, error) {
-	caching = caching.CloneOrDefault()
-
+func readRepoConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, password, cacheDirectory string) (f *formatBlob, fb, formatEncryptionKey []byte, repoConfig *repositoryObjectFormat, err error) {
 	// Read format blob, potentially from cache.
-	fb, err := readAndCacheFormatBlobBytes(ctx, st, caching.CacheDirectory, lc.FormatBlobCacheDuration)
+	fb, err = readAndCacheFormatBlobBytes(ctx, st, cacheDirectory, lc.FormatBlobCacheDuration)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to read format blob")
+		return nil, nil, nil, nil, errors.Wrap(err, "unable to read format blob")
 	}
 
-	if err = writeCacheMarker(caching.CacheDirectory); err != nil {
-		return nil, errors.Wrap(err, "unable to write cache directory marker")
+	if err = writeCacheMarker(cacheDirectory); err != nil {
+		return nil, nil, nil, nil, errors.Wrap(err, "unable to write cache directory marker")
 	}
 
-	f, err := parseFormatBlob(fb)
+	f, err = parseFormatBlob(fb)
 	if err != nil {
-		return nil, errors.Wrap(err, "can't parse format blob")
+		return nil, nil, nil, nil, errors.Wrap(err, "can't parse format blob")
 	}
 
 	fb, err = addFormatBlobChecksumAndLength(fb)
 	if err != nil {
-		return nil, errors.Errorf("unable to add checksum")
+		return nil, nil, nil, nil, errors.Errorf("unable to add checksum")
 	}
 
-	formatEncryptionKey, err := f.deriveFormatEncryptionKeyFromPassword(password)
+	formatEncryptionKey, err = f.deriveFormatEncryptionKeyFromPassword(password)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	repoConfig, err = f.decryptFormatBytes(formatEncryptionKey)
+	if err != nil {
+		return nil, nil, nil, nil, ErrInvalidPassword
+	}
+
+	return f, fb, formatEncryptionKey, repoConfig, nil
+}
+
+// openWithConfig opens the repository with a given configuration, avoiding the need for a config file.
+func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, password string, options *Options, caching *content.CachingOptions, configFile string) (DirectRepository, error) {
+	caching = caching.CloneOrDefault()
+
+	f, fb, formatEncryptionKey, repoConfig, err := readRepoConfig(ctx, st, lc, password, caching.CacheDirectory)
 	if err != nil {
 		return nil, err
-	}
-
-	repoConfig, err := f.decryptFormatBytes(formatEncryptionKey)
-	if err != nil {
-		return nil, ErrInvalidPassword
 	}
 
 	if repoConfig.FormattingOptions.EnablePasswordChange {
