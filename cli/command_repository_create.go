@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"time"
 
 	"github.com/alecthomas/kingpin"
 	"github.com/pkg/errors"
@@ -29,8 +28,6 @@ type commandRepositoryCreate struct {
 	createSplitter              string
 	createOnly                  bool
 	createFormatVersion         int
-	retentionMode               string
-	retentionPeriod             time.Duration
 
 	co  connectOptions
 	svc advancedAppServices
@@ -72,12 +69,10 @@ func (c *commandRepositoryCreate) setup(svc advancedAppServices, parent commandP
 }
 
 func (c *commandRepositoryCreate) newRepositoryOptionsFromFlags() *repo.NewRepositoryOptions {
-	opts := &repo.NewRepositoryOptions{
+	return &repo.NewRepositoryOptions{
 		BlockFormat: content.FormattingOptions{
 			MutableParameters: content.MutableParameters{
-				Version:         content.FormatVersion(c.createFormatVersion),
-				RetentionMode:   c.retentionMode,
-				RetentionPeriod: c.retentionPeriod,
+				Version: content.FormatVersion(c.createFormatVersion),
 			},
 			Hash:       c.createBlockHashFormat,
 			Encryption: c.createBlockEncryptionFormat,
@@ -87,13 +82,6 @@ func (c *commandRepositoryCreate) newRepositoryOptionsFromFlags() *repo.NewRepos
 			Splitter: c.createSplitter,
 		},
 	}
-
-	if c.retentionPeriod != 0 {
-		opts.BlockFormat.MutableParameters.RetentionMode = c.retentionMode
-		opts.BlockFormat.MutableParameters.RetentionPeriod = c.retentionPeriod
-	}
-
-	return opts
 }
 
 func (c *commandRepositoryCreate) ensureEmpty(ctx context.Context, s blob.Storage) error {

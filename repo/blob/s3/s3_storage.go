@@ -366,8 +366,10 @@ func newStorage(ctx context.Context, opt *Options) (*s3Storage, error) {
 		storageConfig:     &StorageConfig{},
 	}
 
-	if err = s.SetRetentionMode(ctx, opt.retentionMode.String(), opt.retentionPeriod); err != nil {
-		return nil, errors.Wrapf(err, "error setting retention mode")
+	if opt.retentionPeriod != 0 {
+		if err = s.SetRetentionMode(ctx, opt.retentionMode.String(), opt.retentionPeriod); err != nil {
+			return nil, errors.Wrapf(err, "error setting retention mode")
+		}
 	}
 
 	var scOutput gather.WriteBuffer
