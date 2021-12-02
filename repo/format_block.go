@@ -33,6 +33,10 @@ var formatBlobChecksumSecret = []byte("kopia-repository")
 // FormatBlobID is the identifier of a BLOB that describes repository format.
 const FormatBlobID = "kopia.repository"
 
+// RetentionBlogID is the identifier of a BLOB that describes BLOB retention
+// settings for the repository.
+const RetentionBlobID = "kopia.retention"
+
 var (
 	purposeAESKey   = []byte("AES")
 	purposeAuthData = []byte("CHECKSUM")

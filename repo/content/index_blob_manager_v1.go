@@ -15,14 +15,16 @@ import (
 )
 
 type indexBlobManagerV1 struct {
-	st             blob.Storage
-	enc            *encryptedBlobMgr
-	epochMgr       *epoch.Manager
-	timeNow        func() time.Time
-	log            logging.Logger
-	maxPackSize    int
-	indexVersion   int
-	indexShardSize int
+	st              blob.Storage
+	enc             *encryptedBlobMgr
+	epochMgr        *epoch.Manager
+	timeNow         func() time.Time
+	log             logging.Logger
+	maxPackSize     int
+	indexVersion    int
+	indexShardSize  int
+	retentionMode   string
+	retentionPeriod time.Duration
 }
 
 func (m *indexBlobManagerV1) listActiveIndexBlobs(ctx context.Context) ([]IndexBlobInfo, time.Time, error) {
@@ -95,7 +97,10 @@ func (m *indexBlobManagerV1) compactEpoch(ctx context.Context, blobIDs []blob.ID
 			return errors.Wrap(err, "error encrypting")
 		}
 
-		if err := m.st.PutBlob(ctx, blobID, data2.Bytes(), blob.PutOptions{}); err != nil {
+		if err := m.st.PutBlob(ctx, blobID, data2.Bytes(), blob.PutOptions{
+			RetentionMode:   m.retentionMode,
+			RetentionPeriod: m.retentionPeriod,
+		}); err != nil {
 			return errors.Wrap(err, "error writing index blob")
 		}
 	}

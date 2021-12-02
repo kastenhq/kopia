@@ -178,9 +178,15 @@ func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 	caching = caching.CloneOrDefault()
 
 	// Read format blob, potentially from cache.
-	fb, err := readAndCacheFormatBlobBytes(ctx, st, caching.CacheDirectory, lc.FormatBlobCacheDuration)
+	fb, err := readAndCacheRepositoryBlobBytes(ctx, st, caching.CacheDirectory, FormatBlobID, lc.FormatBlobCacheDuration)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to read format blob")
+	}
+
+	// Read retention blob, potentially from cache.
+	rb, err := readAndCacheRepositoryBlobBytes(ctx, st, caching.CacheDirectory, RetentionBlobID, lc.FormatBlobCacheDuration)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to read retention blob")
 	}
 
 	if err = writeCacheMarker(caching.CacheDirectory); err != nil {
@@ -207,6 +213,11 @@ func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 		return nil, ErrInvalidPassword
 	}
 
+	retentionConfig, err := deserializeRetentionBytes(f, rb, formatEncryptionKey)
+	if err != nil {
+		return nil, ErrInvalidPassword
+	}
+
 	if repoConfig.FormattingOptions.EnablePasswordChange {
 		caching.HMACSecret = deriveKeyFromMasterKey(repoConfig.HMACSecret, f.UniqueID, localCacheIntegrityPurpose, localCacheIntegrityHMACSecretLength)
 	} else {
@@ -225,6 +236,8 @@ func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 		RepositoryFormatBytes: fb,
 		TimeNow:               defaultTime(options.TimeNowFunc),
 		DisableInternalLog:    options.DisableInternalLog,
+		RetentionMode:         retentionConfig.Mode,
+		RetentionPeriod:       retentionConfig.Period,
 	}
 
 	// do not embed repository format info in pack blobs when password change is enabled.
@@ -362,8 +375,8 @@ func readFormatBlobBytesFromCache(ctx context.Context, cachedFile string, validD
 	return os.ReadFile(cachedFile) //nolint:wrapcheck,gosec
 }
 
-func readAndCacheFormatBlobBytes(ctx context.Context, st blob.Storage, cacheDirectory string, validDuration time.Duration) ([]byte, error) {
-	cachedFile := filepath.Join(cacheDirectory, "kopia.repository")
+func readAndCacheRepositoryBlobBytes(ctx context.Context, st blob.Storage, cacheDirectory string, blobId string, validDuration time.Duration) ([]byte, error) {
+	cachedFile := filepath.Join(cacheDirectory, blobId)
 
 	if validDuration == 0 {
 		validDuration = defaultFormatBlobCacheDuration
@@ -379,21 +392,21 @@ func readAndCacheFormatBlobBytes(ctx context.Context, st blob.Storage, cacheDire
 	if cacheEnabled {
 		b, err := readFormatBlobBytesFromCache(ctx, cachedFile, validDuration)
 		if err == nil {
-			log(ctx).Debugf("kopia.repository retrieved from cache")
+			log(ctx).Debugf("%s retrieved from cache", blobId)
 
 			return b, nil
 		}
 
-		log(ctx).Debugf("kopia.repository could not be fetched from cache: %v", err)
+		log(ctx).Debugf("%s could not be fetched from cache: %v", blobId, err)
 	} else {
-		log(ctx).Debugf("kopia.repository cache not enabled")
+		log(ctx).Debugf("%s cache not enabled", blobId)
 	}
 
 	var b gather.WriteBuffer
 	defer b.Close()
 
-	if err := st.GetBlob(ctx, FormatBlobID, 0, -1, &b); err != nil {
-		return nil, errors.Wrap(err, "error getting format blob")
+	if err := st.GetBlob(ctx, blob.ID(blobId), 0, -1, &b); err != nil {
+		return nil, errors.Wrapf(err, "error getting %s blob", blobId)
 	}
 
 	if cacheEnabled {

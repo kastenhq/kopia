@@ -819,6 +819,8 @@ type ManagerOptions struct {
 	RepositoryFormatBytes []byte
 	TimeNow               func() time.Time // Time provider
 	DisableInternalLog    bool
+	RetentionMode         string
+	RetentionPeriod       time.Duration
 }
 
 // CloneOrDefault returns a clone of provided ManagerOptions or default empty struct if nil.

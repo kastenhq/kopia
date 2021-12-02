@@ -97,6 +97,8 @@ type SharedManager struct {
 	repositoryFormatBytes   []byte
 	indexVersion            int
 	indexShardSize          int
+	retentionMode           string
+	retentionPeriod         time.Duration
 
 	// logger where logs should be written
 	log logging.Logger
@@ -414,13 +416,15 @@ func (sm *SharedManager) setupReadManagerCaches(ctx context.Context, caching *Ca
 
 	// set up new index blob manager
 	sm.indexBlobManagerV1 = &indexBlobManagerV1{
-		st:             cachedSt,
-		enc:            sm.enc,
-		timeNow:        sm.timeNow,
-		maxPackSize:    sm.maxPackSize,
-		indexShardSize: sm.indexShardSize,
-		indexVersion:   sm.indexVersion,
-		log:            sm.namedLogger("index-blob-manager"),
+		st:              cachedSt,
+		enc:             sm.enc,
+		timeNow:         sm.timeNow,
+		maxPackSize:     sm.maxPackSize,
+		indexShardSize:  sm.indexShardSize,
+		indexVersion:    sm.indexVersion,
+		log:             sm.namedLogger("index-blob-manager"),
+		retentionMode:   sm.retentionMode,
+		retentionPeriod: sm.retentionPeriod,
 	}
 	sm.indexBlobManagerV1.epochMgr = epoch.NewManager(cachedSt, sm.format.EpochParameters, sm.indexBlobManagerV1.compactEpoch, sm.namedLogger("epoch-manager"), sm.timeNow)
 
@@ -568,6 +572,8 @@ func NewSharedManager(ctx context.Context, st blob.Storage, f *FormattingOptions
 		internalLogManager:      ilm,
 		internalLogger:          internalLog,
 		contextLogger:           logging.Module(FormatLogModule)(ctx),
+		retentionMode:           opts.RetentionMode,
+		retentionPeriod:         opts.RetentionPeriod,
 	}
 
 	// remember logger defined for the context.
