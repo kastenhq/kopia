@@ -16,6 +16,9 @@ import (
 	"github.com/kopia/kopia/repo/blob"
 )
 
+// VerifyTokenExpirationForGetBlob verifies that the token expiration
+// error is returned by GetBlob.
+// nolint:thelper
 func VerifyTokenExpirationForGetBlob(ctx context.Context, t *testing.T, r blob.Storage) {
 	blocks := []struct {
 		blk      blob.ID

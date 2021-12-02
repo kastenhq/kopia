@@ -218,6 +218,7 @@ func (s *s3Storage) ListBlobs(ctx context.Context, prefix blob.ID, callback func
 			if strings.Contains(err.Error(), blob.TokenExpiredErrStr) {
 				return blob.ErrTokenExpired
 			}
+
 			return err
 		}
 
