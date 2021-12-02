@@ -190,7 +190,7 @@ func TestTokenExpiration(t *testing.T) {
 	region := getEnvOrSkip(t, testRegionEnv)
 	role := getEnvOrSkip(t, testRoleEnv)
 
-	stsAccessKeyId, stsSecretKey, stsSessionToken := createAWSSessionToken(t, awsAccessKeyId, awsSecretAccessKeyId, role)
+	stsAccessKeyId, stsSecretKey, stsSessionToken := createAWSSessionToken(t, awsAccessKeyId, awsSecretAccessKeyId, role, region)
 	createBucket(t, &Options{
 		Endpoint:        awsEndpoint,
 		AccessKeyID:     awsAccessKeyId,
@@ -518,10 +518,10 @@ func createMinioSessionToken(t *testing.T, minioEndpoint, kopiaUserName, kopiaUs
 	return *result.Credentials.AccessKeyId, *result.Credentials.SecretAccessKey, *result.Credentials.SessionToken
 }
 
-func createAWSSessionToken(t *testing.T, awsAccessKeyId, awsSecretAccessKeyId, role string) (accessID, secretKey, sessionToken string) {
+func createAWSSessionToken(t *testing.T, awsAccessKeyId, awsSecretAccessKeyId, role, region string) (accessID, secretKey, sessionToken string) {
 	t.Helper()
 	creds := credentials.NewStaticCredentials(awsAccessKeyId, awsSecretAccessKeyId, "")
-	sess, err := session.NewSession(aws.NewConfig().WithLogLevel(aws.LogDebug).WithRegion("us-west-2").WithCredentials(creds))
+	sess, err := session.NewSession(aws.NewConfig().WithLogLevel(aws.LogDebug).WithRegion(region).WithCredentials(creds))
 	if err != nil {
 		t.Fatalf("failed to create aws session: %v", err)
 	}
