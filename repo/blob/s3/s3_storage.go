@@ -95,6 +95,10 @@ func (s *s3Storage) getBlobWithVersion(ctx context.Context, b blob.ID, version s
 func translateError(err error) error {
 	var me minio.ErrorResponse
 
+	if err != nil && strings.Contains(err.Error(), "The provided token has expired") {
+		return blob.ErrTokenExpired
+	}
+
 	if errors.As(err, &me) {
 		switch me.StatusCode {
 		case http.StatusOK:
@@ -149,6 +153,10 @@ func (s *s3Storage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes) (ve
 		SendContentMd5: atomic.LoadInt32(&s.sendMD5) > 0,
 		StorageClass:   storageClass,
 	})
+
+	if err != nil && strings.Contains(err.Error(), "The provided token has expired") {
+		return versionMetadata{}, blob.ErrTokenExpired
+	}
 
 	var er minio.ErrorResponse
 
@@ -207,6 +215,9 @@ func (s *s3Storage) ListBlobs(ctx context.Context, prefix blob.ID, callback func
 	})
 	for o := range oi {
 		if err := o.Err; err != nil {
+			if strings.Contains(err.Error(), "The provided token has expired") {
+				return blob.ErrTokenExpired
+			}
 			return err
 		}
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/google/uuid"
@@ -178,6 +179,47 @@ func TestS3StorageAWSSTS(t *testing.T) {
 	testStorage(t, options)
 }
 
+func TestTokenExpiration(t *testing.T) {
+	t.Parallel()
+	testutil.ProviderTest(t)
+
+	awsAccessKeyId := getEnv(testAccessKeyIDEnv, "")
+	awsSecretAccessKeyId := getEnv(testSecretAccessKeyEnv, "")
+	bucketName := getEnvOrSkip(t, testBucketEnv)
+	region := getEnvOrSkip(t, testRegionEnv)
+
+	stsAccessKeyId, stsSecretKey, stsSessionToken := createAWSSessionToken(t, awsEndpoint, awsAccessKeyId, awsSecretAccessKeyId, bucketName)
+	createBucket(t, &Options{
+		Endpoint:        awsEndpoint,
+		AccessKeyID:     awsAccessKeyId,
+		SecretAccessKey: awsSecretAccessKeyId,
+		BucketName:      bucketName,
+		Region:          region,
+		DoNotUseTLS:     true,
+	})
+
+	require.NotEqual(t, awsAccessKeyId, stsAccessKeyId)
+	require.NotEqual(t, awsSecretAccessKeyId, stsSecretKey)
+
+	ctx := testlogging.Context(t)
+	st := setupBlobStorage(t, ctx, &Options{
+		Endpoint:        awsEndpoint,
+		AccessKeyID:     stsAccessKeyId,
+		SecretAccessKey: stsSecretKey,
+		SessionToken:    stsSessionToken,
+		BucketName:      bucketName,
+		Region:          region,
+		DoNotUseTLS:     true,
+	})
+
+	// Sleep for 1000 seconds so that the session token
+	// that was setup with a duration of 900 seconds(minimum duration setting.
+	// We cannot configure a value lower than this) expires.
+	time.Sleep(920 * time.Second)
+
+	blobtesting.VerifyTokenExpirationForGetBlob(ctx, t, st)
+}
+
 func TestS3StorageMinio(t *testing.T) {
 	t.Parallel()
 	testutil.ProviderTest(t)
@@ -298,6 +340,18 @@ func TestNeedMD5AWS(t *testing.T) {
 	err = s.PutBlob(ctx, blob.ID("test-put-blob-0"), gather.FromSlice([]byte("xxyasdf243z")))
 
 	require.NoError(t, err, "could not put test blob")
+}
+
+func setupBlobStorage(t *testing.T, ctx context.Context, options *Options) blob.Storage {
+	options.Prefix = uuid.NewString()
+
+	st, err := New(testlogging.Context(t), options)
+	require.NoError(t, err)
+
+	defer st.Close(ctx)
+	defer blobtesting.CleanupOldData(ctx, t, st, 0)
+
+	return st
 }
 
 // nolint:thelper
@@ -460,4 +514,34 @@ func createMinioSessionToken(t *testing.T, minioEndpoint, kopiaUserName, kopiaUs
 	t.Logf("created session token with assume role: expiration: %s", result.Credentials.Expiration)
 
 	return *result.Credentials.AccessKeyId, *result.Credentials.SecretAccessKey, *result.Credentials.SessionToken
+}
+
+func createAWSSessionToken(t *testing.T, minioEndpoint, kopiaUserName, kopiaUserPasswd, bucketName string) (accessID, secretKey, sessionToken string) {
+	t.Helper()
+	creds := credentials.NewStaticCredentials(kopiaUserName, kopiaUserPasswd, "")
+	sess, err := session.NewSession(aws.NewConfig().WithLogLevel(aws.LogDebug).WithRegion("us-west-2").WithCredentials(creds))
+	if err != nil {
+		t.Fatalf("failed to create aws session: %v", err)
+	}
+
+	roleArn := aws.String("arn:aws:iam::036776340102:role/k10-customer-perms-withs3-role")
+	result := stscreds.NewCredentials(sess, *roleArn, func(p *stscreds.AssumeRoleProvider) {
+		p.Duration = time.Duration(900 * time.Second)
+	})
+	if result == nil {
+		t.Fatalf("couldn't find aws creds in aws assume role response")
+	}
+
+	expiry, err := result.ExpiresAt()
+	if err != nil {
+		t.Fatal("expiry is missing")
+	}
+	t.Logf("created session token with assume role: expiration: %s", expiry)
+
+	val, err := result.Get()
+	if err != nil {
+		t.Fatalf("val is missing %v", val)
+	}
+
+	return val.AccessKeyID, val.SecretAccessKey, val.SessionToken
 }
