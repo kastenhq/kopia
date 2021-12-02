@@ -94,7 +94,7 @@ func Initialize(ctx context.Context, st blob.Storage, opt *NewRepositoryOptions,
 		return errors.Wrap(err, "unable to encrypt format bytes")
 	}
 
-	retentionBytes, err := serializeRetentionBytes(format, retention, formatEncryptionKey, format.UniqueID)
+	retentionBytes, err := serializeRetentionBytes(format, retention, formatEncryptionKey)
 	if err != nil {
 		return errors.Wrap(err, "unable to encrypt retention bytes")
 	}

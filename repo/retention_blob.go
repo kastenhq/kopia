@@ -19,7 +19,7 @@ func retentionBlobFromOptions(opt *NewRepositoryOptions) *retentionBlob {
 	}
 }
 
-func serializeRetentionBytes(f *formatBlob, r *retentionBlob, masterKey, repositoryID []byte) ([]byte, error) {
+func serializeRetentionBytes(f *formatBlob, r *retentionBlob, masterKey []byte) ([]byte, error) {
 	content, err := json.Marshal(r)
 	if err != nil {
 		return nil, errors.Wrap(err, "can't marshal retentionBlob to JSON")
@@ -30,7 +30,7 @@ func serializeRetentionBytes(f *formatBlob, r *retentionBlob, masterKey, reposit
 		return content, nil
 
 	case "AES256_GCM":
-		return encryptRepositoryBlobBytesAes256Gcm(content, masterKey, repositoryID)
+		return encryptRepositoryBlobBytesAes256Gcm(content, masterKey, f.UniqueID)
 
 	default:
 		return nil, errors.Errorf("unknown encryption algorithm: '%v'", f.EncryptionAlgorithm)

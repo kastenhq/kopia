@@ -281,6 +281,7 @@ func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 			uniqueID:            f.UniqueID,
 			cachingOptions:      *caching,
 			formatBlob:          f,
+			retentionBlob:       retentionConfig,
 			formatEncryptionKey: formatEncryptionKey,
 			timeNow:             cmOpts.TimeNow,
 			cliOpts:             lc.ClientOptions.ApplyDefaults(ctx, "Repository in "+st.DisplayName()),
