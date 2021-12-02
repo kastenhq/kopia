@@ -19,9 +19,12 @@ var ErrSetTimeUnsupported = errors.Errorf("SetTime is not supported")
 // ErrInvalidRange is returned when the requested blob offset or length is invalid.
 var ErrInvalidRange = errors.Errorf("invalid blob offset or length")
 
-// ErrTokenExpired is returned when the token used for
-// authenticating with storage provider has expired.
+// TokenExpiredErrStr is the error string returned by the provider
+// when a token has expired.
 var TokenExpiredErrStr = "The provided token has expired"
+
+// ErrTokenExpired is returned when the token used for
+// authenticating with a storage provider has expired.
 var ErrTokenExpired = errors.Errorf(TokenExpiredErrStr)
 
 // Bytes encapsulates a sequence of bytes, possibly stored in a non-contiguous buffers,
