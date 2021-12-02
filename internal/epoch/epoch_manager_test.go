@@ -91,7 +91,7 @@ func newTestEnv(t *testing.T) *epochManagerTestEnv {
 		Base: st,
 	}
 	st = fs
-	st = logging.NewWrapper(st, t.Logf, "[STORAGE] ")
+	st = logging.NewWrapper(st, testlogging.NewTestLogger(t), "[STORAGE] ")
 	te := &epochManagerTestEnv{unloggedst: unloggedst, st: st, ft: ft}
 	m := NewManager(te.st, Parameters{
 		Enabled:                 true,
@@ -356,6 +356,15 @@ func TestGetCompleteIndexSetRetriesIfTookTooLong(t *testing.T) {
 	te := newTestEnv(t)
 
 	ctx := testlogging.Context(t)
+
+	// advance by 3 epochs to ensure GetCompleteIndexSet will be trying to list some blobs
+	// some blobs that were not fetched during Refresh().
+	te.mgr.ForceAdvanceEpoch(ctx)
+	te.ft.Advance(1 * time.Hour)
+	te.mgr.ForceAdvanceEpoch(ctx)
+	te.ft.Advance(1 * time.Hour)
+	te.mgr.ForceAdvanceEpoch(ctx)
+	te.ft.Advance(1 * time.Hour)
 
 	// load committed state
 	require.NoError(t, te.mgr.Refresh(ctx))

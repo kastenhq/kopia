@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,7 +14,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/clock"
-	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/iocopy"
 	"github.com/kopia/kopia/internal/retry"
 	"github.com/kopia/kopia/repo/blob"
@@ -75,7 +73,7 @@ func isRetriable(err error) bool {
 	return errors.Is(err, errRetriableInvalidLength)
 }
 
-func (fs *fsImpl) GetBlobFromPath(ctx context.Context, dirPath, path string, offset, length int64, output *gather.WriteBuffer) error {
+func (fs *fsImpl) GetBlobFromPath(ctx context.Context, dirPath, path string, offset, length int64, output blob.OutputBuffer) error {
 	err := retry.WithExponentialBackoffNoValue(ctx, "GetBlobFromPath:"+path, func() error {
 		output.Reset()
 
@@ -222,7 +220,7 @@ func (fs *fsImpl) DeleteBlobInPath(ctx context.Context, dirPath, path string) er
 
 func (fs *fsImpl) ReadDir(ctx context.Context, dirname string) ([]os.FileInfo, error) {
 	v, err := retry.WithExponentialBackoff(ctx, "ReadDir:"+dirname, func() (interface{}, error) {
-		v, err := ioutil.ReadDir(dirname)
+		v, err := os.ReadDir(dirname)
 		// nolint:wrapcheck
 		return v, err
 	}, isRetriable)
@@ -231,7 +229,25 @@ func (fs *fsImpl) ReadDir(ctx context.Context, dirname string) ([]os.FileInfo, e
 		return nil, err
 	}
 
-	return v.([]os.FileInfo), nil
+	fileInfos := make([]os.FileInfo, 0, len(v.([]os.DirEntry)))
+
+	for _, e := range v.([]os.DirEntry) {
+		fi, err := e.Info()
+
+		if os.IsNotExist(err) {
+			// we lost the race, the file was deleted since it was listed.
+			continue
+		}
+
+		if err != nil {
+			// nolint:wrapcheck
+			return nil, err
+		}
+
+		fileInfos = append(fileInfos, fi)
+	}
+
+	return fileInfos, nil
 }
 
 // SetTime updates file modification time to the provided time.

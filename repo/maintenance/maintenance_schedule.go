@@ -70,6 +70,41 @@ func getAES256GCM(rep repo.DirectRepository) (cipher.AEAD, error) {
 	return cipher.NewGCM(c)
 }
 
+// TimeToAttemptNextMaintenance returns the time when we should attempt next maintenance.
+func TimeToAttemptNextMaintenance(ctx context.Context, rep repo.DirectRepository, max time.Time) (time.Time, error) {
+	mp, err := GetParams(ctx, rep)
+	if err != nil {
+		return time.Time{}, errors.Wrap(err, "unable to get maintenance parameters")
+	}
+
+	ms, err := GetSchedule(ctx, rep)
+	if err != nil {
+		return time.Time{}, errors.Wrap(err, "unable to get maintenance schedule")
+	}
+
+	// if maintenance is not owned by this user, return 'max' because ownership may change.
+	if !mp.isOwnedByByThisUser(rep) {
+		log(ctx).Debugw("maintenance not owned by current user.")
+		return max, nil
+	}
+
+	nextMaintenanceTime := max
+
+	if mp.FullCycle.Enabled {
+		if ms.NextFullMaintenanceTime.Before(nextMaintenanceTime) {
+			nextMaintenanceTime = ms.NextFullMaintenanceTime
+		}
+	}
+
+	if mp.QuickCycle.Enabled {
+		if ms.NextQuickMaintenanceTime.Before(nextMaintenanceTime) {
+			nextMaintenanceTime = ms.NextQuickMaintenanceTime
+		}
+	}
+
+	return nextMaintenanceTime, nil
+}
+
 // GetSchedule gets the scheduled maintenance times.
 func GetSchedule(ctx context.Context, rep repo.DirectRepository) (*Schedule, error) {
 	var tmp gather.WriteBuffer
@@ -140,6 +175,15 @@ func SetSchedule(ctx context.Context, rep repo.DirectRepositoryWriter, s *Schedu
 
 // ReportRun reports timing of a maintenance run and persists it in repository.
 func ReportRun(ctx context.Context, rep repo.DirectRepositoryWriter, taskType TaskType, s *Schedule, run func() error) error {
+	if s == nil {
+		var err error
+
+		s, err = GetSchedule(ctx, rep)
+		if err != nil {
+			return errors.Wrap(err, "unable to get maintenance schedule")
+		}
+	}
+
 	ri := RunInfo{
 		Start: rep.Time(),
 	}
@@ -152,15 +196,6 @@ func ReportRun(ctx context.Context, rep repo.DirectRepositoryWriter, taskType Ta
 		ri.Error = runErr.Error()
 	} else {
 		ri.Success = true
-	}
-
-	if s == nil {
-		var err error
-
-		s, err = GetSchedule(ctx, rep)
-		if err != nil {
-			log(ctx).Errorf("unable to get schedule")
-		}
 	}
 
 	s.ReportRun(taskType, ri)

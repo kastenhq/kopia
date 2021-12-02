@@ -5,10 +5,10 @@ include ../tools/tools.mk
 deps: node_modules/.up-to-date
 
 node_modules/.up-to-date: $(npm) package.json package-lock.json
-	$(retry) $(npm) $(npm_flags) install
+	$(retry) $(npm) $(npm_flags) install --no-audit
+	$(npm) $(npm_flags) audit --production
 	echo updated > node_modules/.up-to-date
 
-electron_builder_flags:=
 electron_builder_flags+=-c.extraMetadata.version=$(KOPIA_VERSION:v%=%)
 
 electron_publish_flag:=never
@@ -52,6 +52,13 @@ endif
 ifeq ($(GOOS),darwin)
 ifeq ($(KOPIA_UI_CURRENT_ARCH_ONLY),)
 electron_builder_flags+=--x64 --arm64
+endif
+endif
+
+# build x86_64 and arm64 binaries
+ifeq ($(GOOS),linux)
+ifeq ($(KOPIA_UI_CURRENT_ARCH_ONLY),)
+electron_builder_flags+=--x64 --arm64 --armv7l
 endif
 endif
 
