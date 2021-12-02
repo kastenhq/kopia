@@ -177,16 +177,10 @@ func openDirect(ctx context.Context, configFile string, lc *LocalConfig, passwor
 func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, password string, options *Options, caching *content.CachingOptions, configFile string) (DirectRepository, error) {
 	caching = caching.CloneOrDefault()
 
-	// Read format blob, potentially from cache.
-	fb, err := readAndCacheRepositoryBlobBytes(ctx, st, caching.CacheDirectory, FormatBlobID, lc.FormatBlobCacheDuration)
+	// Read repo blobs, potentially from cache.
+	fb, rb, err := readAndCacheRepositoryBlobs(ctx, st, caching.CacheDirectory, lc.FormatBlobCacheDuration)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to read format blob")
-	}
-
-	// Read retention blob, potentially from cache.
-	rb, err := readAndCacheRepositoryBlobBytes(ctx, st, caching.CacheDirectory, RetentionBlobID, lc.FormatBlobCacheDuration)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to read retention blob")
+		return nil, errors.Wrap(err, "unable to read repository blobs")
 	}
 
 	if err = writeCacheMarker(caching.CacheDirectory); err != nil {
@@ -376,8 +370,8 @@ func readFormatBlobBytesFromCache(ctx context.Context, cachedFile string, validD
 	return os.ReadFile(cachedFile) //nolint:wrapcheck,gosec
 }
 
-func readAndCacheRepositoryBlobBytes(ctx context.Context, st blob.Storage, cacheDirectory string, blobId string, validDuration time.Duration) ([]byte, error) {
-	cachedFile := filepath.Join(cacheDirectory, blobId)
+func readAndCacheRepositoryBlobBytes(ctx context.Context, st blob.Storage, cacheDirectory, blobID string, validDuration time.Duration) ([]byte, error) {
+	cachedFile := filepath.Join(cacheDirectory, blobID)
 
 	if validDuration == 0 {
 		validDuration = defaultFormatBlobCacheDuration
@@ -393,21 +387,21 @@ func readAndCacheRepositoryBlobBytes(ctx context.Context, st blob.Storage, cache
 	if cacheEnabled {
 		b, err := readFormatBlobBytesFromCache(ctx, cachedFile, validDuration)
 		if err == nil {
-			log(ctx).Debugf("%s retrieved from cache", blobId)
+			log(ctx).Debugf("%s retrieved from cache", blobID)
 
 			return b, nil
 		}
 
-		log(ctx).Debugf("%s could not be fetched from cache: %v", blobId, err)
+		log(ctx).Debugf("%s could not be fetched from cache: %v", blobID, err)
 	} else {
-		log(ctx).Debugf("%s cache not enabled", blobId)
+		log(ctx).Debugf("%s cache not enabled", blobID)
 	}
 
 	var b gather.WriteBuffer
 	defer b.Close()
 
-	if err := st.GetBlob(ctx, blob.ID(blobId), 0, -1, &b); err != nil {
-		return nil, errors.Wrapf(err, "error getting %s blob", blobId)
+	if err := st.GetBlob(ctx, blob.ID(blobID), 0, -1, &b); err != nil {
+		return nil, errors.Wrapf(err, "error getting %s blob", blobID)
 	}
 
 	if cacheEnabled {
@@ -417,4 +411,20 @@ func readAndCacheRepositoryBlobBytes(ctx context.Context, st blob.Storage, cache
 	}
 
 	return b.ToByteSlice(), nil
+}
+
+func readAndCacheRepositoryBlobs(ctx context.Context, st blob.Storage, cacheDirectory string, validDuration time.Duration) (format, retention []byte, err error) {
+	// Read format blob, potentially from cache.
+	fb, err := readAndCacheRepositoryBlobBytes(ctx, st, cacheDirectory, FormatBlobID, validDuration)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "unable to read format blob")
+	}
+
+	// Read retention blob, potentially from cache.
+	rb, err := readAndCacheRepositoryBlobBytes(ctx, st, cacheDirectory, RetentionBlobID, validDuration)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "unable to read retention blob")
+	}
+
+	return fb, rb, nil
 }

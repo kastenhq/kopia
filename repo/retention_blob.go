@@ -29,7 +29,7 @@ func serializeRetentionBytes(f *formatBlob, r *retentionBlob, masterKey []byte) 
 	case "NONE":
 		return content, nil
 
-	case "AES256_GCM":
+	case aes256GcmEncryption:
 		return encryptRepositoryBlobBytesAes256Gcm(content, masterKey, f.UniqueID)
 
 	default:
@@ -37,7 +37,7 @@ func serializeRetentionBytes(f *formatBlob, r *retentionBlob, masterKey []byte) 
 	}
 }
 
-func deserializeRetentionBytes(f *formatBlob, encryptedRetentionBytes []byte, masterKey []byte) (*retentionBlob, error) {
+func deserializeRetentionBytes(f *formatBlob, encryptedRetentionBytes, masterKey []byte) (*retentionBlob, error) {
 	var (
 		plainText []byte
 		r         = &retentionBlob{}
@@ -48,7 +48,7 @@ func deserializeRetentionBytes(f *formatBlob, encryptedRetentionBytes []byte, ma
 	case "NONE": // do nothing
 		plainText = encryptedRetentionBytes
 
-	case "AES256_GCM":
+	case aes256GcmEncryption:
 		plainText, err = decryptRepositoryBlobBytesAes256Gcm(encryptedRetentionBytes, masterKey, f.UniqueID)
 		if err != nil {
 			return nil, errors.Errorf("unable to decrypt repository retention blob")

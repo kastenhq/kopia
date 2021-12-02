@@ -17,6 +17,7 @@ import (
 )
 
 const (
+	aes256GcmEncryption             = "AES256_GCM"
 	defaultFormatEncryption         = "AES256_GCM"
 	lengthOfRecoverBlockLength      = 2 // number of bytes used to store recover block length
 	maxChecksummedFormatBytesLength = 65000
@@ -33,7 +34,7 @@ var formatBlobChecksumSecret = []byte("kopia-repository")
 // FormatBlobID is the identifier of a BLOB that describes repository format.
 const FormatBlobID = "kopia.repository"
 
-// RetentionBlogID is the identifier of a BLOB that describes BLOB retention
+// RetentionBlobID is the identifier of a BLOB that describes BLOB retention
 // settings for the repository.
 const RetentionBlobID = "kopia.retention"
 
@@ -186,7 +187,7 @@ func (f *formatBlob) decryptFormatBytes(masterKey []byte) (*repositoryObjectForm
 	case "NONE": // do nothing
 		return f.UnencryptedFormat, nil
 
-	case "AES256_GCM":
+	case aes256GcmEncryption:
 		plainText, err := decryptRepositoryBlobBytesAes256Gcm(f.EncryptedFormatBytes, masterKey, f.UniqueID)
 		if err != nil {
 			return nil, errors.Errorf("unable to decrypt repository format")
@@ -271,11 +272,12 @@ func encryptFormatBytes(f *formatBlob, format *repositoryObjectFormat, masterKey
 		f.UnencryptedFormat = format
 		return nil
 
-	case "AES256_GCM":
+	case aes256GcmEncryption:
 		content, err := json.Marshal(&encryptedRepositoryConfig{Format: *format})
 		if err != nil {
 			return errors.Wrap(err, "can't marshal format to JSON")
 		}
+
 		content, err = encryptRepositoryBlobBytesAes256Gcm(content, masterKey, repositoryID)
 		if err != nil {
 			return errors.Wrap(err, "failed to encrypt format JSON")

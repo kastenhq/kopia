@@ -5,9 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/pkg/errors"
+
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/repo/blob"
-	"github.com/pkg/errors"
 )
 
 // ChangePassword changes the repository password and rewrites
@@ -31,7 +32,7 @@ func (r *directRepository) ChangePassword(ctx context.Context, newPassword strin
 
 	r.formatEncryptionKey = newFormatEncryptionKey
 
-	if err := encryptFormatBytes(f, repoConfig, newFormatEncryptionKey, f.UniqueID); err != nil {
+	if err = encryptFormatBytes(f, repoConfig, newFormatEncryptionKey, f.UniqueID); err != nil {
 		return errors.Wrap(err, "unable to encrypt format bytes")
 	}
 
@@ -40,6 +41,7 @@ func (r *directRepository) ChangePassword(ctx context.Context, newPassword strin
 		return errors.Wrap(err, "unable to encrypt retention bytes")
 	}
 
+	// TODO: no need to put a blob when nil
 	if err := r.blobs.PutBlob(ctx, RetentionBlobID, gather.FromSlice(retentionBytes), blob.PutOptions{}); err != nil {
 		return errors.Wrap(err, "unable to write retention blob")
 	}

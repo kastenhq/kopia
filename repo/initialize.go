@@ -86,11 +86,11 @@ func Initialize(ctx context.Context, st blob.Storage, opt *NewRepositoryOptions,
 		return errors.Wrap(err, "invalid parameters")
 	}
 
-	if err := f.MutableParameters.Validate(); err != nil {
+	if err = f.MutableParameters.Validate(); err != nil {
 		return errors.Wrap(err, "invalid parameters")
 	}
 
-	if err := encryptFormatBytes(format, f, formatEncryptionKey, format.UniqueID); err != nil {
+	if err = encryptFormatBytes(format, f, formatEncryptionKey, format.UniqueID); err != nil {
 		return errors.Wrap(err, "unable to encrypt format bytes")
 	}
 
