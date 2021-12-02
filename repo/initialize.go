@@ -94,15 +94,17 @@ func Initialize(ctx context.Context, st blob.Storage, opt *NewRepositoryOptions,
 		return errors.Wrap(err, "unable to encrypt format bytes")
 	}
 
-	retentionBytes, err := serializeRetentionBytes(format, retention, formatEncryptionKey)
-	if err != nil {
-		return errors.Wrap(err, "unable to encrypt retention bytes")
-	}
+	if !retention.IsNull() {
+		retentionBytes, err := serializeRetentionBytes(format, retention, formatEncryptionKey)
+		if err != nil {
+			return errors.Wrap(err, "unable to encrypt retention bytes")
+		}
 
-	// Write the retention blob first so that we'll consider the repository
-	// corrupted if writing the format blob fails later.
-	if err := st.PutBlob(ctx, RetentionBlobID, gather.FromSlice(retentionBytes), blob.PutOptions{}); err != nil {
-		return errors.Wrap(err, "unable to write retention blob")
+		// Write the retention blob first so that we'll consider the repository
+		// corrupted if writing the format blob fails later.
+		if err := st.PutBlob(ctx, RetentionBlobID, gather.FromSlice(retentionBytes), blob.PutOptions{}); err != nil {
+			return errors.Wrap(err, "unable to write retention blob")
+		}
 	}
 
 	if err := writeFormatBlob(ctx, st, format); err != nil {

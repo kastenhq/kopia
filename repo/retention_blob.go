@@ -12,6 +12,10 @@ type retentionBlob struct {
 	Period time.Duration `json:"period,omitempty"`
 }
 
+func (r *retentionBlob) IsNull() bool {
+	return r.Mode == "" || r.Period == 0
+}
+
 func retentionBlobFromOptions(opt *NewRepositoryOptions) *retentionBlob {
 	return &retentionBlob{
 		Mode:   opt.RetentionMode,
