@@ -49,6 +49,7 @@ const (
 	testBucketEnv          = "KOPIA_S3_TEST_BUCKET"
 	testLockedBucketEnv    = "KOPIA_S3_TEST_LOCKED_BUCKET"
 	testRegionEnv          = "KOPIA_S3_TEST_REGION"
+	testRoleEnv            = "KOPIA_S3_TEST_ROLE"
 	// additional env vars need to be set to execute TestS3StorageAWSSTS.
 	testSTSAccessKeyIDEnv     = "KOPIA_S3_TEST_STS_ACCESS_KEY_ID"
 	testSTSSecretAccessKeyEnv = "KOPIA_S3_TEST_STS_SECRET_ACCESS_KEY"
@@ -187,8 +188,9 @@ func TestTokenExpiration(t *testing.T) {
 	awsSecretAccessKeyId := getEnv(testSecretAccessKeyEnv, "")
 	bucketName := getEnvOrSkip(t, testBucketEnv)
 	region := getEnvOrSkip(t, testRegionEnv)
+	role := getEnvOrSkip(t, testRoleEnv)
 
-	stsAccessKeyId, stsSecretKey, stsSessionToken := createAWSSessionToken(t, awsEndpoint, awsAccessKeyId, awsSecretAccessKeyId, bucketName)
+	stsAccessKeyId, stsSecretKey, stsSessionToken := createAWSSessionToken(t, awsAccessKeyId, awsSecretAccessKeyId, role)
 	createBucket(t, &Options{
 		Endpoint:        awsEndpoint,
 		AccessKeyID:     awsAccessKeyId,
@@ -516,15 +518,15 @@ func createMinioSessionToken(t *testing.T, minioEndpoint, kopiaUserName, kopiaUs
 	return *result.Credentials.AccessKeyId, *result.Credentials.SecretAccessKey, *result.Credentials.SessionToken
 }
 
-func createAWSSessionToken(t *testing.T, minioEndpoint, kopiaUserName, kopiaUserPasswd, bucketName string) (accessID, secretKey, sessionToken string) {
+func createAWSSessionToken(t *testing.T, awsAccessKeyId, awsSecretAccessKeyId, role string) (accessID, secretKey, sessionToken string) {
 	t.Helper()
-	creds := credentials.NewStaticCredentials(kopiaUserName, kopiaUserPasswd, "")
+	creds := credentials.NewStaticCredentials(awsAccessKeyId, awsSecretAccessKeyId, "")
 	sess, err := session.NewSession(aws.NewConfig().WithLogLevel(aws.LogDebug).WithRegion("us-west-2").WithCredentials(creds))
 	if err != nil {
 		t.Fatalf("failed to create aws session: %v", err)
 	}
 
-	roleArn := aws.String("arn:aws:iam::036776340102:role/k10-customer-perms-withs3-role")
+	roleArn := aws.String(role)
 	result := stscreds.NewCredentials(sess, *roleArn, func(p *stscreds.AssumeRoleProvider) {
 		p.Duration = time.Duration(900 * time.Second)
 	})
