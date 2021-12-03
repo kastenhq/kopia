@@ -177,7 +177,7 @@ func TestIndexEpochManager_Parallel(t *testing.T) {
 
 				if _, err := te2.mgr.WriteIndex(ctx, map[blob.ID]blob.Bytes{
 					blob.ID(fmt.Sprintf("w%vr%x", worker, rnd)): gather.FromSlice(ndx.Bytes()),
-				}); err != nil {
+				}, "", 0); err != nil {
 					return errors.Wrap(err, "error writing")
 				}
 
@@ -634,6 +634,6 @@ func (te *epochManagerTestEnv) mustWriteIndexFile(ctx context.Context, t *testin
 
 	_, err := te.mgr.WriteIndex(ctx, map[blob.ID]blob.Bytes{
 		blob.ID(hex.EncodeToString(rnd[:])): gather.FromSlice(ndx.Bytes()),
-	})
+	}, "", 0)
 	require.NoError(t, err)
 }

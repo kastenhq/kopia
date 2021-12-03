@@ -396,10 +396,12 @@ func TestInitializeWithRetentionBlob(t *testing.T) {
 		NewRepositoryOptions: func(n *repo.NewRepositoryOptions) {
 			n.RetentionMode = minio.Governance.String()
 			n.RetentionPeriod = time.Hour * 24
-		}})
+		},
+	})
+
+	var d gather.WriteBuffer
 
 	// verify that the retention blob is created
-	var d gather.WriteBuffer
 	require.NoError(t, env.RepositoryWriter.BlobStorage().GetBlob(ctx, repo.RetentionBlobID, 0, -1, &d))
 	require.NoError(t, env.RepositoryWriter.ChangePassword(ctx, "new-password"))
 	// verify that the retention blob is created and is different after
@@ -412,7 +414,8 @@ func TestInitializeWithNoRetention(t *testing.T) {
 		NewRepositoryOptions: func(n *repo.NewRepositoryOptions) {
 			n.RetentionMode = minio.Governance.String()
 			n.RetentionPeriod = 0 // no-effect
-		}})
+		},
+	})
 
 	// verify that the retention blob is NOT created because the retention period is not
 	// specified
@@ -424,7 +427,8 @@ func TestObjectWritesWithRetention(t *testing.T) {
 		NewRepositoryOptions: func(n *repo.NewRepositoryOptions) {
 			n.RetentionMode = minio.Governance.String()
 			n.RetentionPeriod = time.Hour * 24
-		}})
+		},
+	})
 
 	writer := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{})
 	_, err := writer.Write([]byte("the quick brown fox jumps over the lazy dog"))

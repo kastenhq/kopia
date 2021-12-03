@@ -32,7 +32,7 @@ func (r *directRepository) ChangePassword(ctx context.Context, newPassword strin
 
 	r.formatEncryptionKey = newFormatEncryptionKey
 
-	if err = encryptFormatBytes(f, repoConfig, newFormatEncryptionKey, f.UniqueID); err != nil {
+	if err := encryptFormatBytes(f, repoConfig, newFormatEncryptionKey, f.UniqueID); err != nil {
 		return errors.Wrap(err, "unable to encrypt format bytes")
 	}
 
