@@ -674,7 +674,7 @@ func (e *Manager) GetCompleteIndexSet(ctx context.Context, maxEpoch int) ([]blob
 }
 
 // WriteIndex writes new index blob by picking the appropriate prefix based on current epoch.
-func (e *Manager) WriteIndex(ctx context.Context, dataShards map[blob.ID]blob.Bytes) ([]blob.Metadata, error) {
+func (e *Manager) WriteIndex(ctx context.Context, dataShards map[blob.ID]blob.Bytes, retentionMode string, retentionPeriod time.Duration) ([]blob.Metadata, error) {
 	for {
 		cs, err := e.committedState(ctx)
 		if err != nil {
@@ -688,7 +688,7 @@ func (e *Manager) WriteIndex(ctx context.Context, dataShards map[blob.ID]blob.By
 		for unprefixedBlobID, data := range dataShards {
 			blobID := UncompactedEpochBlobPrefix(cs.WriteEpoch) + unprefixedBlobID
 
-			if err := e.st.PutBlob(ctx, blobID, data, blob.PutOptions{}); err != nil {
+			if err := e.st.PutBlob(ctx, blobID, data, blob.PutOptions{RetentionMode: retentionMode, RetentionPeriod: retentionPeriod}); err != nil {
 				return nil, errors.Wrap(err, "error writing index blob")
 			}
 

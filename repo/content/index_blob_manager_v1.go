@@ -127,7 +127,7 @@ func (m *indexBlobManagerV1) writeIndexBlobs(ctx context.Context, dataShards []g
 	}
 
 	// nolint:wrapcheck
-	return m.epochMgr.WriteIndex(ctx, shards)
+	return m.epochMgr.WriteIndex(ctx, shards, m.retentionMode, m.retentionPeriod)
 }
 
 var _ indexBlobManager = (*indexBlobManagerV1)(nil)
