@@ -1,5 +1,5 @@
-//go:build (darwin && amd64) || (linux && amd64)
-// +build darwin,amd64 linux,amd64
+//go:build darwin || (linux && amd64)
+// +build darwin linux,amd64
 
 // Package kopiaclient provides a client to interact with a Kopia repo.
 package kopiaclient
@@ -199,7 +199,7 @@ func (kc *KopiaClient) getStorage(ctx context.Context, repoDir, bucketName strin
 		fsOpts := &filesystem.Options{
 			Path: repoDir,
 		}
-		st, err = filesystem.New(ctx, fsOpts)
+		st, err = filesystem.New(ctx, fsOpts, false)
 	}
 
 	return st, errors.Wrap(err, "unable to get storage")

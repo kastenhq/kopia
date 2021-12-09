@@ -9,14 +9,13 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync/atomic"
 	"time"
 
-	"github.com/efarrer/iothrottler"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/iocopy"
 	"github.com/kopia/kopia/repo/blob"
@@ -29,14 +28,11 @@ const (
 )
 
 type s3Storage struct {
-	sendMD5 int32
 	Options
 
 	cli *minio.Client
 
-	downloadThrottler *iothrottler.IOThrottlerPool
-	uploadThrottler   *iothrottler.IOThrottlerPool
-	storageConfig     *StorageConfig
+	storageConfig *StorageConfig
 }
 
 func (s *s3Storage) GetBlob(ctx context.Context, b blob.ID, offset, length int64, output blob.OutputBuffer) error {
@@ -71,17 +67,12 @@ func (s *s3Storage) getBlobWithVersion(ctx context.Context, b blob.ID, version s
 
 		defer o.Close() //nolint:errcheck
 
-		throttled, err := s.downloadThrottler.AddReader(o)
-		if err != nil {
-			return errors.Wrap(err, "AddReader")
-		}
-
 		if length == 0 {
 			return nil
 		}
 
 		// nolint:wrapcheck
-		return iocopy.JustCopy(output, throttled)
+		return iocopy.JustCopy(output, o)
 	}
 
 	if err := attempt(); err != nil {
@@ -134,24 +125,38 @@ func (s *s3Storage) getVersionMetadata(ctx context.Context, b blob.ID, version s
 	return infoToVersionMetadata(s.Prefix, &oi), nil
 }
 
-func (s *s3Storage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes) error {
-	_, err := s.putBlob(ctx, b, data)
+func (s *s3Storage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes, opts blob.PutOptions) error {
+	_, err := s.putBlob(ctx, b, data, opts)
 
 	return err
 }
 
-func (s *s3Storage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes) (versionMetadata, error) {
-	throttled, err := s.uploadThrottler.AddReader(io.NopCloser(data.Reader()))
-	if err != nil {
-		return versionMetadata{}, errors.Wrap(err, "AddReader")
+func (s *s3Storage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes, opts blob.PutOptions) (versionMetadata, error) {
+	var (
+		storageClass    = s.storageConfig.getStorageClassForBlobID(b)
+		retentionMode   minio.RetentionMode
+		retainUntilDate time.Time
+	)
+
+	if opts.RetentionPeriod != 0 {
+		retentionMode = minio.RetentionMode(opts.RetentionMode)
+		if !retentionMode.IsValid() {
+			return versionMetadata{}, errors.Errorf("invalid retention mode: %q", opts.RetentionMode)
+		}
+
+		retainUntilDate = clock.Now().Add(opts.RetentionPeriod).UTC()
 	}
 
-	storageClass := s.storageConfig.getStorageClassForBlobID(b)
-
-	uploadInfo, err := s.cli.PutObject(ctx, s.BucketName, s.getObjectNameString(b), throttled, int64(data.Length()), minio.PutObjectOptions{
-		ContentType:    "application/x-kopia",
-		SendContentMd5: atomic.LoadInt32(&s.sendMD5) > 0,
-		StorageClass:   storageClass,
+	uploadInfo, err := s.cli.PutObject(ctx, s.BucketName, s.getObjectNameString(b), data.Reader(), int64(data.Length()), minio.PutObjectOptions{
+		ContentType: "application/x-kopia",
+		// The Content-MD5 header is required for any request to upload an object
+		// with a retention period configured using Amazon S3 Object Lock.
+		// Unconditionally computing the content MD5, potentially incurring
+		// a slightly higher CPU overhead.
+		SendContentMd5:  true,
+		StorageClass:    storageClass,
+		RetainUntilDate: retainUntilDate,
+		Mode:            retentionMode,
 	})
 
 	if err != nil && strings.Contains(err.Error(), blob.TokenExpiredErrStr) {
@@ -161,16 +166,16 @@ func (s *s3Storage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes) (ve
 	var er minio.ErrorResponse
 
 	if errors.As(err, &er) && er.Code == "InvalidRequest" && strings.Contains(strings.ToLower(er.Message), "content-md5") {
-		atomic.StoreInt32(&s.sendMD5, 1) // set sendMD5 on retry
-
 		return versionMetadata{}, err // nolint:wrapcheck
 	}
 
 	if errors.Is(err, io.EOF) && uploadInfo.Size == 0 {
 		// special case empty stream
 		_, err = s.cli.PutObject(ctx, s.BucketName, s.getObjectNameString(b), bytes.NewBuffer(nil), 0, minio.PutObjectOptions{
-			ContentType:  "application/x-kopia",
-			StorageClass: storageClass,
+			ContentType:     "application/x-kopia",
+			StorageClass:    storageClass,
+			RetainUntilDate: retainUntilDate,
+			Mode:            retentionMode,
 		})
 	}
 
@@ -263,14 +268,6 @@ func (s *s3Storage) FlushCaches(ctx context.Context) error {
 	return nil
 }
 
-func toBandwidth(bytesPerSecond int) iothrottler.Bandwidth {
-	if bytesPerSecond <= 0 {
-		return iothrottler.Unlimited
-	}
-
-	return iothrottler.Bandwidth(bytesPerSecond) * iothrottler.BytesPerSecond
-}
-
 func getCustomTransport(insecureSkipVerify bool) (transport *http.Transport) {
 	// nolint:gosec
 	customTransport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: insecureSkipVerify}}
@@ -314,9 +311,6 @@ func newStorage(ctx context.Context, opt *Options) (*s3Storage, error) {
 		return nil, errors.Wrap(err, "unable to create client")
 	}
 
-	downloadThrottler := iothrottler.NewIOThrottlerPool(toBandwidth(opt.MaxDownloadSpeedBytesPerSecond))
-	uploadThrottler := iothrottler.NewIOThrottlerPool(toBandwidth(opt.MaxUploadSpeedBytesPerSecond))
-
 	ok, err := cli.BucketExists(ctx, opt.BucketName)
 	if err != nil {
 		return nil, errors.Wrapf(err, "unable to determine if bucket %q exists", opt.BucketName)
@@ -327,12 +321,9 @@ func newStorage(ctx context.Context, opt *Options) (*s3Storage, error) {
 	}
 
 	s := s3Storage{
-		Options:           *opt,
-		cli:               cli,
-		sendMD5:           0,
-		downloadThrottler: downloadThrottler,
-		uploadThrottler:   uploadThrottler,
-		storageConfig:     &StorageConfig{},
+		Options:       *opt,
+		cli:           cli,
+		storageConfig: &StorageConfig{},
 	}
 
 	var scOutput gather.WriteBuffer
@@ -354,7 +345,7 @@ func init() {
 		func() interface{} {
 			return &Options{}
 		},
-		func(ctx context.Context, o interface{}) (blob.Storage, error) {
+		func(ctx context.Context, o interface{}, isCreate bool) (blob.Storage, error) {
 			return New(ctx, o.(*Options))
 		})
 }

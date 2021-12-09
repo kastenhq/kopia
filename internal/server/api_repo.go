@@ -14,6 +14,7 @@ import (
 	"github.com/kopia/kopia/internal/serverapi"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/repo/blob/throttling"
 	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/repo/encryption"
 	"github.com/kopia/kopia/repo/hashing"
@@ -111,7 +112,7 @@ func (s *Server) handleRepoCreate(ctx context.Context, r *http.Request, body []b
 		return nil, err
 	}
 
-	st, err := blob.NewStorage(ctx, req.Storage)
+	st, err := blob.NewStorage(ctx, req.Storage, true)
 	if err != nil {
 		return nil, requestError(serverapi.ErrorStorageConnection, "unable to connect to storage: "+err.Error())
 	}
@@ -154,7 +155,7 @@ func (s *Server) handleRepoExists(ctx context.Context, r *http.Request, body []b
 		return nil, requestError(serverapi.ErrorMalformedRequest, "unable to decode request: "+err.Error())
 	}
 
-	st, err := blob.NewStorage(ctx, req.Storage)
+	st, err := blob.NewStorage(ctx, req.Storage, false)
 	if err != nil {
 		return nil, internalServerError(err)
 	}
@@ -243,6 +244,33 @@ func (s *Server) handleRepoSupportedAlgorithms(ctx context.Context, r *http.Requ
 	return res, nil
 }
 
+func (s *Server) handleRepoGetThrottle(ctx context.Context, r *http.Request, body []byte) (interface{}, *apiError) {
+	dr, ok := s.rep.(repo.DirectRepository)
+	if !ok {
+		return nil, requestError(serverapi.ErrorStorageConnection, "no direct storage connection")
+	}
+
+	return dr.Throttler().Limits(), nil
+}
+
+func (s *Server) handleRepoSetThrottle(ctx context.Context, r *http.Request, body []byte) (interface{}, *apiError) {
+	dr, ok := s.rep.(repo.DirectRepository)
+	if !ok {
+		return nil, requestError(serverapi.ErrorStorageConnection, "no direct storage connection")
+	}
+
+	var req throttling.Limits
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, requestError(serverapi.ErrorMalformedRequest, "unable to decode request: "+err.Error())
+	}
+
+	if err := dr.Throttler().SetLimits(req); err != nil {
+		return nil, requestError(serverapi.ErrorMalformedRequest, "unable to set limits: "+err.Error())
+	}
+
+	return &serverapi.Empty{}, nil
+}
+
 func (s *Server) getConnectOptions(cliOpts repo.ClientOptions) *repo.ConnectOptions {
 	o := *s.options.ConnectOptions
 	o.ClientOptions = o.ClientOptions.Override(cliOpts)
@@ -261,7 +289,7 @@ func (s *Server) connectAPIServerAndOpen(ctx context.Context, si *repo.APIServer
 }
 
 func (s *Server) connectAndOpen(ctx context.Context, conn blob.ConnectionInfo, password string, cliOpts repo.ClientOptions) *apiError {
-	st, err := blob.NewStorage(ctx, conn)
+	st, err := blob.NewStorage(ctx, conn, false)
 	if err != nil {
 		return requestError(serverapi.ErrorStorageConnection, "can't open storage: "+err.Error())
 	}

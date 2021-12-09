@@ -24,7 +24,7 @@ import (
 const (
 	restoreCommandHelp = `Restore a directory or a file.
 
-Restore can operate in two modes: 
+Restore can operate in two modes:
 
 * from a snapshot: restoring (possibly shallowly) a specified file or
 directory from a snapshot into a target path. By default, the target
@@ -33,7 +33,7 @@ path will be created by the restore command if it does not exist.
 * by expanding a shallow placeholder in situ where the placeholder was
 created by a previous restore.
 
-In the from-snapshot mode: 
+In the from-snapshot mode:
 
 The source to be restored is specified in the form of a directory or file ID and
 optionally a sub-directory path.
@@ -87,7 +87,6 @@ followed by the path of the directory for the contents to be restored.
 2. one or more placeholder files of the form path.kopia-entry
 `
 
-	bitsPerByte    = 8
 	unlimitedDepth = math.MaxInt32
 )
 
@@ -106,6 +105,7 @@ type commandRestore struct {
 	restoreMode                   string
 	restoreParallel               int
 	restoreIgnorePermissionErrors bool
+	restoreWriteFilesAtomically   bool
 	restoreSkipTimes              bool
 	restoreSkipOwners             bool
 	restoreSkipPermissions        bool
@@ -132,6 +132,7 @@ func (c *commandRestore) setup(svc appServices, parent commandParent) {
 	cmd.Flag("skip-permissions", "Skip permissions during restore").BoolVar(&c.restoreSkipPermissions)
 	cmd.Flag("skip-times", "Skip times during restore").BoolVar(&c.restoreSkipTimes)
 	cmd.Flag("ignore-permission-errors", "Ignore permission errors").Default("true").BoolVar(&c.restoreIgnorePermissionErrors)
+	cmd.Flag("write-files-atomically", "Write files atomically to disk, ensuring they are either fully committed, or not written at all, preventing partially written files").Default("false").BoolVar(&c.restoreWriteFilesAtomically)
 	cmd.Flag("ignore-errors", "Ignore all errors").BoolVar(&c.restoreIgnoreErrors)
 	cmd.Flag("skip-existing", "Skip files and symlinks that exist in the output").BoolVar(&c.restoreIncremental)
 	cmd.Flag("shallow", "Shallow restore the directory hierarchy starting at this level (default is to deep restore the entire hierarchy.)").Int32Var(&c.restoreShallowAtDepth)
@@ -215,6 +216,7 @@ func (c *commandRestore) restoreOutput(ctx context.Context) (restore.Output, err
 			OverwriteFiles:         c.restoreOverwriteFiles,
 			OverwriteSymlinks:      c.restoreOverwriteSymlinks,
 			IgnorePermissionErrors: c.restoreIgnorePermissionErrors,
+			WriteFilesAtomically:   c.restoreWriteFilesAtomically,
 			SkipOwners:             c.restoreSkipOwners,
 			SkipPermissions:        c.restoreSkipPermissions,
 			SkipTimes:              c.restoreSkipTimes,
@@ -362,9 +364,8 @@ func (c *commandRestore) run(ctx context.Context, rep repo.Repository) error {
 				var maybeRemaining, maybeSkipped, maybeErrors string
 
 				if est, ok := eta.Estimate(float64(stats.RestoredTotalFileSize), float64(stats.EnqueuedTotalFileSize)); ok {
-					bitsPerSecond := est.SpeedPerSecond * float64(bitsPerByte)
 					maybeRemaining = fmt.Sprintf(" %v (%.1f%%) remaining %v",
-						units.BitsPerSecondsString(bitsPerSecond),
+						units.BytesPerSecondsString(est.SpeedPerSecond),
 						est.PercentComplete,
 						est.Remaining)
 				}

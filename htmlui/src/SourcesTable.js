@@ -3,16 +3,16 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import axios from 'axios';
 import moment from 'moment';
 import React, { Component } from 'react';
-import Badge from 'react-bootstrap-v5/lib/Badge';
-import Button from 'react-bootstrap-v5/lib/Button';
-import Col from 'react-bootstrap-v5/lib/Col';
-import Dropdown from 'react-bootstrap-v5/lib/Dropdown';
-import Row from 'react-bootstrap-v5/lib/Row';
-import Spinner from 'react-bootstrap-v5/lib/Spinner';
+import Badge from 'react-bootstrap/Badge';
+import Button from 'react-bootstrap/Button';
+import Col from 'react-bootstrap/Col';
+import Dropdown from 'react-bootstrap/Dropdown';
+import Row from 'react-bootstrap/Row';
+import Spinner from 'react-bootstrap/Spinner';
 import { Link } from 'react-router-dom';
 import { handleChange } from './forms';
 import MyTable from './Table';
-import { compare, errorAlert, ownerName, redirectIfNotConnected, sizeDisplayName, sizeWithFailures, sourceQueryStringParams } from './uiutil';
+import { CLIEquivalent, compare, errorAlert, ownerName, policyEditorURL, redirectIfNotConnected, sizeDisplayName, sizeWithFailures, sourceQueryStringParams } from './uiutil';
 
 const localSnapshots = "Local Snapshots"
 const allSnapshots = "All Snapshots"
@@ -96,6 +96,7 @@ export class SourcesTable extends Component {
                     <Button variant="primary" size="sm" onClick={() => {
                         parent.startSnapshot(x.row.original.source);
                     }}>Snapshot now</Button>
+                    &nbsp;<Link to={policyEditorURL(x.row.original.source)}><Button size="sm" variant="info">Policy</Button></Link>
                 </>;
 
             case "PENDING":
@@ -233,7 +234,7 @@ export class SourcesTable extends Component {
             </> : '',
         }, {
             id: 'status',
-            Header: 'Status',
+            Header: '',
             width: 300,
             accessor: x => x.status,
             Cell: x => this.statusCell(x, this),
@@ -270,6 +271,7 @@ export class SourcesTable extends Component {
             </div>
 
             <MyTable data={sources} columns={columns} />
+            <CLIEquivalent command={`snapshot list`} />
         </div>;
     }
 }

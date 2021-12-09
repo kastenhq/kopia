@@ -85,6 +85,7 @@ func (s *Server) APIHandlers(legacyAPI bool) http.Handler {
 	m.HandleFunc("/api/v1/policy", s.handleAPI(requireUIUser, s.handlePolicyGet)).Methods(http.MethodGet)
 	m.HandleFunc("/api/v1/policy", s.handleAPI(requireUIUser, s.handlePolicyPut)).Methods(http.MethodPut)
 	m.HandleFunc("/api/v1/policy", s.handleAPI(requireUIUser, s.handlePolicyDelete)).Methods(http.MethodDelete)
+	m.HandleFunc("/api/v1/policy/resolve", s.handleAPI(requireUIUser, s.handlePolicyResolve)).Methods(http.MethodPost)
 
 	m.HandleFunc("/api/v1/policies", s.handleAPI(requireUIUser, s.handlePolicyList)).Methods(http.MethodGet)
 
@@ -94,6 +95,12 @@ func (s *Server) APIHandlers(legacyAPI bool) http.Handler {
 	m.HandleFunc("/api/v1/objects/{objectID}", s.requireAuth(s.handleObjectGet)).Methods(http.MethodGet)
 	m.HandleFunc("/api/v1/restore", s.handleAPI(requireUIUser, s.handleRestore)).Methods(http.MethodPost)
 	m.HandleFunc("/api/v1/estimate", s.handleAPI(requireUIUser, s.handleEstimate)).Methods(http.MethodPost)
+
+	// path APIs
+	m.HandleFunc("/api/v1/paths/resolve", s.handleAPI(requireUIUser, s.handlePathResolve)).Methods(http.MethodPost)
+
+	// path APIs
+	m.HandleFunc("/api/v1/cli", s.handleAPI(requireUIUser, s.handleCLIInfo)).Methods(http.MethodGet)
 
 	// methods that can be called by any authenticated user (UI or remote user).
 	m.HandleFunc("/api/v1/flush", s.handleAPI(anyAuthenticatedUser, s.handleFlush)).Methods(http.MethodPost)
@@ -107,6 +114,8 @@ func (s *Server) APIHandlers(legacyAPI bool) http.Handler {
 
 	m.HandleFunc("/api/v1/repo/disconnect", s.handleAPI(requireUIUser, s.handleRepoDisconnect)).Methods(http.MethodPost)
 	m.HandleFunc("/api/v1/repo/algorithms", s.handleAPIPossiblyNotConnected(requireUIUser, s.handleRepoSupportedAlgorithms)).Methods(http.MethodGet)
+	m.HandleFunc("/api/v1/repo/throttle", s.handleAPI(requireUIUser, s.handleRepoGetThrottle)).Methods(http.MethodGet)
+	m.HandleFunc("/api/v1/repo/throttle", s.handleAPI(requireUIUser, s.handleRepoSetThrottle)).Methods(http.MethodPut)
 
 	if legacyAPI {
 		m.HandleFunc("/api/v1/repo/parameters", s.handleAPI(anyAuthenticatedUser, s.handleRepoParameters)).Methods(http.MethodGet)
@@ -220,11 +229,11 @@ func (s *Server) requireAuth(f http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (s *Server) httpAuthorizationInfo(r *http.Request) auth.AuthorizationInfo {
+func (s *Server) httpAuthorizationInfo(ctx context.Context, r *http.Request) auth.AuthorizationInfo {
 	// authentication already done
 	userAtHost, _, _ := r.BasicAuth()
 
-	authz := s.authorizer.Authorize(r.Context(), s.rep, userAtHost)
+	authz := s.authorizer.Authorize(ctx, s.rep, userAtHost)
 	if authz == nil {
 		authz = auth.NoAccess()
 	}
@@ -427,6 +436,18 @@ func (s *Server) beginUpload(ctx context.Context, src snapshot.SourceInfo) {
 func (s *Server) endUpload(ctx context.Context, src snapshot.SourceInfo) {
 	log(ctx).Debugf("finished uploading %v", src)
 	<-s.uploadSemaphore
+}
+
+func (s *Server) triggerRefreshSource(sourceInfo snapshot.SourceInfo) {
+	sm := s.sourceManagers[sourceInfo]
+	if sm == nil {
+		return
+	}
+
+	select {
+	case sm.refreshRequested <- struct{}{}:
+	default:
+	}
 }
 
 // SetRepository sets the repository (nil is allowed and indicates server that is not

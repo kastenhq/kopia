@@ -1,5 +1,5 @@
 import React, { Component } from 'react';
-import Row from 'react-bootstrap-v5/lib/Row';
+import Row from 'react-bootstrap/Row';
 import { handleChange, OptionalField, RequiredBoolean, RequiredField, validateRequiredFields } from './forms';
 
 export class SetupS3 extends Component {
@@ -8,7 +8,7 @@ export class SetupS3 extends Component {
 
         this.state = {
             "doNotUseTLS": false,
-            "doNotValidateTLS": false,
+            "doNotVerifyTLS": false,
             ...props.initial
         };
         this.handleChange = handleChange.bind(this);
@@ -27,7 +27,7 @@ export class SetupS3 extends Component {
             </Row>
             <Row>
                 {RequiredBoolean(this, "Use HTTP connection (insecure)", "doNotUseTLS")}
-                {RequiredBoolean(this, "Do not validate TLS certificate", "doNotValidateTLS")}
+                {RequiredBoolean(this, "Do not verify TLS certificate", "doNotVerifyTLS")}
             </Row>
             <Row>
                 {RequiredField(this, "Access Key ID", "accessKeyID", { placeholder: "enter access key ID" })}

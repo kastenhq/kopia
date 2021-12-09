@@ -1,12 +1,15 @@
 package filesystem
 
-import "os"
+import (
+	"os"
+
+	"github.com/kopia/kopia/repo/blob/sharded"
+	"github.com/kopia/kopia/repo/blob/throttling"
+)
 
 // Options defines options for Filesystem-backed storage.
 type Options struct {
 	Path string `json:"path"`
-
-	DirectoryShards []int `json:"dirShards"`
 
 	FileMode      os.FileMode `json:"fileMode,omitempty"`
 	DirectoryMode os.FileMode `json:"dirMode,omitempty"`
@@ -14,7 +17,8 @@ type Options struct {
 	FileUID *int `json:"uid,omitempty"`
 	FileGID *int `json:"gid,omitempty"`
 
-	ListParallelism int `json:"listParallelism,omitempty"`
+	sharded.Options
+	throttling.Limits
 }
 
 func (fso *Options) fileMode() os.FileMode {
@@ -31,12 +35,4 @@ func (fso *Options) dirMode() os.FileMode {
 	}
 
 	return fso.DirectoryMode
-}
-
-func (fso *Options) shards() []int {
-	if fso.DirectoryShards == nil {
-		return fsDefaultShards
-	}
-
-	return fso.DirectoryShards
 }

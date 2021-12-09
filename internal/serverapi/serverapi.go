@@ -136,21 +136,19 @@ type SupportedAlgorithmsResponse struct {
 
 // CreateSnapshotSourceRequest contains request to create snapshot source and optionally create first snapshot.
 type CreateSnapshotSourceRequest struct {
-	Path           string        `json:"path"`
-	CreateSnapshot bool          `json:"createSnapshot"`
-	InitialPolicy  policy.Policy `json:"initialPolicy"` // policy to set on the source when first created, ignored if already exists
+	Path           string         `json:"path"`
+	CreateSnapshot bool           `json:"createSnapshot"`
+	Policy         *policy.Policy `json:"policy"` // policy to set on the path
 }
 
 // CreateSnapshotSourceResponse contains response of creating snapshot source.
 type CreateSnapshotSourceResponse struct {
-	Created         bool `json:"created"`     // whether the source was created (false==previously existed)
 	SnapshotStarted bool `json:"snapshotted"` // whether snapshotting has been started
 }
 
 // Snapshot describes single snapshot entry.
 type Snapshot struct {
 	ID               manifest.ID          `json:"id"`
-	Source           snapshot.SourceInfo  `json:"source"`
 	Description      string               `json:"description"`
 	StartTime        time.Time            `json:"startTime"`
 	EndTime          time.Time            `json:"endTime"`
@@ -158,11 +156,14 @@ type Snapshot struct {
 	Summary          *fs.DirectorySummary `json:"summary"`
 	RootEntry        string               `json:"rootID"`
 	RetentionReasons []string             `json:"retention"`
+	Pins             []string             `json:"pins"`
 }
 
 // SnapshotsResponse contains a list of snapshots.
 type SnapshotsResponse struct {
-	Snapshots []*Snapshot `json:"snapshots"`
+	Snapshots       []*Snapshot `json:"snapshots"`
+	UnfilteredCount int         `json:"unfilteredCount"`
+	UniqueCount     int         `json:"uniqueCount"`
 }
 
 // MountSnapshotRequest contains request to mount a snapshot.
@@ -217,6 +218,36 @@ type RestoreRequest struct {
 
 // EstimateRequest contains request to estimate the size of the snapshot in a given root.
 type EstimateRequest struct {
-	Root                 string `json:"root"`
-	MaxExamplesPerBucket int    `json:"maxExamplesPerBucket"`
+	Root                 string         `json:"root"`
+	MaxExamplesPerBucket int            `json:"maxExamplesPerBucket"`
+	PolicyOverride       *policy.Policy `json:"policyOverride"`
+}
+
+// ResolvePolicyRequest contains request structure to ResolvePolicy.
+type ResolvePolicyRequest struct {
+	Updates                  *policy.Policy `json:"updates"`
+	NumUpcomingSnapshotTimes int            `json:"numUpcomingSnapshotTimes"` // if > 0, return N UpcomingSnapshotTimes
+}
+
+// ResolvePolicyResponse returns the resolved details about a single policy.
+type ResolvePolicyResponse struct {
+	Effective             *policy.Policy     `json:"effective"`
+	Definition            *policy.Definition `json:"definition"`
+	Defined               *policy.Policy     `json:"defined"`
+	UpcomingSnapshotTimes []time.Time        `json:"upcomingSnapshotTimes"`
+}
+
+// ResolvePathRequest contains request to resolve a particular path to ResolvePathResponse.
+type ResolvePathRequest struct {
+	Path string `json:"path"`
+}
+
+// ResolvePathResponse contains response to resolve a particular path.
+type ResolvePathResponse struct {
+	SourceInfo snapshot.SourceInfo `json:"source"`
+}
+
+// CLIInfo contains CLI information.
+type CLIInfo struct {
+	Executable string `json:"executable"`
 }

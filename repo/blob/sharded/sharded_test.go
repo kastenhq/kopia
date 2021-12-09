@@ -19,6 +19,36 @@ import (
 	"github.com/kopia/kopia/repo/blob/sharded"
 )
 
+func TestShardedOpenLegacyFileStorage(t *testing.T) {
+	t.Parallel()
+	ctx := testlogging.Context(t)
+	dir := testutil.TempDirectory(t)
+
+	st, err := filesystem.New(ctx, &filesystem.Options{
+		Path:    dir,
+		Options: sharded.Options{},
+	}, false)
+
+	require.NoError(t, err)
+	require.NoError(t, st.PutBlob(ctx, "foobarbaz12345678910123213123", gather.FromSlice([]byte{1, 2, 3}), blob.PutOptions{}))
+	require.FileExists(t, filepath.Join(dir, "foo", "bar", "baz12345678910123213123.f"))
+}
+
+func TestShardedOpenLatestFileStorage(t *testing.T) {
+	t.Parallel()
+	ctx := testlogging.Context(t)
+	dir := testutil.TempDirectory(t)
+
+	st, err := filesystem.New(ctx, &filesystem.Options{
+		Path:    dir,
+		Options: sharded.Options{},
+	}, true)
+
+	require.NoError(t, err)
+	require.NoError(t, st.PutBlob(ctx, "foobarbaz12345678910123213123", gather.FromSlice([]byte{1, 2, 3}), blob.PutOptions{}))
+	require.FileExists(t, filepath.Join(dir, "f", "oob", "arbaz12345678910123213123.f"))
+}
+
 func TestShardedFileStorage(t *testing.T) {
 	t.Parallel()
 
@@ -38,9 +68,11 @@ func TestShardedFileStorage(t *testing.T) {
 				path := testutil.TempDirectory(t)
 
 				r, err := filesystem.New(ctx, &filesystem.Options{
-					Path:            path,
-					DirectoryShards: shardSpec,
-				})
+					Path: path,
+					Options: sharded.Options{
+						DirectoryShards: shardSpec,
+					},
+				}, true)
 
 				os.WriteFile(filepath.Join(path, "foreign-file"), []byte{1, 2, 3}, 0o600)
 
@@ -48,7 +80,7 @@ func TestShardedFileStorage(t *testing.T) {
 					t.Errorf("unexpected result: %v %v", r, err)
 				}
 
-				blobtesting.VerifyStorage(ctx, t, r)
+				blobtesting.VerifyStorage(ctx, t, r, blob.PutOptions{})
 				blobtesting.AssertConnectionInfoRoundTrips(ctx, t, r)
 
 				if err := r.Close(ctx); err != nil {
@@ -133,7 +165,7 @@ func TestShardedFileStorageShardingMap(t *testing.T) {
 
 			r, err := filesystem.New(ctx, &filesystem.Options{
 				Path: path,
-			})
+			}, true)
 			require.NoError(t, err)
 
 			dotShardsFile := filepath.Join(path, ".shards")
@@ -144,7 +176,7 @@ func TestShardedFileStorageShardingMap(t *testing.T) {
 			var allBlobIDs []blob.ID
 
 			for blobID, wantFilename := range tc.blobFilePathMap {
-				require.NoError(t, r.PutBlob(ctx, blobID, gather.FromSlice([]byte("foo"))))
+				require.NoError(t, r.PutBlob(ctx, blobID, gather.FromSlice([]byte("foo")), blob.PutOptions{}))
 				require.FileExists(t, filepath.Join(path, wantFilename))
 
 				allBlobIDs = append(allBlobIDs, blobID)
@@ -178,7 +210,7 @@ func TestShardedFileStorageShardingMap_Invalid(t *testing.T) {
 
 	r, err := filesystem.New(ctx, &filesystem.Options{
 		Path: path,
-	})
+	}, true)
 	require.NoError(t, err)
 
 	dotShardsFile := filepath.Join(path, ".shards")
@@ -189,19 +221,19 @@ func TestShardedFileStorageShardingMap_Invalid(t *testing.T) {
 	var tmp gather.WriteBuffer
 	defer tmp.Close()
 
-	require.Error(t, r.PutBlob(ctx, "someblob", gather.FromSlice([]byte("foo"))))
+	require.Error(t, r.PutBlob(ctx, "someblob", gather.FromSlice([]byte("foo")), blob.PutOptions{}))
 
 	// delete invalid .shards file
 	require.NoError(t, os.Remove(dotShardsFile))
 
 	// now putting the blob will succeed
-	require.NoError(t, r.PutBlob(ctx, "someblob", gather.FromSlice([]byte("foo"))))
+	require.NoError(t, r.PutBlob(ctx, "someblob", gather.FromSlice([]byte("foo")), blob.PutOptions{}))
 
 	// write malformed file again, but will be ignored since it was successfully loaded
 	// in this session.
 	require.NoError(t, os.WriteFile(dotShardsFile, []byte{1, 2, 3}, 0o600))
 
-	require.NoError(t, r.PutBlob(ctx, "someblob2", gather.FromSlice([]byte("foo"))))
+	require.NoError(t, r.PutBlob(ctx, "someblob2", gather.FromSlice([]byte("foo")), blob.PutOptions{}))
 }
 
 func TestClone(t *testing.T) {

@@ -2,7 +2,6 @@ package policy
 
 import (
 	"encoding/json"
-	"fmt"
 	"sort"
 	"testing"
 
@@ -35,7 +34,7 @@ func TestPolicyManagerInheritanceTest(t *testing.T) {
 		Path:     "/some/path2",
 	}, &Policy{
 		RetentionPolicy: RetentionPolicy{
-			KeepDaily: intPtr(66),
+			KeepMonthly: intPtr(66),
 		},
 	}))
 
@@ -51,10 +50,14 @@ func TestPolicyManagerInheritanceTest(t *testing.T) {
 		sourceInfo    snapshot.SourceInfo
 		wantEffective *Policy
 		wantSources   []snapshot.SourceInfo
+		wantDef       Definition
 	}{
 		{
 			sourceInfo:    GlobalPolicySourceInfo,
 			wantEffective: defaultPolicyWithLabels,
+			wantSources: []snapshot.SourceInfo{
+				GlobalPolicySourceInfo,
+			},
 		},
 		{
 			sourceInfo: snapshot.SourceInfo{
@@ -69,6 +72,13 @@ func TestPolicyManagerInheritanceTest(t *testing.T) {
 				"path":       "/some/path",
 				"username":   "myuser",
 			}),
+			wantSources: []snapshot.SourceInfo{
+				{
+					UserName: "myuser",
+					Host:     "host-c",
+					Path:     "/some/path",
+				},
+			},
 		},
 		{
 			sourceInfo: snapshot.SourceInfo{
@@ -76,7 +86,7 @@ func TestPolicyManagerInheritanceTest(t *testing.T) {
 				Host:     "host-a",
 				Path:     "/some/path",
 			},
-			wantEffective: policyWithLabels(defaultPolicyWithKeepDaily(t, 44), map[string]string{
+			wantEffective: policyWithLabels(policyWithKeepDaily(t, DefaultPolicy, 44), map[string]string{
 				"type":       "policy",
 				"policyType": "path",
 				"hostname":   "host-a",
@@ -84,7 +94,13 @@ func TestPolicyManagerInheritanceTest(t *testing.T) {
 				"username":   "myuser",
 			}),
 			wantSources: []snapshot.SourceInfo{
+				{UserName: "myuser", Host: "host-a", Path: "/some/path"},
 				{Host: "host-a"},
+			},
+			wantDef: Definition{
+				RetentionPolicy: RetentionPolicyDefinition{
+					KeepDaily: snapshot.SourceInfo{Host: "host-a"},
+				},
 			},
 		},
 		{
@@ -93,7 +109,7 @@ func TestPolicyManagerInheritanceTest(t *testing.T) {
 				Host:     "host-a",
 				Path:     "/some/path2/nested",
 			},
-			wantEffective: policyWithLabels(defaultPolicyWithKeepDaily(t, 66), map[string]string{
+			wantEffective: policyWithLabels(policyWithKeepDaily(t, policyWithKeepMonthly(t, DefaultPolicy, 66), 44), map[string]string{
 				"type":       "policy",
 				"policyType": "path",
 				"hostname":   "host-a",
@@ -101,16 +117,24 @@ func TestPolicyManagerInheritanceTest(t *testing.T) {
 				"username":   "myuser",
 			}),
 			wantSources: []snapshot.SourceInfo{
+				{UserName: "myuser", Path: "/some/path2/nested", Host: "host-a"},
 				{UserName: "myuser", Path: "/some/path2", Host: "host-a"},
 				{Host: "host-a"},
+			},
+			wantDef: Definition{
+				RetentionPolicy: RetentionPolicyDefinition{
+					KeepDaily:   snapshot.SourceInfo{Host: "host-a"},
+					KeepMonthly: snapshot.SourceInfo{Host: "host-a", UserName: "myuser", Path: "/some/path2"},
+				},
 			},
 		},
 	}
 
 	for _, tc := range cases {
 		tc := tc
-		t.Run(fmt.Sprintf("%v", tc.sourceInfo), func(t *testing.T) {
-			pol, src, err := GetEffectivePolicy(ctx, env.RepositoryWriter, tc.sourceInfo)
+
+		t.Run(tc.sourceInfo.String(), func(t *testing.T) {
+			pol, def, src, err := GetEffectivePolicy(ctx, env.RepositoryWriter, tc.sourceInfo)
 			if err != nil {
 				t.Fatalf("err: %v", err)
 			}
@@ -129,6 +153,12 @@ func TestPolicyManagerInheritanceTest(t *testing.T) {
 				t.Errorf("got: %v", sources)
 				t.Errorf("want: %v", tc.wantSources)
 				t.Errorf("invalid sources: %v", diff)
+			}
+
+			if diff := cmp.Diff(*def, tc.wantDef); diff != "" {
+				t.Errorf("got: %v", def)
+				t.Errorf("want: %v", tc.wantDef)
+				t.Errorf("invalid definition: %v", diff)
 			}
 		})
 	}
@@ -155,11 +185,20 @@ func policyWithLabels(p *Policy, l map[string]string) *Policy {
 	return &p2
 }
 
-func defaultPolicyWithKeepDaily(t *testing.T, keepDaily int) *Policy {
+func policyWithKeepDaily(t *testing.T, base *Policy, keepDaily int) *Policy {
 	t.Helper()
 
-	p := clonePolicy(t, DefaultPolicy)
+	p := clonePolicy(t, base)
 	p.RetentionPolicy.KeepDaily = &keepDaily
+
+	return p
+}
+
+func policyWithKeepMonthly(t *testing.T, base *Policy, keepMonthly int) *Policy {
+	t.Helper()
+
+	p := clonePolicy(t, base)
+	p.RetentionPolicy.KeepMonthly = &keepMonthly
 
 	return p
 }
@@ -392,8 +431,8 @@ func TestApplicablePoliciesForSource(t *testing.T) {
 
 	for _, tc := range cases {
 		tc := tc
-		t.Run(fmt.Sprintf("%v", tc.si), func(t *testing.T) {
-			res, err := applicablePoliciesForSource(ctx, env.RepositoryWriter, tc.si)
+		t.Run(tc.si.String(), func(t *testing.T) {
+			res, err := applicablePoliciesForSource(ctx, env.RepositoryWriter, tc.si, nil)
 			if err != nil {
 				t.Fatalf("error in applicablePoliciesForSource(%v): %v", tc.si, err)
 			}

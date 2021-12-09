@@ -28,12 +28,12 @@ func (c *storageRcloneFlags) setup(_ storageProviderServices, cmd *kingpin.CmdCl
 	cmd.Flag("rclone-nowait-for-transfers", "Don't wait for transfers when closing storage").Hidden().BoolVar(&c.opt.NoWaitForTransfers)
 	cmd.Flag("list-parallelism", "Set list parallelism").Hidden().IntVar(&c.opt.ListParallelism)
 	cmd.Flag("atomic-writes", "Assume provider writes are atomic").Default("true").BoolVar(&c.opt.AtomicWrites)
+
+	commonThrottlingFlags(cmd, &c.opt.Limits)
 }
 
-func (c *storageRcloneFlags) connect(ctx context.Context, isNew bool) (blob.Storage, error) {
-	if c.connectFlat {
-		c.opt.DirectoryShards = []int{}
-	}
+func (c *storageRcloneFlags) connect(ctx context.Context, isCreate bool, formatVersion int) (blob.Storage, error) {
+	c.opt.DirectoryShards = initialDirectoryShards(c.connectFlat, formatVersion)
 
 	if c.embedRCloneConfigFile != "" {
 		cfg, err := os.ReadFile(c.embedRCloneConfigFile)
@@ -45,5 +45,5 @@ func (c *storageRcloneFlags) connect(ctx context.Context, isNew bool) (blob.Stor
 	}
 
 	// nolint:wrapcheck
-	return rclone.New(ctx, &c.opt)
+	return rclone.New(ctx, &c.opt, isCreate)
 }

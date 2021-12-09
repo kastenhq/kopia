@@ -2,16 +2,16 @@ import { faUserFriends } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import axios from 'axios';
 import React, { Component } from 'react';
-import Badge from 'react-bootstrap-v5/lib/Badge';
-import Button from 'react-bootstrap-v5/lib/Button';
-import Col from 'react-bootstrap-v5/lib/Col';
-import Dropdown from 'react-bootstrap-v5/lib/Dropdown';
-import Form from 'react-bootstrap-v5/lib/Form';
-import Row from 'react-bootstrap-v5/lib/Row';
+import Badge from 'react-bootstrap/Badge';
+import Button from 'react-bootstrap/Button';
+import Col from 'react-bootstrap/Col';
+import Dropdown from 'react-bootstrap/Dropdown';
+import Form from 'react-bootstrap/Form';
+import Row from 'react-bootstrap/Row';
+import { Link } from 'react-router-dom';
 import { handleChange } from './forms';
-import { PolicyEditor } from './PolicyEditor';
 import MyTable from './Table';
-import { compare, DirectorySelector, isAbsolutePath, ownerName, redirectIfNotConnected } from './uiutil';
+import { CLIEquivalent, compare, DirectorySelector, isAbsolutePath, ownerName, policyEditorURL, redirectIfNotConnected } from './uiutil';
 
 const localPolicies = "Local Policies"
 const allPolicies = "All Policies"
@@ -31,7 +31,6 @@ export class PoliciesTable extends Component {
             sources: [],
         };
 
-        this.editorClosed = this.editorClosed.bind(this);
         this.editPolicyForPath = this.editPolicyForPath.bind(this);
         this.handleChange = handleChange.bind(this);
         this.fetchPolicies = this.fetchPolicies.bind(this);
@@ -94,13 +93,6 @@ export class PoliciesTable extends Component {
         });
     }
 
-    editorClosed() {
-        this.setState({
-            editorTarget: null,
-        });
-        this.fetchPolicies();
-    }
-
     editPolicyForPath(e) {
         e.preventDefault();
 
@@ -113,13 +105,11 @@ export class PoliciesTable extends Component {
             return;
         }
 
-        this.setState({
-            editorTarget: {
-                userName: this.state.localUsername,
-                host: this.state.localHost,
-                path: this.state.policyPath,
-            },
-        })
+        this.props.history.push(policyEditorURL({
+            userName: this.state.localUsername,
+            host: this.state.localHost,
+            path: this.state.policyPath,
+        }));
     }
 
     selectOwner(h) {
@@ -233,12 +223,7 @@ export class PoliciesTable extends Component {
             id: 'edit',
             Header: '',
             width: 50,
-            Cell: x => <Button size="sm" onClick={() => {
-                this.setState({
-                    editorTarget: x.row.original.target,
-                    selectedRowIsNew: false,
-                })
-            }}>Edit</Button>,
+            Cell: x => <Link to={policyEditorURL(x.row.original.target)}><Button size="sm">Edit</Button></Link>,
         }]
 
         return <div className="padded">
@@ -277,14 +262,13 @@ export class PoliciesTable extends Component {
                 </Form>
             </div>}
 
-            {items.length > 0 ? <div className={this.state.editorTarget ? "hidden" : "normal"}>
+            {items.length > 0 ? <div>
                 <p>Found {items.length} policies matching criteria.</p>
                 <MyTable data={items} columns={columns} />
             </div> : ((this.state.selectedOwner === localPolicies && this.state.policyPath) ? <p>
                 No policy found for directory <code>{this.state.policyPath}</code>. Click <b>Set Policy</b> to define it.
             </p> : <p>No policies found.</p>)}
-
-            {this.state.editorTarget && <PolicyEditor host={this.state.editorTarget.host} userName={this.state.editorTarget.userName} path={this.state.editorTarget.path} close={this.editorClosed} />}
+            <CLIEquivalent command="policy list" />
         </div>;
     }
 }

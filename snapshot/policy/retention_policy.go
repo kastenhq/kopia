@@ -2,6 +2,9 @@ package policy
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kopia/kopia/snapshot"
@@ -23,6 +26,16 @@ type RetentionPolicy struct {
 	KeepWeekly  *int `json:"keepWeekly,omitempty"`
 	KeepMonthly *int `json:"keepMonthly,omitempty"`
 	KeepAnnual  *int `json:"keepAnnual,omitempty"`
+}
+
+// RetentionPolicyDefinition specifies which policy definition provided the value of a particular field.
+type RetentionPolicyDefinition struct {
+	KeepLatest  snapshot.SourceInfo `json:"keepLatest,omitempty"`
+	KeepHourly  snapshot.SourceInfo `json:"keepHourly,omitempty"`
+	KeepDaily   snapshot.SourceInfo `json:"keepDaily,omitempty"`
+	KeepWeekly  snapshot.SourceInfo `json:"keepWeekly,omitempty"`
+	KeepMonthly snapshot.SourceInfo `json:"keepMonthly,omitempty"`
+	KeepAnnual  snapshot.SourceInfo `json:"keepAnnual,omitempty"`
 }
 
 // ComputeRetentionReasons computes the reasons why each snapshot is retained, based on
@@ -143,6 +156,8 @@ func (r *RetentionPolicy) getRetentionReasons(i int, s *snapshot.Manifest, cutof
 		}
 	}
 
+	SortRetentionTags(keepReasons)
+
 	return keepReasons
 }
 
@@ -193,28 +208,126 @@ var defaultRetentionPolicy = RetentionPolicy{
 }
 
 // Merge applies default values from the provided policy.
-func (r *RetentionPolicy) Merge(src RetentionPolicy) {
-	if r.KeepLatest == nil {
-		r.KeepLatest = src.KeepLatest
+func (r *RetentionPolicy) Merge(src RetentionPolicy, def *RetentionPolicyDefinition, si snapshot.SourceInfo) {
+	mergeOptionalInt(&r.KeepLatest, src.KeepLatest, &def.KeepLatest, si)
+	mergeOptionalInt(&r.KeepHourly, src.KeepHourly, &def.KeepHourly, si)
+	mergeOptionalInt(&r.KeepDaily, src.KeepDaily, &def.KeepDaily, si)
+	mergeOptionalInt(&r.KeepWeekly, src.KeepWeekly, &def.KeepWeekly, si)
+	mergeOptionalInt(&r.KeepMonthly, src.KeepMonthly, &def.KeepMonthly, si)
+	mergeOptionalInt(&r.KeepAnnual, src.KeepAnnual, &def.KeepAnnual, si)
+}
+
+// CompactRetentionReasons returns compressed retention reasons given a list of retention reasons.
+func CompactRetentionReasons(reasons []string) []string {
+	reasonsByPrefix := map[string][]int{}
+
+	result := []string{}
+
+	for _, r := range reasons {
+		prefix, suffix := prefixSuffix(r)
+
+		n, err := strconv.Atoi(suffix)
+		if err != nil {
+			result = append(result, r)
+			continue
+		}
+
+		reasonsByPrefix[prefix] = append(reasonsByPrefix[prefix], n)
 	}
 
-	if r.KeepHourly == nil {
-		r.KeepHourly = src.KeepHourly
+	for prefix, v := range reasonsByPrefix {
+		result = appendRLE(result, prefix, v)
 	}
 
-	if r.KeepDaily == nil {
-		r.KeepDaily = src.KeepDaily
+	SortRetentionTags(result)
+
+	return result
+}
+
+func prefixSuffix(s string) (prefix, suffix string) {
+	if p := strings.LastIndex(s, "-"); p < 0 {
+		prefix = s
+		suffix = ""
+	} else {
+		prefix = s[0:p]
+		suffix = s[p+1:]
 	}
 
-	if r.KeepWeekly == nil {
-		r.KeepWeekly = src.KeepWeekly
+	return
+}
+
+func appendRLE(out []string, prefix string, numbers []int) []string {
+	sort.Ints(numbers)
+
+	runStart := numbers[0]
+	runEnd := numbers[0]
+
+	appendRun := func() {
+		if runStart == runEnd {
+			out = append(out, fmt.Sprintf("%v-%v", prefix, runStart))
+		} else {
+			out = append(out, fmt.Sprintf("%v-%v..%v", prefix, runStart, runEnd))
+		}
 	}
 
-	if r.KeepMonthly == nil {
-		r.KeepMonthly = src.KeepMonthly
+	for _, num := range numbers[1:] {
+		if num == runEnd+1 {
+			runEnd = num
+		} else {
+			appendRun()
+
+			runStart = num
+			runEnd = runStart
+		}
 	}
 
-	if r.KeepAnnual == nil {
-		r.KeepAnnual = src.KeepAnnual
+	appendRun()
+
+	return out
+}
+
+// CompactPins returns compressed pins reasons given a list of pins.
+func CompactPins(pins []string) []string {
+	cnt := map[string]int{}
+
+	for _, p := range pins {
+		cnt[p]++
 	}
+
+	result := []string{}
+
+	for k := range cnt {
+		result = append(result, k)
+	}
+
+	sort.Strings(result)
+
+	return result
+}
+
+var retentionPrefixSortValue = map[string]int{
+	"latest":  1,
+	"hourly":  2, // nolint:gomnd
+	"daily":   3, // nolint:gomnd
+	"weekly":  4, // nolint:gomnd
+	"monthly": 5, // nolint:gomnd
+	"annual":  6, // nolint:gomnd
+}
+
+// SortRetentionTags sorts the provided retention tags in canonical order.
+func SortRetentionTags(tags []string) {
+	sort.Slice(tags, func(i, j int) bool {
+		p1, s1 := prefixSuffix(tags[i])
+		p2, s2 := prefixSuffix(tags[j])
+
+		if l, r := retentionPrefixSortValue[p1], retentionPrefixSortValue[p2]; l != r {
+			return l < r
+		}
+
+		if l, r := p1, p2; l != r {
+			return p1 < p2
+		}
+
+		return s1 < s2
+	})
 }

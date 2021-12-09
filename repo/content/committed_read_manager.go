@@ -19,6 +19,7 @@ import (
 	"github.com/kopia/kopia/internal/ownwrites"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/filesystem"
+	"github.com/kopia/kopia/repo/blob/sharded"
 	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/repo/hashing"
 	"github.com/kopia/kopia/repo/logging"
@@ -31,6 +32,13 @@ const indexRecoverPostambleSize = 8192
 const indexRefreshFrequency = 15 * time.Minute
 
 const ownWritesCacheDuration = 15 * time.Minute
+
+// constants below specify how long to prevent cache entries from expiring.
+const (
+	DefaultMetadataCacheSweepAge = 24 * time.Hour
+	DefaultDataCacheSweepAge     = 10 * time.Minute
+	DefaultIndexCacheSweepAge    = 1 * time.Hour
+)
 
 var cachedIndexBlobPrefixes = []blob.ID{
 	IndexBlobPrefix,
@@ -324,7 +332,7 @@ func newListCache(ctx context.Context, st blob.Storage, caching *CachingOptions)
 		return nil, errors.Wrap(err, "unable to get list cache backing storage")
 	}
 
-	return listcache.NewWrapper(st, cacheSt, cachedIndexBlobPrefixes, caching.HMACSecret, time.Duration(caching.MaxListCacheDurationSec)*time.Second), nil
+	return listcache.NewWrapper(st, cacheSt, cachedIndexBlobPrefixes, caching.HMACSecret, caching.MaxListCacheDuration.DurationOrDefault(0)), nil
 }
 
 func newCacheBackingStorage(ctx context.Context, caching *CachingOptions, subdir string) (blob.Storage, error) {
@@ -342,9 +350,11 @@ func newCacheBackingStorage(ctx context.Context, caching *CachingOptions, subdir
 
 	// nolint:wrapcheck
 	return filesystem.New(ctx, &filesystem.Options{
-		Path:            blobListCacheDir,
-		DirectoryShards: []int{},
-	})
+		Path: blobListCacheDir,
+		Options: sharded.Options{
+			DirectoryShards: []int{},
+		},
+	}, false)
 }
 
 func (sm *SharedManager) namedLogger(n string) logging.Logger {
@@ -361,7 +371,10 @@ func (sm *SharedManager) setupReadManagerCaches(ctx context.Context, caching *Ca
 		return errors.Wrap(err, "unable to initialize data cache storage")
 	}
 
-	dataCache, err := newContentCacheForData(ctx, sm.st, dataCacheStorage, caching.MaxCacheSizeBytes, caching.HMACSecret)
+	dataCache, err := newContentCacheForData(ctx, sm.st, dataCacheStorage, cache.SweepSettings{
+		MaxSizeBytes: caching.MaxCacheSizeBytes,
+		MinSweepAge:  caching.MinContentSweepAge.DurationOrDefault(DefaultDataCacheSweepAge),
+	}, caching.HMACSecret)
 	if err != nil {
 		return errors.Wrap(err, "unable to initialize content cache")
 	}
@@ -376,7 +389,10 @@ func (sm *SharedManager) setupReadManagerCaches(ctx context.Context, caching *Ca
 		return errors.Wrap(err, "unable to initialize data cache storage")
 	}
 
-	metadataCache, err := newContentCacheForMetadata(ctx, sm.st, metadataCacheStorage, metadataCacheSize)
+	metadataCache, err := newContentCacheForMetadata(ctx, sm.st, metadataCacheStorage, cache.SweepSettings{
+		MaxSizeBytes: metadataCacheSize,
+		MinSweepAge:  caching.MinMetadataSweepAge.DurationOrDefault(DefaultMetadataCacheSweepAge),
+	})
 	if err != nil {
 		return errors.Wrap(err, "unable to initialize metadata cache")
 	}
@@ -431,7 +447,7 @@ func (sm *SharedManager) setupReadManagerCaches(ctx context.Context, caching *Ca
 	// once everything is ready, set it up
 	sm.contentCache = dataCache
 	sm.metadataCache = metadataCache
-	sm.committedContents = newCommittedContentIndex(caching, uint32(sm.crypter.Encryptor.Overhead()), sm.indexVersion, sm.enc.getEncryptedBlob, sm.namedLogger("committed-content-index"))
+	sm.committedContents = newCommittedContentIndex(caching, uint32(sm.crypter.Encryptor.Overhead()), sm.indexVersion, sm.enc.getEncryptedBlob, sm.namedLogger("committed-content-index"), caching.MinIndexSweepAge.DurationOrDefault(DefaultIndexCacheSweepAge))
 
 	return nil
 }

@@ -1,5 +1,10 @@
 package rclone
 
+import (
+	"github.com/kopia/kopia/repo/blob/sharded"
+	"github.com/kopia/kopia/repo/blob/throttling"
+)
+
 // Options defines options for RClone storage.
 type Options struct {
 	RemotePath         string   `json:"remotePath"`                   // remote:path supported by RClone
@@ -9,8 +14,9 @@ type Options struct {
 	StartupTimeout     int      `json:"startupTimeout,omitempty"`     // time to wait for rclone to start
 	Debug              bool     `json:"debug,omitempty"`              // log rclone output
 	NoWaitForTransfers bool     `json:"noWaitForTransfers,omitempty"` // when set to true, don't wait for transfers to finish when closing
-	DirectoryShards    []int    `json:"dirShards"`
 	EmbeddedConfig     string   `json:"embeddedConfig,omitempty"`
-	ListParallelism    int      `json:"listParallelism,omitempty"`
 	AtomicWrites       bool     `json:"atomicWrites"`
+
+	sharded.Options
+	throttling.Limits
 }

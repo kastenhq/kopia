@@ -32,7 +32,7 @@ func (c *commandRepositoryConnect) setup(svc advancedAppServices, parent command
 		f.setup(svc, cc)
 		cc.Action(func(_ *kingpin.ParseContext) error {
 			ctx := svc.rootContext()
-			st, err := f.connect(ctx, false)
+			st, err := f.connect(ctx, false, 0)
 			if err != nil {
 				return errors.Wrap(err, "can't connect to storage")
 			}
@@ -90,7 +90,7 @@ func (c *connectOptions) toRepoConnectOptions() *repo.ConnectOptions {
 			CacheDirectory:            c.connectCacheDirectory,
 			MaxCacheSizeBytes:         c.connectMaxCacheSizeMB << 20,         //nolint:gomnd
 			MaxMetadataCacheSizeBytes: c.connectMaxMetadataCacheSizeMB << 20, //nolint:gomnd
-			MaxListCacheDurationSec:   int(c.connectMaxListCacheDuration.Seconds()),
+			MaxListCacheDuration:      content.DurationSeconds(c.connectMaxListCacheDuration.Seconds()),
 		},
 		ClientOptions: repo.ClientOptions{
 			Hostname:                c.connectHostname,

@@ -58,7 +58,7 @@ func (c *commandRepositoryCreate) setup(svc advancedAppServices, parent commandP
 		f.setup(svc, cc)
 		cc.Action(func(_ *kingpin.ParseContext) error {
 			ctx := svc.rootContext()
-			st, err := f.connect(ctx, true)
+			st, err := f.connect(ctx, true, c.createFormatVersion)
 			if err != nil {
 				return errors.Wrap(err, "can't connect to storage")
 			}
@@ -157,8 +157,8 @@ func (c *commandRepositoryCreate) populateRepository(ctx context.Context, passwo
 			return errors.Wrap(err, "unable to set global policy")
 		}
 
-		printRetentionPolicy(&c.out, policy.DefaultPolicy, nil)
-		printCompressionPolicy(&c.out, policy.DefaultPolicy, nil)
+		printRetentionPolicy(&c.out, policy.DefaultPolicy, &policy.Definition{})
+		printCompressionPolicy(&c.out, policy.DefaultPolicy, &policy.Definition{})
 
 		c.out.printStderr("\nTo find more information about default policy run 'kopia policy get'.\nTo change the policy use 'kopia policy set' command.\n")
 

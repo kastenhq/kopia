@@ -15,6 +15,7 @@ import (
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/repo/blob/sharded"
 )
 
 func TestFileStorage(t *testing.T) {
@@ -36,15 +37,17 @@ func TestFileStorage(t *testing.T) {
 		path := testutil.TempDirectory(t)
 
 		r, err := New(ctx, &Options{
-			Path:            path,
-			DirectoryShards: shardSpec,
-		})
+			Path: path,
+			Options: sharded.Options{
+				DirectoryShards: shardSpec,
+			},
+		}, true)
 
 		if r == nil || err != nil {
 			t.Errorf("unexpected result: %v %v", r, err)
 		}
 
-		blobtesting.VerifyStorage(ctx, t, r)
+		blobtesting.VerifyStorage(ctx, t, r, blob.PutOptions{})
 		blobtesting.AssertConnectionInfoRoundTrips(ctx, t, r)
 		require.NoError(t, providervalidation.ValidateProvider(ctx, r, blobtesting.TestValidationOptions))
 
@@ -70,18 +73,18 @@ func TestFileStorageTouch(t *testing.T) {
 
 	r, err := New(ctx, &Options{
 		Path: path,
-	})
+	}, true)
 
 	if r == nil || err != nil {
 		t.Errorf("unexpected result: %v %v", r, err)
 	}
 
 	fs := r.(*fsStorage)
-	assertNoError(t, fs.PutBlob(ctx, t1, gather.FromSlice([]byte{1})))
+	assertNoError(t, fs.PutBlob(ctx, t1, gather.FromSlice([]byte{1}), blob.PutOptions{}))
 	time.Sleep(2 * time.Second) // sleep a bit to accommodate Apple filesystems with low timestamp resolution
-	assertNoError(t, fs.PutBlob(ctx, t2, gather.FromSlice([]byte{1})))
+	assertNoError(t, fs.PutBlob(ctx, t2, gather.FromSlice([]byte{1}), blob.PutOptions{}))
 	time.Sleep(2 * time.Second)
-	assertNoError(t, fs.PutBlob(ctx, t3, gather.FromSlice([]byte{1})))
+	assertNoError(t, fs.PutBlob(ctx, t3, gather.FromSlice([]byte{1}), blob.PutOptions{}))
 	time.Sleep(2 * time.Second) // sleep a bit to accommodate Apple filesystems with low timestamp resolution
 
 	verifyBlobTimestampOrder(t, fs, t1, t2, t3)
@@ -112,7 +115,7 @@ func TestFileStorageConcurrency(t *testing.T) {
 
 	st, err := New(ctx, &Options{
 		Path: path,
-	})
+	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,16 +140,18 @@ func TestFilesystemStorageDirectoryShards(t *testing.T) {
 	dataDir := testutil.TempDirectory(t)
 
 	st, err := New(ctx, &Options{
-		Path:            dataDir,
-		DirectoryShards: []int{5, 2},
-	})
+		Path: dataDir,
+		Options: sharded.Options{
+			DirectoryShards: []int{5, 2},
+		},
+	}, true)
 	if err != nil {
 		t.Fatalf("unable to connect to rclone backend: %v", err)
 	}
 
 	defer st.Close(ctx)
 
-	require.NoError(t, st.PutBlob(ctx, "someblob1234567812345678", gather.FromSlice([]byte{1, 2, 3})))
+	require.NoError(t, st.PutBlob(ctx, "someblob1234567812345678", gather.FromSlice([]byte{1, 2, 3}), blob.PutOptions{}))
 	require.FileExists(t, filepath.Join(dataDir, "someb", "lo", "b1234567812345678.f"))
 }
 

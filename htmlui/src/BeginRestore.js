@@ -1,9 +1,9 @@
 import axios from 'axios';
 import React, { Component } from 'react';
-import Button from 'react-bootstrap-v5/lib/Button';
-import Form from 'react-bootstrap-v5/lib/Form';
-import Row from 'react-bootstrap-v5/lib/Row';
-import Col from 'react-bootstrap-v5/lib/Col';
+import Button from 'react-bootstrap/Button';
+import Form from 'react-bootstrap/Form';
+import Row from 'react-bootstrap/Row';
+import Col from 'react-bootstrap/Col';
 import { Link } from "react-router-dom";
 import { handleChange, RequiredBoolean, RequiredField, RequiredNumberField, validateRequiredFields } from './forms';
 import { errorAlert, GoBackButton } from './uiutil';
@@ -23,6 +23,7 @@ export class BeginRestore extends Component {
             overwriteDirectories: false,
             overwriteSymlinks: false,
             ignorePermissionErrors: true,
+            writeFilesAtomically: false,
             restoreDirEntryAtDepth: 1000,
             minSizeForPlaceholder: 0,
             restoreTask: "",
@@ -67,6 +68,7 @@ export class BeginRestore extends Component {
                 overwriteFiles: this.state.overwriteFiles,
                 overwriteDirectories: this.state.overwriteDirectories,
                 overwriteSymlinks: this.state.overwriteSymlinks,
+                writeFilesAtomically: this.state.writeFilesAtomically
             }
         }
 
@@ -122,6 +124,9 @@ export class BeginRestore extends Component {
                 </Row>
                 <Row>
                     {RequiredBoolean(this, "Overwrite Symbolic Links", "overwriteSymlinks")}
+                </Row>
+                <Row>
+                    {RequiredBoolean(this, "Write files atomically", "writeFilesAtomically")}
                 </Row>
                 <Row>
                     <Col><hr/></Col>

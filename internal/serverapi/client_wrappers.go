@@ -2,14 +2,17 @@ package serverapi
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/apiclient"
 	"github.com/kopia/kopia/internal/uitask"
+	"github.com/kopia/kopia/repo/blob/throttling"
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot"
+	"github.com/kopia/kopia/snapshot/policy"
 )
 
 // CreateSnapshotSource creates snapshot source with a given path.
@@ -96,6 +99,25 @@ func Status(ctx context.Context, c *apiclient.KopiaAPIClient) (*StatusResponse, 
 	return resp, nil
 }
 
+// GetThrottlingLimits gets the throttling limits.
+func GetThrottlingLimits(ctx context.Context, c *apiclient.KopiaAPIClient) (throttling.Limits, error) {
+	resp := throttling.Limits{}
+	if err := c.Get(ctx, "repo/throttle", nil, &resp); err != nil {
+		return throttling.Limits{}, errors.Wrap(err, "throttling")
+	}
+
+	return resp, nil
+}
+
+// SetThrottlingLimits sets the throttling limits.
+func SetThrottlingLimits(ctx context.Context, c *apiclient.KopiaAPIClient, l throttling.Limits) error {
+	if err := c.Put(ctx, "repo/throttle", &l, &Empty{}); err != nil {
+		return errors.Wrap(err, "throttling")
+	}
+
+	return nil
+}
+
 // ListSources lists the snapshot sources managed by the server.
 func ListSources(ctx context.Context, c *apiclient.KopiaAPIClient, match *snapshot.SourceInfo) (*SourcesResponse, error) {
 	resp := &SourcesResponse{}
@@ -106,10 +128,16 @@ func ListSources(ctx context.Context, c *apiclient.KopiaAPIClient, match *snapsh
 	return resp, nil
 }
 
-// ListSnapshots lists the snapshots managed by the server for a given source filter.
-func ListSnapshots(ctx context.Context, c *apiclient.KopiaAPIClient, match *snapshot.SourceInfo) (*SnapshotsResponse, error) {
+// ListSnapshots lists the snapshots managed by the server for a given source source.
+func ListSnapshots(ctx context.Context, c *apiclient.KopiaAPIClient, src snapshot.SourceInfo, all bool) (*SnapshotsResponse, error) {
 	resp := &SnapshotsResponse{}
-	if err := c.Get(ctx, "snapshots"+matchSourceParameters(match), nil, resp); err != nil {
+
+	u := "snapshots" + matchSourceParameters(&src)
+	if all {
+		u += "&all=1"
+	}
+
+	if err := c.Get(ctx, u, nil, resp); err != nil {
 		return nil, errors.Wrap(err, "ListSnapshots")
 	}
 
@@ -121,6 +149,41 @@ func ListPolicies(ctx context.Context, c *apiclient.KopiaAPIClient, match *snaps
 	resp := &PoliciesResponse{}
 	if err := c.Get(ctx, "policies"+matchSourceParameters(match), nil, resp); err != nil {
 		return nil, errors.Wrap(err, "ListPolicies")
+	}
+
+	return resp, nil
+}
+
+func policyTargetURLParamters(si snapshot.SourceInfo) string {
+	return fmt.Sprintf("userName=%v&host=%v&path=%v", si.UserName, si.Host, si.Path)
+}
+
+// SetPolicy sets the policy.
+func SetPolicy(ctx context.Context, c *apiclient.KopiaAPIClient, si snapshot.SourceInfo, pol *policy.Policy) error {
+	resp := &Empty{}
+	if err := c.Put(ctx, "policy?"+policyTargetURLParamters(si), pol, resp); err != nil {
+		return errors.Wrap(err, "SetPolicy")
+	}
+
+	return nil
+}
+
+// ResolvePolicy resolves the policy.
+func ResolvePolicy(ctx context.Context, c *apiclient.KopiaAPIClient, si snapshot.SourceInfo, req *ResolvePolicyRequest) (*ResolvePolicyResponse, error) {
+	resp := &ResolvePolicyResponse{}
+
+	if err := c.Post(ctx, "policy/resolve?"+policyTargetURLParamters(si), req, resp); err != nil {
+		return nil, errors.Wrap(err, "ResolvePolicy")
+	}
+
+	return resp, nil
+}
+
+// ListTasks lists the tasks.
+func ListTasks(ctx context.Context, c *apiclient.KopiaAPIClient) (*TaskListResponse, error) {
+	resp := &TaskListResponse{}
+	if err := c.Get(ctx, "tasks", nil, resp); err != nil {
+		return nil, errors.Wrap(err, "ListTasks")
 	}
 
 	return resp, nil

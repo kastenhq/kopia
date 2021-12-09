@@ -37,9 +37,8 @@ type Impl interface {
 type Storage struct {
 	Impl Impl
 
-	RootPath        string
-	Shards          []int
-	ListParallelism int
+	RootPath string
+	Options
 
 	parametersMutex sync.Mutex
 	parameters      *Parameters
@@ -180,7 +179,11 @@ func (s *Storage) GetMetadata(ctx context.Context, blobID blob.ID) (blob.Metadat
 }
 
 // PutBlob implements blob.Storage.
-func (s *Storage) PutBlob(ctx context.Context, blobID blob.ID, data blob.Bytes) error {
+func (s *Storage) PutBlob(ctx context.Context, blobID blob.ID, data blob.Bytes, opts blob.PutOptions) error {
+	if opts.HasRetentionOptions() {
+		return errors.New("setting blob-retention is not supported")
+	}
+
 	dirPath, filePath, err := s.GetShardedPathAndFilePath(ctx, blobID)
 	if err != nil {
 		return errors.Wrap(err, "error determining sharded path")
@@ -232,7 +235,7 @@ func (s *Storage) getParameters(ctx context.Context) (*Parameters, error) {
 		}
 
 		// blob.ErrBlobNotFound is ok, initialize parameters from defaults.
-		s.parameters = DefaultParameters(s.Shards)
+		s.parameters = DefaultParameters(s.DirectoryShards)
 
 		tmp.Reset()
 
@@ -277,4 +280,21 @@ func (s *Storage) GetShardedPathAndFilePath(ctx context.Context, blobID blob.ID)
 	filePath = path.Join(shardPath, s.makeFileName(blobID))
 
 	return
+}
+
+// New returns new sharded.Storage helper.
+func New(impl Impl, rootPath string, opt Options, isCreate bool) Storage {
+	if opt.DirectoryShards == nil {
+		if isCreate {
+			opt.DirectoryShards = []int{1, 3}
+		} else {
+			opt.DirectoryShards = []int{3, 3}
+		}
+	}
+
+	return Storage{
+		Impl:     impl,
+		RootPath: rootPath,
+		Options:  opt,
+	}
 }

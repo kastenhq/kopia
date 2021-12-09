@@ -58,7 +58,7 @@ func (c *commandRepositorySyncTo) setup(svc advancedAppServices, parent commandP
 		f.setup(svc, cc)
 		cc.Action(func(_ *kingpin.ParseContext) error {
 			ctx := svc.rootContext()
-			st, err := f.connect(ctx, false)
+			st, err := f.connect(ctx, false, 0)
 			if err != nil {
 				return errors.Wrap(err, "can't connect to storage")
 			}
@@ -246,7 +246,7 @@ func (c *commandRepositorySyncTo) runSyncBlobs(ctx context.Context, src blob.Rea
 
 				if est, ok := tt.Estimate(float64(bytesCopied), float64(totalBytes)); ok {
 					eta = fmt.Sprintf("%v (%v)", est.Remaining, formatTimestamp(est.EstimatedEndTime))
-					speed = units.BitsPerSecondsString(est.SpeedPerSecond * 8) //nolint:gomnd
+					speed = units.BytesPerSecondsString(est.SpeedPerSecond)
 				}
 
 				c.outputSyncProgress(
@@ -303,7 +303,7 @@ func (c *commandRepositorySyncTo) syncCopyBlob(ctx context.Context, m blob.Metad
 		return errors.Wrapf(err, "error reading blob '%v' from source", m.BlobID)
 	}
 
-	if err := dst.PutBlob(ctx, m.BlobID, data.Bytes()); err != nil {
+	if err := dst.PutBlob(ctx, m.BlobID, data.Bytes(), blob.PutOptions{}); err != nil {
 		return errors.Wrapf(err, "error writing blob '%v' to destination", m.BlobID)
 	}
 
@@ -350,7 +350,7 @@ func (c *commandRepositorySyncTo) ensureRepositoriesHaveSameFormatBlob(ctx conte
 				return errors.Errorf("destination repository does not have a format blob")
 			}
 
-			return errors.Wrap(dst.PutBlob(ctx, repo.FormatBlobID, srcData.Bytes()), "error saving format blob")
+			return errors.Wrap(dst.PutBlob(ctx, repo.FormatBlobID, srcData.Bytes(), blob.PutOptions{}), "error saving format blob")
 		}
 
 		return errors.Wrap(err, "error reading destination repository format blob")

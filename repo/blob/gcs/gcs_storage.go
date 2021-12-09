@@ -10,7 +10,6 @@ import (
 	"time"
 
 	gcsclient "cloud.google.com/go/storage"
-	"github.com/efarrer/iothrottler"
 	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -20,7 +19,6 @@ import (
 
 	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/iocopy"
-	"github.com/kopia/kopia/internal/throttle"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/retrying"
 )
@@ -33,12 +31,8 @@ const (
 type gcsStorage struct {
 	Options
 
-	ctx           context.Context
 	storageClient *gcsclient.Client
 	bucket        *gcsclient.BucketHandle
-
-	downloadThrottler *iothrottler.IOThrottlerPool
-	uploadThrottler   *iothrottler.IOThrottlerPool
 }
 
 func (gcs *gcsStorage) GetBlob(ctx context.Context, b blob.ID, offset, length int64, output blob.OutputBuffer) error {
@@ -47,7 +41,7 @@ func (gcs *gcsStorage) GetBlob(ctx context.Context, b blob.ID, offset, length in
 	}
 
 	attempt := func() error {
-		reader, err := gcs.bucket.Object(gcs.getObjectNameString(b)).NewRangeReader(gcs.ctx, offset, length)
+		reader, err := gcs.bucket.Object(gcs.getObjectNameString(b)).NewRangeReader(ctx, offset, length)
 		if err != nil {
 			return errors.Wrap(err, "NewRangeReader")
 		}
@@ -97,7 +91,11 @@ func translateError(err error) error {
 	}
 }
 
-func (gcs *gcsStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes) error {
+func (gcs *gcsStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes, opts blob.PutOptions) error {
+	if opts.HasRetentionOptions() {
+		return errors.New("setting blob-retention is not supported")
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 
 	obj := gcs.bucket.Object(gcs.getObjectNameString(b))
@@ -126,7 +124,7 @@ func (gcs *gcsStorage) SetTime(ctx context.Context, b blob.ID, t time.Time) erro
 }
 
 func (gcs *gcsStorage) DeleteBlob(ctx context.Context, b blob.ID) error {
-	err := translateError(gcs.bucket.Object(gcs.getObjectNameString(b)).Delete(gcs.ctx))
+	err := translateError(gcs.bucket.Object(gcs.getObjectNameString(b)).Delete(ctx))
 	if errors.Is(err, blob.ErrBlobNotFound) {
 		return nil
 	}
@@ -139,7 +137,7 @@ func (gcs *gcsStorage) getObjectNameString(blobID blob.ID) string {
 }
 
 func (gcs *gcsStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback func(blob.Metadata) error) error {
-	lst := gcs.bucket.Objects(gcs.ctx, &gcsclient.Query{
+	lst := gcs.bucket.Objects(ctx, &gcsclient.Query{
 		Prefix: gcs.getObjectNameString(prefix),
 	})
 
@@ -182,16 +180,8 @@ func (gcs *gcsStorage) FlushCaches(ctx context.Context) error {
 	return nil
 }
 
-func toBandwidth(bytesPerSecond int) iothrottler.Bandwidth {
-	if bytesPerSecond <= 0 {
-		return iothrottler.Unlimited
-	}
-
-	return iothrottler.Bandwidth(bytesPerSecond) * iothrottler.BytesPerSecond
-}
-
 func tokenSourceFromCredentialsFile(ctx context.Context, fn string, scopes ...string) (oauth2.TokenSource, error) {
-	data, err := os.ReadFile(fn)
+	data, err := os.ReadFile(fn) //nolint:gosec
 	if err != nil {
 		return nil, errors.Wrap(err, "error reading credentials file")
 	}
@@ -241,11 +231,7 @@ func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 		return nil, errors.Wrap(err, "unable to initialize token source")
 	}
 
-	downloadThrottler := iothrottler.NewIOThrottlerPool(toBandwidth(opt.MaxDownloadSpeedBytesPerSecond))
-	uploadThrottler := iothrottler.NewIOThrottlerPool(toBandwidth(opt.MaxUploadSpeedBytesPerSecond))
-
 	hc := oauth2.NewClient(ctx, ts)
-	hc.Transport = throttle.NewRoundTripper(hc.Transport, downloadThrottler, uploadThrottler)
 
 	cli, err := gcsclient.NewClient(ctx, option.WithHTTPClient(hc))
 	if err != nil {
@@ -257,12 +243,9 @@ func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 	}
 
 	gcs := &gcsStorage{
-		Options:           *opt,
-		ctx:               ctx,
-		storageClient:     cli,
-		bucket:            cli.Bucket(opt.BucketName),
-		downloadThrottler: downloadThrottler,
-		uploadThrottler:   uploadThrottler,
+		Options:       *opt,
+		storageClient: cli,
+		bucket:        cli.Bucket(opt.BucketName),
 	}
 
 	// verify GCS connection is functional by listing blobs in a bucket, which will fail if the bucket
@@ -285,7 +268,7 @@ func init() {
 		func() interface{} {
 			return &Options{}
 		},
-		func(ctx context.Context, o interface{}) (blob.Storage, error) {
+		func(ctx context.Context, o interface{}, isCreate bool) (blob.Storage, error) {
 			return New(ctx, o.(*Options))
 		})
 }

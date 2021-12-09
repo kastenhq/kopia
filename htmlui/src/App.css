@@ -18,12 +18,39 @@ body {
   font-weight: bold;
 }
 
-.form-label {
-  padding-top: 5px;
+.label-help {
+  padding-top: 4px;
+  padding-bottom: 8px;
+  color: #666;
+  font-size: 90%;
 }
 
 .required {
   font-weight: bold;
+}
+
+.policyFieldColumn {
+  margin-top: 4px;
+}
+
+.policyEffectiveValue {
+  background-color: #fff;
+}
+
+.policyEditorHeader {
+  font-size: 110%;
+  font-weight: bold;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.policyValue {
+  background-color: #f8f8f8;
+}
+
+.policyField {
+  font-weight: bold;
+  color:#004;
 }
 
 .providerParams {
@@ -52,16 +79,8 @@ body {
   margin-bottom: 10px;
 }
 
-.padded {
-  padding: 10px;
-}
-
-.padded-top {
-  padding-top: 10px;
-}
-
 .debug-json {
-  font-size: 60%;
+  font-size: 80%;
 }
 
 .error {
@@ -74,6 +93,17 @@ body {
 
 .hidden {
   display: none;
+}
+
+.accordion-button {
+  padding: 10px;
+  font-weight: bold;
+}
+
+.accordion-button.collapsed {
+  padding: 10px;
+  font-weight: bold;
+  background-color: #f8f8ff;
 }
 
 div.tab-body {
@@ -113,8 +143,7 @@ div.tab-body {
 }
 
 .logs-table {
-  border: 1px solid #ccd;
-  background-color: #f0f0ff;
+  background-color: #f8f8ff;
   font-family: monospace;
   font-size: 12px;
   font-weight: bold;
@@ -145,14 +174,15 @@ div.tab-body {
   padding-left: 40px;
 }
 
-.estimate-results {
-  margin: 10px;
-  margin-left: 15px;
-  padding: 15px;
-  border: 1px solid #ccc;
-  background-color: #f8f8ff;
+.estimateResults {
+  color: #008;
+  font-size: 95%;
 }
 
 .list-actions {
   min-height: 40px;
+}
+
+.cli-equivalent {
+  font-family: monospace;
 }

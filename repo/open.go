@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/kopia/kopia/repo/blob"
 	loggingwrapper "github.com/kopia/kopia/repo/blob/logging"
 	"github.com/kopia/kopia/repo/blob/readonly"
+	"github.com/kopia/kopia/repo/blob/throttling"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/logging"
 	"github.com/kopia/kopia/repo/manifest"
@@ -32,6 +34,13 @@ const CacheDirMarkerHeader = "Signature: 8a477f597d28d172789f06886806bc55"
 // defaultFormatBlobCacheDuration is the duration for which we treat cached kopia.repository
 // as valid.
 const defaultFormatBlobCacheDuration = 15 * time.Minute
+
+// throttlingWindow is the duration window during which the throttling token bucket fully replenishes.
+// the maximum number of tokens in the bucket is multiplied by the number of seconds.
+const throttlingWindow = 60 * time.Second
+
+// start with 10% of tokens in the bucket.
+const throttleBucketInitialFill = 0.1
 
 // localCacheIntegrityHMACSecretLength length of HMAC secret protecting local cache items.
 const localCacheIntegrityHMACSecretLength = 16
@@ -113,7 +122,10 @@ func getContentCacheOrNil(ctx context.Context, opt *content.CachingOptions, pass
 		return nil, errors.Wrap(err, "unable to initialize protection")
 	}
 
-	pc, err := cache.NewPersistentCache(ctx, "cache-storage", cs, prot, opt.MaxCacheSizeBytes, cache.DefaultTouchThreshold, cache.DefaultSweepFrequency)
+	pc, err := cache.NewPersistentCache(ctx, "cache-storage", cs, prot, cache.SweepSettings{
+		MaxSizeBytes: opt.MaxCacheSizeBytes,
+		MinSweepAge:  opt.MinContentSweepAge.DurationOrDefault(content.DefaultDataCacheSweepAge),
+	})
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to open persistent cache")
 	}
@@ -141,7 +153,7 @@ func openDirect(ctx context.Context, configFile string, lc *LocalConfig, passwor
 		return nil, errors.Errorf("storage not set in the configuration file")
 	}
 
-	st, err := blob.NewStorage(ctx, *lc.Storage)
+	st, err := blob.NewStorage(ctx, *lc.Storage, false)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot open storage")
 	}
@@ -164,6 +176,7 @@ func openDirect(ctx context.Context, configFile string, lc *LocalConfig, passwor
 }
 
 // openWithConfig opens the repository with a given configuration, avoiding the need for a config file.
+// nolint:funlen
 func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, password string, options *Options, caching *content.CachingOptions, configFile string) (DirectRepository, error) {
 	caching = caching.CloneOrDefault()
 
@@ -222,6 +235,11 @@ func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 		cmOpts.RepositoryFormatBytes = nil
 	}
 
+	st, throttler, err := addThrottler(ctx, st)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to add throttler")
+	}
+
 	scm, err := content.NewSharedManager(ctx, st, fo, caching, cmOpts)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to create shared content manager")
@@ -243,11 +261,12 @@ func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 	}
 
 	dr := &directRepository{
-		cmgr:  cm,
-		omgr:  om,
-		blobs: st,
-		mmgr:  manifests,
-		sm:    scm,
+		cmgr:      cm,
+		omgr:      om,
+		blobs:     st,
+		mmgr:      manifests,
+		sm:        scm,
+		throttler: throttler,
 		directRepositoryParameters: directRepositoryParameters{
 			uniqueID:            f.UniqueID,
 			cachingOptions:      *caching,
@@ -262,6 +281,33 @@ func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 	}
 
 	return dr, nil
+}
+
+func addThrottler(ctx context.Context, st blob.Storage) (blob.Storage, throttling.SettableThrottler, error) {
+	throttler, err := throttling.NewThrottler(
+		throttlingLimitsFromConnectionInfo(ctx, st.ConnectionInfo()), throttlingWindow, throttleBucketInitialFill)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "unable to create throttler")
+	}
+
+	return throttling.NewWrapper(st, throttler), throttler, nil
+}
+
+func throttlingLimitsFromConnectionInfo(ctx context.Context, ci blob.ConnectionInfo) throttling.Limits {
+	v, err := json.Marshal(ci.Config)
+	if err != nil {
+		return throttling.Limits{}
+	}
+
+	var l throttling.Limits
+
+	if err := json.Unmarshal(v, &l); err != nil {
+		return throttling.Limits{}
+	}
+
+	log(ctx).Debugw("throttling limits from connection info", "limits", l)
+
+	return l
 }
 
 func writeCacheMarker(cacheDir string) error {
@@ -316,7 +362,7 @@ func readFormatBlobBytesFromCache(ctx context.Context, cachedFile string, validD
 		return nil, errors.Errorf("cached file too old")
 	}
 
-	return os.ReadFile(cachedFile) //nolint:wrapcheck
+	return os.ReadFile(cachedFile) //nolint:wrapcheck,gosec
 }
 
 func readAndCacheFormatBlobBytes(ctx context.Context, st blob.Storage, cacheDirectory string, validDuration time.Duration) ([]byte, error) {

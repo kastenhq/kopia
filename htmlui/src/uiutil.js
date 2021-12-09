@@ -1,12 +1,13 @@
-import { faBan, faCheck, faChevronLeft, faExclamationCircle, faExclamationTriangle, faFolderOpen, faWindowClose } from '@fortawesome/free-solid-svg-icons';
+import { faBan, faCheck, faChevronLeft, faCopy, faExclamationCircle, faExclamationTriangle, faFolderOpen, faTerminal, faWindowClose } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import axios from 'axios';
-import React from 'react';
-import Button from 'react-bootstrap-v5/lib/Button';
-import Form from 'react-bootstrap-v5/lib/Form';
-import FormControl from 'react-bootstrap-v5/lib/FormControl';
-import InputGroup from 'react-bootstrap-v5/lib/InputGroup';
-import Spinner from 'react-bootstrap-v5/lib/Spinner';
+import React, { useState } from 'react';
+import Button from 'react-bootstrap/Button';
+import Form from 'react-bootstrap/Form';
+import FormControl from 'react-bootstrap/FormControl';
+import InputGroup from 'react-bootstrap/InputGroup';
+import Spinner from 'react-bootstrap/Spinner';
+import { Link } from 'react-router-dom';
 
 const base10UnitPrefixes = ["", "K", "M", "G", "T"];
 
@@ -137,7 +138,7 @@ export function taskStatusSymbol(task) {
         case "RUNNING":
             return <>
                 <Spinner animation="border" variant="primary" size="sm" /> Running for {dur}
-            &nbsp;
+                &nbsp;
                 <FontAwesomeIcon size="sm" color="red" icon={faWindowClose} title="Cancel task" onClick={() => cancelTask(task.id)} />
             </>;
 
@@ -165,6 +166,30 @@ export function GoBackButton(props) {
     return <Button size="sm" variant="outline-secondary" {...props}><FontAwesomeIcon icon={faChevronLeft} /> Return </Button>;
 }
 
+export function PolicyTypeName(s) {
+    if (!s.host && !s.userName) {
+        return "Global Policy"
+    }
+
+    if (!s.userName) {
+        return "Host: " + s.host;
+    }
+
+    if (!s.path) {
+        return "User: " + s.userName + "@" + s.host;
+    }
+
+    return "Directory: " + s.userName + "@" + s.host + ":" + s.path;
+}
+
+export function policyEditorURL(s) {
+    return '/policies/edit?' + sourceQueryStringParams(s);
+}
+
+export function PolicyEditorLink(s) {
+    return <Link to={policyEditorURL(s)}>{PolicyTypeName(s)}</Link>;
+}
+
 export function sourceQueryStringParams(src) {
     return 'userName=' + encodeURIComponent(src.userName) + '&host=' + encodeURIComponent(src.host) + '&path=' + encodeURIComponent(src.path);
 }
@@ -176,7 +201,7 @@ export function isAbsolutePath(p) {
     }
 
     // Windows-style X:\... path.
-    if (p.length >= 3 && p.substring(1,3) === ":\\") {
+    if (p.length >= 3 && p.substring(1, 3) === ":\\") {
         const letter = p.substring(0, 1).toUpperCase();
 
         return letter >= "A" && letter <= "Z";
@@ -196,9 +221,11 @@ export function errorAlert(err, prefix) {
     }
 
     prefix += ": ";
-    
+
     if (err.response && err.response.data && err.response.data.error) {
         alert(prefix + err.response.data.error);
+    } else if (err instanceof Error) {
+        alert(err);
     } else {
         alert(prefix + JSON.stringify(err));
     }
@@ -218,3 +245,38 @@ export function DirectorySelector(props) {
         </Button>
     </InputGroup>;
 }
+
+export function CLIEquivalent(props) {
+    let [visible, setVisible] = useState(false);
+    let [cliInfo, setCLIInfo] = useState({});
+
+    if (visible && !cliInfo.executable) {
+        axios.get('/api/v1/cli').then(result => {
+            setCLIInfo(result.data);
+        }).catch(error => { });
+    }
+
+    const ref = React.createRef()
+
+    function copyToClibopard() {
+        const el = ref.current;
+        if (!el) {
+            return
+        }
+
+        el.select();
+        el.setSelectionRange(0, 99999);
+
+        document.execCommand("copy");
+    }
+
+
+    return <>
+        <InputGroup size="sm" >
+            <Button size="sm" title="Click to show CLI equivalent" variant="warning" onClick={() => setVisible(!visible)}><FontAwesomeIcon size="sm" icon={faTerminal} /></Button>
+            {visible && <Button class="sm" variant="outline-dark" title="Copy to clipboard" onClick={copyToClibopard} ><FontAwesomeIcon size="sm" icon={faCopy} /></Button>}
+            {visible && <FormControl size="sm" ref={ref} className="cli-equivalent" value={`${cliInfo.executable} ${props.command}`} />}
+        </InputGroup>
+    </>;
+}
+

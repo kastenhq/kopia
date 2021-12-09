@@ -63,7 +63,7 @@ func TestServerStart(t *testing.T) {
 
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
-	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir, "--override-hostname=fake-hostname", "--override-username=fake-username")
+	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir, "--override-hostname=fake-hostname", "--override-username=fake-username", "--max-upload-speed=10000000001")
 
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
@@ -100,6 +100,20 @@ func TestServerStart(t *testing.T) {
 	st := verifyServerConnected(t, cli, true)
 	require.Equal(t, "filesystem", st.Storage)
 
+	limits, err := serverapi.GetThrottlingLimits(ctx, cli)
+	require.NoError(t, err)
+
+	// make sure limits are preserved
+	require.Equal(t, 10000000001.0, limits.UploadBytesPerSecond)
+
+	// change the limit via the API.
+	limits.UploadBytesPerSecond++
+	require.NoError(t, serverapi.SetThrottlingLimits(ctx, cli, limits))
+
+	limits, err = serverapi.GetThrottlingLimits(ctx, cli)
+	require.NoError(t, err)
+	require.Equal(t, 10000000002.0, limits.UploadBytesPerSecond)
+
 	sources := verifySourceCount(t, cli, nil, 1)
 	require.Equal(t, sharedTestDataDir1, sources[0].Source.Path)
 
@@ -113,29 +127,29 @@ func TestServerStart(t *testing.T) {
 	require.Equal(t, int64(0), et.Counters["Ignored Errors"].Value)
 
 	createResp, err := serverapi.CreateSnapshotSource(ctx, cli, &serverapi.CreateSnapshotSourceRequest{
-		Path: sharedTestDataDir2,
+		Path:   sharedTestDataDir2,
+		Policy: &policy.Policy{},
 	})
 	require.NoError(t, err)
 
-	require.True(t, createResp.Created)
 	require.False(t, createResp.SnapshotStarted)
 
 	verifySourceCount(t, cli, nil, 2)
 	verifySourceCount(t, cli, &snapshot.SourceInfo{Host: "no-such-host"}, 0)
 	verifySourceCount(t, cli, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir2}, 1)
 
-	verifySnapshotCount(t, cli, nil, 2)
-	verifySnapshotCount(t, cli, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir1}, 2)
-	verifySnapshotCount(t, cli, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir2}, 0)
-	verifySnapshotCount(t, cli, &snapshot.SourceInfo{Host: "no-such-host"}, 0)
+	verifySnapshotCount(t, cli, snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir1}, true, 2)
+	verifySnapshotCount(t, cli, snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir1}, false, 1)
+	verifySnapshotCount(t, cli, snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir2}, true, 0)
+	verifySnapshotCount(t, cli, snapshot.SourceInfo{Host: "no-such-host"}, true, 0)
 
 	uploadMatchingSnapshots(t, cli, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir2})
-	waitForSnapshotCount(ctx, t, cli, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir2}, 1)
+	waitForSnapshotCount(ctx, t, cli, snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir2}, 1)
 
 	_, err = serverapi.CancelUpload(ctx, cli, nil)
 	require.NoError(t, err)
 
-	snaps := verifySnapshotCount(t, cli, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir2}, 1)
+	snaps := verifySnapshotCount(t, cli, snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir2}, true, 1)
 
 	rootPayload, err := serverapi.GetObject(ctx, cli, snaps[0].RootEntry)
 	require.NoError(t, err)
@@ -148,13 +162,13 @@ func TestServerStart(t *testing.T) {
 	keepDaily := 77
 
 	createResp, err = serverapi.CreateSnapshotSource(ctx, cli, &serverapi.CreateSnapshotSourceRequest{
-		Path:           sharedTestDataDir3,
-		CreateSnapshot: true,
-		InitialPolicy: policy.Policy{
+		Path: sharedTestDataDir3,
+		Policy: &policy.Policy{
 			RetentionPolicy: policy.RetentionPolicy{
 				KeepDaily: &keepDaily,
 			},
 		},
+		CreateSnapshot: true,
 	})
 	require.NoError(t, err)
 
@@ -166,7 +180,7 @@ func TestServerStart(t *testing.T) {
 	require.Len(t, policies.Policies, 1)
 	require.Equal(t, keepDaily, *policies.Policies[0].Policy.RetentionPolicy.KeepDaily)
 
-	waitForSnapshotCount(ctx, t, cli, &snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir3}, 1)
+	waitForSnapshotCount(ctx, t, cli, snapshot.SourceInfo{Host: "fake-hostname", UserName: "fake-username", Path: sharedTestDataDir3}, 1)
 }
 
 func TestServerCreateAndConnectViaAPI(t *testing.T) {
@@ -291,7 +305,7 @@ func TestConnectToExistingRepositoryViaAPI(t *testing.T) {
 
 	uploadMatchingSnapshots(t, cli, &si)
 
-	snaps := waitForSnapshotCount(ctx, t, cli, &si, 3)
+	snaps := waitForSnapshotCount(ctx, t, cli, si, 3)
 
 	// we're reproducing the bug described in, after connecting to repo via API, next snapshot size becomes zero.
 	// https://kopia.discourse.group/t/kopia-0-7-0-not-backing-up-any-files-repro-needed/136/6?u=jkowalski
@@ -369,13 +383,13 @@ func verifyServerConnected(t *testing.T, cli *apiclient.KopiaAPIClient, want boo
 	return st
 }
 
-func waitForSnapshotCount(ctx context.Context, t *testing.T, cli *apiclient.KopiaAPIClient, match *snapshot.SourceInfo, want int) []*serverapi.Snapshot {
+func waitForSnapshotCount(ctx context.Context, t *testing.T, cli *apiclient.KopiaAPIClient, src snapshot.SourceInfo, want int) []*serverapi.Snapshot {
 	t.Helper()
 
 	var result []*serverapi.Snapshot
 
 	err := retry.PeriodicallyNoValue(ctx, 1*time.Second, 180, "wait for snapshots", func() error {
-		snapshots, err := serverapi.ListSnapshots(testlogging.Context(t), cli, match)
+		snapshots, err := serverapi.ListSnapshots(testlogging.Context(t), cli, src, true)
 		if err != nil {
 			return errors.Wrap(err, "error listing sources")
 		}
@@ -423,10 +437,10 @@ func uploadMatchingSnapshots(t *testing.T, cli *apiclient.KopiaAPIClient, match 
 	}
 }
 
-func verifySnapshotCount(t *testing.T, cli *apiclient.KopiaAPIClient, match *snapshot.SourceInfo, want int) []*serverapi.Snapshot {
+func verifySnapshotCount(t *testing.T, cli *apiclient.KopiaAPIClient, src snapshot.SourceInfo, all bool, want int) []*serverapi.Snapshot {
 	t.Helper()
 
-	snapshots, err := serverapi.ListSnapshots(testlogging.Context(t), cli, match)
+	snapshots, err := serverapi.ListSnapshots(testlogging.Context(t), cli, src, all)
 	require.NoError(t, err)
 
 	if got := len(snapshots.Snapshots); got != want {
@@ -460,7 +474,7 @@ func verifySourceCount(t *testing.T, cli *apiclient.KopiaAPIClient, match *snaps
 func verifyUIServedWithCorrectTitle(t *testing.T, cli *apiclient.KopiaAPIClient, sp serverParameters) {
 	t.Helper()
 
-	req, err := http.NewRequestWithContext(context.Background(), "GET", sp.baseURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", sp.baseURL, http.NoBody)
 	require.NoError(t, err)
 
 	req.SetBasicAuth("kopia", sp.password)

@@ -1,14 +1,15 @@
 import axios from 'axios';
 import React, { Component } from 'react';
-import Badge from 'react-bootstrap-v5/lib/Badge';
-import Button from 'react-bootstrap-v5/lib/Button';
-import Col from 'react-bootstrap-v5/lib/Col';
-import Row from 'react-bootstrap-v5/lib/Row';
-import Form from 'react-bootstrap-v5/lib/Form';
-import InputGroup from 'react-bootstrap-v5/lib/InputGroup';
-import Spinner from 'react-bootstrap-v5/lib/Spinner';
+import Badge from 'react-bootstrap/Badge';
+import Button from 'react-bootstrap/Button';
+import Col from 'react-bootstrap/Col';
+import Row from 'react-bootstrap/Row';
+import Form from 'react-bootstrap/Form';
+import InputGroup from 'react-bootstrap/InputGroup';
+import Spinner from 'react-bootstrap/Spinner';
 import { handleChange } from './forms';
 import { SetupRepository } from './SetupRepository';
+import { CLIEquivalent } from './uiutil';
 
 export class RepoStatus extends Component {
     constructor() {
@@ -171,12 +172,19 @@ export class RepoStatus extends Component {
                             <Form.Control readOnly defaultValue={this.state.status.username + "@" + this.state.status.hostname} />
                         </Form.Group>
                     </Row>
+                    <Row><Col>&nbsp;</Col></Row>
                     <Row>
                         <Col>
                             <Button size="sm" variant="danger" onClick={this.disconnect}>Disconnect</Button>
                         </Col>
                     </Row>
                 </Form>
+                <Row><Col>&nbsp;</Col></Row>
+                <Row>
+                    <Col xs={12}>
+                        <CLIEquivalent command="repository status" />
+                    </Col>
+                </Row>
             </> : <SetupRepository />
     }
 }

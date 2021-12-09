@@ -23,6 +23,7 @@ import (
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/logging"
 	"github.com/kopia/kopia/repo/blob/rclone"
+	"github.com/kopia/kopia/repo/blob/sharded"
 )
 
 const cleanupAge = 4 * time.Hour
@@ -67,7 +68,7 @@ func TestRCloneStorage(t *testing.T) {
 		// pass local file as remote path.
 		RemotePath: dataDir,
 		RCloneExe:  rcloneExe,
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("unable to connect to rclone backend: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestRCloneStorage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	blobtesting.VerifyStorage(ctx, t, st)
+	blobtesting.VerifyStorage(ctx, t, st, blob.PutOptions{})
 	blobtesting.AssertConnectionInfoRoundTrips(ctx, t, st)
 }
 
@@ -111,17 +112,19 @@ func TestRCloneStorageDirectoryShards(t *testing.T) {
 
 	st, err := rclone.New(ctx, &rclone.Options{
 		// pass local file as remote path.
-		RemotePath:      dataDir,
-		RCloneExe:       rcloneExe,
-		DirectoryShards: []int{5, 2},
-	})
+		RemotePath: dataDir,
+		RCloneExe:  rcloneExe,
+		Options: sharded.Options{
+			DirectoryShards: []int{5, 2},
+		},
+	}, true)
 	if err != nil {
 		t.Fatalf("unable to connect to rclone backend: %v", err)
 	}
 
 	defer st.Close(ctx)
 
-	require.NoError(t, st.PutBlob(ctx, "someblob1234567812345678", gather.FromSlice([]byte{1, 2, 3})))
+	require.NoError(t, st.PutBlob(ctx, "someblob1234567812345678", gather.FromSlice([]byte{1, 2, 3}), blob.PutOptions{}))
 	require.FileExists(t, filepath.Join(dataDir, "someb", "lo", "b1234567812345678.f"))
 }
 
@@ -134,7 +137,7 @@ func TestRCloneStorageInvalidExe(t *testing.T) {
 	_, err := rclone.New(ctx, &rclone.Options{
 		RCloneExe:  "no-such-rclone",
 		RemotePath: "mmm:/tmp/rclonetest",
-	})
+	}, false)
 	if err == nil {
 		t.Fatalf("unexpected success wen starting rclone")
 	}
@@ -150,7 +153,7 @@ func TestRCloneStorageInvalidFlags(t *testing.T) {
 		RCloneExe:  mustGetRcloneExeOrSkip(t),
 		RemotePath: "mmm:/tmp/rclonetest",
 		RCloneArgs: []string{"--no-such-flag"},
-	})
+	}, false)
 	if err == nil {
 		t.Fatalf("unexpected success wen starting rclone")
 	}
@@ -196,13 +199,15 @@ func TestRCloneProviders(t *testing.T) {
 		rp := rp
 
 		opt := &rclone.Options{
-			RemotePath:      rp,
-			RCloneExe:       rcloneExe,
-			RCloneArgs:      rcloneArgs,
-			EmbeddedConfig:  embeddedConfig,
-			Debug:           true,
-			ListParallelism: 16,
-			AtomicWrites:    true,
+			RemotePath:     rp,
+			RCloneExe:      rcloneExe,
+			RCloneArgs:     rcloneArgs,
+			EmbeddedConfig: embeddedConfig,
+			Debug:          true,
+			Options: sharded.Options{
+				ListParallelism: 16,
+			},
+			AtomicWrites: true,
 		}
 
 		t.Run("Cleanup-"+name, func(t *testing.T) {
@@ -219,14 +224,15 @@ func TestRCloneProviders(t *testing.T) {
 			// we are using shared storage, append a guid so that tests don't collide
 			opt.RemotePath += "/" + uuid.NewString()
 
-			st, err := rclone.New(ctx, opt)
+			st, err := rclone.New(ctx, opt, true)
 			if err != nil {
 				t.Fatalf("unable to connect to rclone backend: %v", err)
 			}
 
 			defer st.Close(ctx)
 
-			blobtesting.VerifyStorage(ctx, t, logging.NewWrapper(st, testlogging.NewTestLogger(t), "[RCLONE-STORAGE] "))
+			blobtesting.VerifyStorage(ctx, t, logging.NewWrapper(st, testlogging.NewTestLogger(t), "[RCLONE-STORAGE] "),
+				blob.PutOptions{})
 			blobtesting.AssertConnectionInfoRoundTrips(ctx, t, st)
 		})
 	}
