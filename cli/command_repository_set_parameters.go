@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/minio/minio-go/v7"
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/epoch"
@@ -15,6 +16,8 @@ import (
 type commandRepositorySetParameters struct {
 	maxPackSizeMB      int
 	indexFormatVersion int
+	retentionMode      string
+	retentionPeriod    time.Duration
 
 	epochRefreshFrequency    time.Duration
 	epochMinDuration         time.Duration
@@ -34,6 +37,8 @@ func (c *commandRepositorySetParameters) setup(svc appServices, parent commandPa
 
 	cmd.Flag("max-pack-size-mb", "Set max pack file size").PlaceHolder("MB").IntVar(&c.maxPackSizeMB)
 	cmd.Flag("index-version", "Set version of index format used for writing").IntVar(&c.indexFormatVersion)
+	cmd.Flag("retention-mode", "Set the blob retention-mode for supported storage backends.").EnumVar(&c.retentionMode, minio.Governance.String(), minio.Compliance.String())
+	cmd.Flag("retention-period", "Set the blob retention-period for supported storage backends.").DurationVar(&c.retentionPeriod)
 
 	cmd.Flag("upgrade", "Upgrade repository to the latest stable format").BoolVar(&c.upgradeRepositoryFormat)
 
@@ -94,10 +99,22 @@ func (c *commandRepositorySetParameters) setDurationParameter(ctx context.Contex
 	log(ctx).Infof(" - setting %v to %v.\n", desc, v)
 }
 
+func (c *commandRepositorySetParameters) setStringParameter(ctx context.Context, v, desc string, dst *string, anyChange *bool) {
+	if v == "" {
+		return
+	}
+
+	*dst = v
+	*anyChange = true
+
+	log(ctx).Infof(" - setting %v to %v.\n", desc, v)
+}
+
 func (c *commandRepositorySetParameters) run(ctx context.Context, rep repo.DirectRepositoryWriter) error {
 	var anyChange bool
 
 	mp := rep.ContentReader().ContentFormat().MutableParameters
+	ro := rep.ContentReader().RetentionOptions()
 
 	upgradeToEpochManager := false
 
@@ -117,6 +134,8 @@ func (c *commandRepositorySetParameters) run(ctx context.Context, rep repo.Direc
 
 	c.setSizeMBParameter(ctx, c.maxPackSizeMB, "maximum pack size", &mp.MaxPackSize, &anyChange)
 	c.setIntParameter(ctx, c.indexFormatVersion, "index format version", &mp.IndexVersion, &anyChange)
+	c.setStringParameter(ctx, c.retentionMode, "storage backend blob retention mode", &ro.Mode, &anyChange)
+	c.setDurationParameter(ctx, c.retentionPeriod, "storage backend blob retention period", &ro.Period, &anyChange)
 
 	c.setDurationParameter(ctx, c.epochMinDuration, "minimum epoch duration", &mp.EpochParameters.MinEpochDuration, &anyChange)
 	c.setDurationParameter(ctx, c.epochRefreshFrequency, "epoch refresh frequency", &mp.EpochParameters.EpochRefreshFrequency, &anyChange)
@@ -138,7 +157,7 @@ func (c *commandRepositorySetParameters) run(ctx context.Context, rep repo.Direc
 		}
 	}
 
-	if err := rep.SetParameters(ctx, mp); err != nil {
+	if err := rep.SetParameters(ctx, mp, ro); err != nil {
 		return errors.Wrap(err, "error setting parameters")
 	}
 

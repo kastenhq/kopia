@@ -1,6 +1,8 @@
 package content
 
 import (
+	"time"
+
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/epoch"
@@ -102,4 +104,29 @@ func (f *FormattingOptions) GetHashFunction() string {
 // GetHmacSecret implements hashing.Parameters.
 func (f *FormattingOptions) GetHmacSecret() []byte {
 	return f.HMACSecret
+}
+
+// RetentionOptions define the parameters required for retention settings for
+// supporting storage backends.
+type RetentionOptions struct {
+	Mode   string        `json:"mode,omitempty"`   // retention mode,must be "governance" or "compliance"
+	Period time.Duration `json:"period,omitempty"` // retention period
+}
+
+// Validate validates the parameters.
+func (r *RetentionOptions) Validate() error {
+	if (r.Mode == "") != (r.Period == 0) {
+		return errors.Errorf("both retention mode and period must be provided when setting blob retention properties")
+	}
+
+	if r.Period != 0 && r.Period < 24*time.Hour {
+		return errors.Errorf("invalid retention-period, the minimum required is 1-day and there is no maximum limit")
+	}
+
+	return nil
+}
+
+// IsNull returns whether the retention options are set.
+func (r *RetentionOptions) IsNull() bool {
+	return r.Mode == "" || r.Period == 0
 }

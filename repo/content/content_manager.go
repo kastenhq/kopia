@@ -510,6 +510,11 @@ func (bm *WriteManager) ContentFormat() FormattingOptions {
 	return bm.format
 }
 
+// RetentionOptions returns formatting options.
+func (bm *WriteManager) RetentionOptions() RetentionOptions {
+	return RetentionOptions{Mode: bm.retentionMode, Period: bm.retentionPeriod}
+}
+
 // Close closes the content manager.
 func (bm *WriteManager) Close(ctx context.Context) error {
 	return bm.SharedManager.release(ctx)

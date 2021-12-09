@@ -77,7 +77,7 @@ type DirectRepositoryWriter interface {
 
 	BlobStorage() blob.Storage
 	ContentManager() *content.WriteManager
-	SetParameters(ctx context.Context, m content.MutableParameters) error
+	SetParameters(ctx context.Context, m content.MutableParameters, ro content.RetentionOptions) error
 	ChangePassword(ctx context.Context, newPassword string) error
 }
 

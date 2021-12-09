@@ -10,6 +10,7 @@ import (
 type Reader interface {
 	SupportsContentCompression() bool
 	ContentFormat() FormattingOptions
+	RetentionOptions() RetentionOptions
 	GetContent(ctx context.Context, id ID) ([]byte, error)
 	ContentInfo(ctx context.Context, id ID) (Info, error)
 	IterateContents(ctx context.Context, opts IterateOptions, callback IterateCallback) error

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+
+	"github.com/kopia/kopia/repo/content"
 )
 
 type retentionBlob struct {
@@ -23,18 +25,25 @@ func retentionBlobFromOptions(opt *NewRepositoryOptions) *retentionBlob {
 	}
 }
 
+func retentionBlobFromRetentionOptions(opt *content.RetentionOptions) *retentionBlob {
+	return &retentionBlob{
+		Mode:   opt.Mode,
+		Period: opt.Period,
+	}
+}
+
 func serializeRetentionBytes(f *formatBlob, r *retentionBlob, masterKey []byte) ([]byte, error) {
-	content, err := json.Marshal(r)
+	data, err := json.Marshal(r)
 	if err != nil {
 		return nil, errors.Wrap(err, "can't marshal retentionBlob to JSON")
 	}
 
 	switch f.EncryptionAlgorithm {
 	case "NONE":
-		return content, nil
+		return data, nil
 
 	case aes256GcmEncryption:
-		return encryptRepositoryBlobBytesAes256Gcm(content, masterKey, f.UniqueID)
+		return encryptRepositoryBlobBytesAes256Gcm(data, masterKey, f.UniqueID)
 
 	default:
 		return nil, errors.Errorf("unknown encryption algorithm: '%v'", f.EncryptionAlgorithm)
