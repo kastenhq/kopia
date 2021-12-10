@@ -273,7 +273,8 @@ func TestTokenExpiration(t *testing.T) {
 	role := getEnvOrSkip(t, testRoleEnv)
 
 	// Get the credentials and custom provider
-	credentials, customProvider := customCredentialsAndProvider(t, awsAccessKeyID, awsSecretAccessKeyID, role, region)
+	creds, customProvider := customCredentialsAndProvider(awsAccessKeyID, awsSecretAccessKeyID, role, region)
+
 	createBucket(t, &Options{
 		Endpoint:        awsEndpoint,
 		AccessKeyID:     awsAccessKeyID,
@@ -284,18 +285,21 @@ func TestTokenExpiration(t *testing.T) {
 	})
 
 	// Verify that the credentials can be used to get a new value
-	val, err := credentials.Get()
+	val, err := creds.Get()
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
+
 	stsAccessKeyID := val.AccessKeyID
 	stsSecretKeyID := val.SecretAccessKey
+
 	require.NotEqual(t, awsAccessKeyID, stsAccessKeyID)
 	require.NotEqual(t, awsSecretAccessKeyID, stsSecretKeyID)
 
 	// Create new storage using the credentials
 	ctx := testlogging.Context(t)
-	st, err := newStorageWithCredentials(ctx, credentials, &Options{
+
+	st, err := newStorageWithCredentials(ctx, creds, &Options{
 		Endpoint:    awsEndpoint,
 		BucketName:  bucketName,
 		Region:      region,
@@ -304,6 +308,7 @@ func TestTokenExpiration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
+
 	rst := retrying.NewWrapper(st)
 
 	// Since the session token is valid at this point
@@ -319,7 +324,7 @@ func TestTokenExpiration(t *testing.T) {
 
 	// Reset the expired flag and expire the credentials, so that a new valid token
 	// is obtained by the client.
-	credentials.Expire()
+	creds.Expire()
 	customProvider.expired.Store(false)
 	blobtesting.VerifyBlobNotFoundForGetBlob(ctx, t, rst)
 }
@@ -692,10 +697,23 @@ func (cp *customProvider) Retrieve() (miniocreds.Value, error) {
 		return miniocreds.Value{
 			AccessKeyID:     "ASIAQREAKNKDF6IFPFPF",
 			SecretAccessKey: "/z/ZFyu1oHKvZ8FpTnCHq7nrtCYk21Z3G33aJ1kX",
-			SessionToken:    "IQoJb3JpZ2luX2VjEAgaCXVzLXdlc3QtMiJHMEUCIE9ksww79k8+88oFB5gFTM+vfx93UGv95CwbVPWRWjPqAiEA4Inwdu81YlGiXkVVAO8XnTVlDcJZ47oaF45lkebIQ4sqpQII4f//////////ARADGgwwMzY3NzYzNDAxMDIiDMKMi295qUSc2Ucvvir5AWl8REdzLsvkok88mXaJAAaapLun007IlSutXnM7V/OYsbR1avxN81xU5MJqq6RGeap1k0pr5NdQuzRBFATcLIwuYGUZw6FxwpUks/tmad8KTe/aNcj0iqXzqElcMV/myDG5B6Mkkg+rtN36bH3b1UTncvYa+OKIdx4x3oGMJpIHCxXeE8jsIww+YyQ2+20/p+H+oPC0i96vlSDMJ4qO9SP18FXcMn5kp5OujIRdebc+ZtIid2UwXgaZ2YeQX2Gtqyb41KNZHSZmXA/qjT95B3ZN2HagNIrieERZfLFTQ5kNZjVeQNEFAyy4I6sDjH3mpuaBjLDzaFnDQjDjp8qNBjqdAQ4EcapiFs9/2AcpwIyi0zcPvoIhR5c1/rrjBW4l63rMTHe/DYQ69n8ZrQNjegxBSDFzSZDgIPGo8stFLvT1x8zUABilkCnnxyDcon/ysVLPYsKo2C/dJokOcipL5oyzZuW7J6JSZuUd/AxCgEbkFxRXQBVx35ROzZDqNpsm3aqkHO0afxVkula9oTbUMDHBGFiCZkLLqFVzBaiS0Z8=",
-			SignerType:      miniocreds.SignatureV4,
+			SessionToken: `IQoJb3JpZ2luX2VjEAgaCXVzLXdlc3QtMiJHMEUCIE
+			9ksww79k8+88oFB5gFTM+vfx93UGv95CwbVPWRWjPqAiEA4Inwdu81YlGiXk
+			VVAO8XnTVlDcJZ47oaF45lkebIQ4sqpQII4f//////////ARADGgwwMzY3Nz
+			YzNDAxMDIiDMKMi295qUSc2Ucvvir5AWl8REdzLsvkok88mXaJAAaapLun00
+			7IlSutXnM7V/OYsbR1avxN81xU5MJqq6RGeap1k0pr5NdQuzRBFATcLIwuYG
+			UZw6FxwpUks/tmad8KTe/aNcj0iqXzqElcMV/myDG5B6Mkkg+rtN36bH3b1U
+			TncvYa+OKIdx4x3oGMJpIHCxXeE8jsIww+YyQ2+20/p+H+oPC0i96vlSDMJ4
+			qO9SP18FXcMn5kp5OujIRdebc+ZtIid2UwXgaZ2YeQX2Gtqyb41KNZHSZmXA
+			/qjT95B3ZN2HagNIrieERZfLFTQ5kNZjVeQNEFAyy4I6sDjH3mpuaBjLDzaF
+			nDQjDjp8qNBjqdAQ4EcapiFs9/2AcpwIyi0zcPvoIhR5c1/rrjBW4l63rMTH
+			e/DYQ69n8ZrQNjegxBSDFzSZDgIPGo8stFLvT1x8zUABilkCnnxyDcon/ysV
+			LPYsKo2C/dJokOcipL5oyzZuW7J6JSZuUd/AxCgEbkFxRXQBVx35ROzZDqNp
+			sm3aqkHO0afxVkula9oTbUMDHBGFiCZkLLqFVzBaiS0Z8=`,
+			SignerType: miniocreds.SignatureV4,
 		}, nil
 	}
+
 	return cp.stsProvider.Retrieve()
 }
 
@@ -705,7 +723,7 @@ func (cp *customProvider) IsExpired() bool {
 
 // customCredentialsAndProvider creates a custom provider and returns credentials
 // using this provider.
-func customCredentialsAndProvider(t *testing.T, accessKey, secretKey, roleARN, region string) (*miniocreds.Credentials, *customProvider) {
+func customCredentialsAndProvider(accessKey, secretKey, roleARN, region string) (*miniocreds.Credentials, *customProvider) {
 	opts := miniocreds.STSAssumeRoleOptions{
 		AccessKey:       accessKey,
 		SecretKey:       secretKey,
@@ -725,5 +743,6 @@ func customCredentialsAndProvider(t *testing.T, accessKey, secretKey, roleARN, r
 	}
 	// Initialize expired to false
 	cp.expired.Store(false)
+
 	return miniocreds.New(cp), cp
 }

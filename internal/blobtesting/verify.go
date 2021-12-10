@@ -45,6 +45,7 @@ func VerifyTokenExpirationForGetBlob(ctx context.Context, t *testing.T, r blob.S
 	})
 }
 
+// VerifyBlobNotFoundForGetBlob verifies that the ErrBlobNotFound
 // error is returned by GetBlob.
 // nolint:thelper
 func VerifyBlobNotFoundForGetBlob(ctx context.Context, t *testing.T, r blob.Storage) {
