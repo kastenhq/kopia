@@ -483,19 +483,6 @@ func TestNeedMD5AWS(t *testing.T) {
 }
 
 // nolint:thelper
-func setupBlobStorage(ctx context.Context, t *testing.T, options *Options) blob.Storage {
-	options.Prefix = uuid.NewString()
-
-	st, err := New(testlogging.Context(t), options)
-	require.NoError(t, err)
-
-	defer st.Close(ctx)
-	defer blobtesting.CleanupOldData(ctx, t, st, 0)
-
-	return st
-}
-
-// nolint:thelper
 func testStorage(t *testing.T, options *Options, runValidationTest bool, opts blob.PutOptions) {
 	ctx := testlogging.Context(t)
 
