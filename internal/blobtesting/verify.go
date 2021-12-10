@@ -45,6 +45,34 @@ func VerifyTokenExpirationForGetBlob(ctx context.Context, t *testing.T, r blob.S
 	})
 }
 
+// error is returned by GetBlob.
+// nolint:thelper
+func VerifyBlobNotFoundForGetBlob(ctx context.Context, t *testing.T, r blob.Storage) {
+	blocks := []struct {
+		blk      blob.ID
+		contents []byte
+	}{
+		{blk: "abcdbbf4f0507d054ed5a80a5b65086f602b", contents: []byte{}},
+		{blk: "zxce0e35630770c54668a8cfb4e414c6bf8f", contents: []byte{1}},
+		{blk: "abff4585856ebf0748fd989e1dd623a8963d", contents: bytes.Repeat([]byte{1}, 1000)},
+		{blk: "abgc3dca496d510f492c858a2df1eb824e62", contents: bytes.Repeat([]byte{1}, 10000)},
+		{blk: "kopia.repository", contents: bytes.Repeat([]byte{2}, 100)},
+	}
+
+	// First verify that blocks don't exist.
+	t.Run("VerifyBlobNotFoundForGetBlob", func(t *testing.T) {
+		for _, b := range blocks {
+			b := b
+
+			t.Run(string(b.blk), func(t *testing.T) {
+				t.Parallel()
+
+				AssertGetBlobNotFound(ctx, t, r, b.blk)
+			})
+		}
+	})
+}
+
 // VerifyStorage verifies the behavior of the specified storage.
 // nolint:gocyclo,thelper
 func VerifyStorage(ctx context.Context, t *testing.T, r blob.Storage, opts blob.PutOptions) {

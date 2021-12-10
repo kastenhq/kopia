@@ -10,12 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/google/uuid"
@@ -31,6 +31,7 @@ import (
 	"github.com/kopia/kopia/internal/timetrack"
 	"github.com/kopia/kopia/internal/tlsutil"
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/repo/blob/retrying"
 )
 
 const (
@@ -43,7 +44,8 @@ const (
 	minioBucketName          = "my-bucket" // we use ephemeral minio for each test so this does not need to be unique
 
 	// default aws S3 endpoint.
-	awsEndpoint = "s3.amazonaws.com"
+	awsEndpoint           = "s3.amazonaws.com"
+	awsStsEndpointUSWest2 = "https://sts.us-west-2.amazonaws.com"
 
 	// env vars need to be set to execute TestS3StorageAWS.
 	testEndpointEnv        = "KOPIA_S3_TEST_ENDPOINT"
@@ -270,7 +272,8 @@ func TestTokenExpiration(t *testing.T) {
 	region := getEnvOrSkip(t, testRegionEnv)
 	role := getEnvOrSkip(t, testRoleEnv)
 
-	stsAccessKeyID, stsSecretKeyID, stsSessionToken := createAWSSessionToken(t, awsAccessKeyID, awsSecretAccessKeyID, role, region)
+	// Get the credentials and custom provider
+	credentials, customProvider := customCredentialsAndProvider(t, awsAccessKeyID, awsSecretAccessKeyID, role, region)
 	createBucket(t, &Options{
 		Endpoint:        awsEndpoint,
 		AccessKeyID:     awsAccessKeyID,
@@ -280,26 +283,45 @@ func TestTokenExpiration(t *testing.T) {
 		DoNotUseTLS:     true,
 	})
 
+	// Verify that the credentials can be used to get a new value
+	val, err := credentials.Get()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	stsAccessKeyID := val.AccessKeyID
+	stsSecretKeyID := val.SecretAccessKey
 	require.NotEqual(t, awsAccessKeyID, stsAccessKeyID)
 	require.NotEqual(t, awsSecretAccessKeyID, stsSecretKeyID)
 
+	// Create new storage using the credentials
 	ctx := testlogging.Context(t)
-	st := setupBlobStorage(ctx, t, &Options{
-		Endpoint:        awsEndpoint,
-		AccessKeyID:     stsAccessKeyID,
-		SecretAccessKey: stsSecretKeyID,
-		SessionToken:    stsSessionToken,
-		BucketName:      bucketName,
-		Region:          region,
-		DoNotUseTLS:     true,
+	st, err := newStorageWithCredentials(ctx, credentials, &Options{
+		Endpoint:    awsEndpoint,
+		BucketName:  bucketName,
+		Region:      region,
+		DoNotUseTLS: true,
 	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	rst := retrying.NewWrapper(st)
 
-	// Sleep for 1000 seconds so that the session token
-	// that was setup with a duration of 900 seconds(minimum duration setting.
-	// We cannot configure a value lower than this) expires.
-	time.Sleep(920 * time.Second)
+	// Since the session token is valid at this point
+	// we expect errors that indicate that the blob was not found.
+	// customProvider.expired is false at this point since the customProvider
+	// was initialized with false.
+	blobtesting.VerifyBlobNotFoundForGetBlob(ctx, t, rst)
 
-	blobtesting.VerifyTokenExpirationForGetBlob(ctx, t, st)
+	// Atomic set the expired flag to true here to force token expiration.
+	// After this we expect to get token expiration errors.
+	customProvider.expired.Store(true)
+	blobtesting.VerifyTokenExpirationForGetBlob(ctx, t, rst)
+
+	// Reset the expired flag and expire the credentials, so that a new valid token
+	// is obtained by the client.
+	credentials.Expire()
+	customProvider.expired.Store(false)
+	blobtesting.VerifyBlobNotFoundForGetBlob(ctx, t, rst)
 }
 
 func TestS3StorageMinio(t *testing.T) {
@@ -666,37 +688,55 @@ func createMinioSessionToken(t *testing.T, minioEndpoint, kopiaUserName, kopiaUs
 	return *result.Credentials.AccessKeyId, *result.Credentials.SecretAccessKey, *result.Credentials.SessionToken
 }
 
-func createAWSSessionToken(t *testing.T, awsAccessKeyID, awsSecretAccessKeyID, role, region string) (accessID, secretKey, sessionToken string) {
-	t.Helper()
+// customProvider is a custom provider based on minio's STSAssumeRole struct
+// that implements the logic for retrieving
+// credentials and checking if the credentials
+// have expired.
+// The expired field is used to allow the user of this
+// provider to force expiration of the credentials. This causes
+// the next call to Retrieve to return expired credentials.
+type customProvider struct {
+	expired     atomic.Value
+	stsProvider miniocreds.STSAssumeRole
+}
 
-	creds := credentials.NewStaticCredentials(awsAccessKeyID, awsSecretAccessKeyID, "")
-
-	sess, err := session.NewSession(aws.NewConfig().WithLogLevel(aws.LogDebug).WithRegion(region).WithCredentials(creds))
-	if err != nil {
-		t.Fatalf("failed to create aws session: %v", err)
+func (cp *customProvider) Retrieve() (miniocreds.Value, error) {
+	if cp.IsExpired() {
+		return miniocreds.Value{
+			AccessKeyID:     "ASIAQREAKNKDF6IFPFPF",
+			SecretAccessKey: "/z/ZFyu1oHKvZ8FpTnCHq7nrtCYk21Z3G33aJ1kX",
+			SessionToken:    "IQoJb3JpZ2luX2VjEAgaCXVzLXdlc3QtMiJHMEUCIE9ksww79k8+88oFB5gFTM+vfx93UGv95CwbVPWRWjPqAiEA4Inwdu81YlGiXkVVAO8XnTVlDcJZ47oaF45lkebIQ4sqpQII4f//////////ARADGgwwMzY3NzYzNDAxMDIiDMKMi295qUSc2Ucvvir5AWl8REdzLsvkok88mXaJAAaapLun007IlSutXnM7V/OYsbR1avxN81xU5MJqq6RGeap1k0pr5NdQuzRBFATcLIwuYGUZw6FxwpUks/tmad8KTe/aNcj0iqXzqElcMV/myDG5B6Mkkg+rtN36bH3b1UTncvYa+OKIdx4x3oGMJpIHCxXeE8jsIww+YyQ2+20/p+H+oPC0i96vlSDMJ4qO9SP18FXcMn5kp5OujIRdebc+ZtIid2UwXgaZ2YeQX2Gtqyb41KNZHSZmXA/qjT95B3ZN2HagNIrieERZfLFTQ5kNZjVeQNEFAyy4I6sDjH3mpuaBjLDzaFnDQjDjp8qNBjqdAQ4EcapiFs9/2AcpwIyi0zcPvoIhR5c1/rrjBW4l63rMTHe/DYQ69n8ZrQNjegxBSDFzSZDgIPGo8stFLvT1x8zUABilkCnnxyDcon/ysVLPYsKo2C/dJokOcipL5oyzZuW7J6JSZuUd/AxCgEbkFxRXQBVx35ROzZDqNpsm3aqkHO0afxVkula9oTbUMDHBGFiCZkLLqFVzBaiS0Z8=",
+			SignerType:      miniocreds.SignatureV4,
+		}, nil
 	}
+	return cp.stsProvider.Retrieve()
+}
 
-	roleArn := aws.String(role)
+func (cp *customProvider) IsExpired() bool {
+	return cp.expired.Load().(bool)
+}
 
-	result := stscreds.NewCredentials(sess, *roleArn, func(p *stscreds.AssumeRoleProvider) {
-		p.Duration = 900 * time.Second
-	})
-	if result == nil {
-		t.Fatalf("couldn't find aws creds in aws assume role response")
+// customCredentialsAndProvider creates a custom provider and returns credentials
+// using this provider.
+func customCredentialsAndProvider(t *testing.T, accessKey, secretKey, roleARN, region string) (*miniocreds.Credentials, *customProvider) {
+	opts := miniocreds.STSAssumeRoleOptions{
+		AccessKey:       accessKey,
+		SecretKey:       secretKey,
+		Location:        region,
+		RoleARN:         roleARN,
+		RoleSessionName: "s3-test-session",
 	}
-
-	expiry, err := result.ExpiresAt()
-	if err != nil {
-		t.Fatal("expiry is missing")
+	stsEndpoint := awsStsEndpointUSWest2
+	cp := &customProvider{
+		stsProvider: miniocreds.STSAssumeRole{
+			Client: &http.Client{
+				Transport: http.DefaultTransport,
+			},
+			STSEndpoint: stsEndpoint,
+			Options:     opts,
+		},
 	}
-
-	t.Logf("created session token with assume role: expiration: %s", expiry)
-
-	fmt.Printf("Debug before Get")
-	val, err := result.Get()
-	if err != nil {
-		t.Fatalf("val is missing %v", val)
-	}
-
-	return val.AccessKeyID, val.SecretAccessKey, val.SessionToken
+	// Initialize expired to false
+	cp.expired.Store(false)
+	return miniocreds.New(cp), cp
 }

@@ -292,12 +292,16 @@ func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 }
 
 func newStorage(ctx context.Context, opt *Options) (*s3Storage, error) {
+	return newStorageWithCredentials(ctx, credentials.NewStaticV4(opt.AccessKeyID, opt.SecretAccessKey, opt.SessionToken), opt)
+}
+
+func newStorageWithCredentials(ctx context.Context, creds *credentials.Credentials, opt *Options) (*s3Storage, error) {
 	if opt.BucketName == "" {
 		return nil, errors.New("bucket name must be specified")
 	}
 
 	minioOpts := &minio.Options{
-		Creds:  credentials.NewStaticV4(opt.AccessKeyID, opt.SecretAccessKey, opt.SessionToken),
+		Creds:  creds,
 		Secure: !opt.DoNotUseTLS,
 		Region: opt.Region,
 	}
