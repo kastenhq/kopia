@@ -103,7 +103,7 @@ func newTestEnv(t *testing.T) *epochManagerTestEnv {
 		EpochAdvanceOnCountThreshold:          15,
 		EpochAdvanceOnTotalSizeBytesThreshold: 20 << 20,
 		DeleteParallelism:                     1,
-	}, te.compact, testlogging.NewTestLogger(t), te.ft.NowFunc())
+	}, te.compact, testlogging.NewTestLogger(t), te.ft.NowFunc(), "", 0)
 	te.mgr = m
 	te.faultyStorage = fs
 	te.data = data
@@ -122,7 +122,7 @@ func (te *epochManagerTestEnv) another() *epochManagerTestEnv {
 		faultyStorage: te.faultyStorage,
 	}
 
-	te2.mgr = NewManager(te2.st, te.mgr.Params, te2.compact, te.mgr.log, te.mgr.timeFunc)
+	te2.mgr = NewManager(te2.st, te.mgr.Params, te2.compact, te.mgr.log, te.mgr.timeFunc, "", 0)
 
 	return te2
 }
@@ -177,7 +177,7 @@ func TestIndexEpochManager_Parallel(t *testing.T) {
 
 				if _, err := te2.mgr.WriteIndex(ctx, map[blob.ID]blob.Bytes{
 					blob.ID(fmt.Sprintf("w%vr%x", worker, rnd)): gather.FromSlice(ndx.Bytes()),
-				}, "", 0); err != nil {
+				}); err != nil {
 					return errors.Wrap(err, "error writing")
 				}
 
@@ -634,6 +634,6 @@ func (te *epochManagerTestEnv) mustWriteIndexFile(ctx context.Context, t *testin
 
 	_, err := te.mgr.WriteIndex(ctx, map[blob.ID]blob.Bytes{
 		blob.ID(hex.EncodeToString(rnd[:])): gather.FromSlice(ndx.Bytes()),
-	}, "", 0)
+	})
 	require.NoError(t, err)
 }

@@ -416,17 +416,19 @@ func (sm *SharedManager) setupReadManagerCaches(ctx context.Context, caching *Ca
 
 	// set up new index blob manager
 	sm.indexBlobManagerV1 = &indexBlobManagerV1{
-		st:              cachedSt,
-		enc:             sm.enc,
-		timeNow:         sm.timeNow,
-		maxPackSize:     sm.maxPackSize,
-		indexShardSize:  sm.indexShardSize,
-		indexVersion:    sm.indexVersion,
-		log:             sm.namedLogger("index-blob-manager"),
-		retentionMode:   sm.retentionMode,
-		retentionPeriod: sm.retentionPeriod,
+		st:             cachedSt,
+		enc:            sm.enc,
+		timeNow:        sm.timeNow,
+		maxPackSize:    sm.maxPackSize,
+		indexShardSize: sm.indexShardSize,
+		indexVersion:   sm.indexVersion,
+		log:            sm.namedLogger("index-blob-manager"),
 	}
-	sm.indexBlobManagerV1.epochMgr = epoch.NewManager(cachedSt, sm.format.EpochParameters, sm.indexBlobManagerV1.compactEpoch, sm.namedLogger("epoch-manager"), sm.timeNow)
+	compactor := func(ctx context.Context, blobIDs []blob.ID, outputPrefix blob.ID) error {
+		return sm.indexBlobManagerV1.compactEpoch(ctx, blobIDs, outputPrefix, sm.retentionMode, sm.retentionPeriod)
+	}
+	sm.indexBlobManagerV1.epochMgr = epoch.NewManager(cachedSt, sm.format.EpochParameters,
+		compactor, sm.namedLogger("epoch-manager"), sm.timeNow, sm.retentionMode, sm.retentionPeriod)
 
 	// select active index blob manager based on parameters
 	if sm.format.EpochParameters.Enabled {

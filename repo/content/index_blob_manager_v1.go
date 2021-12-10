@@ -15,16 +15,14 @@ import (
 )
 
 type indexBlobManagerV1 struct {
-	st              blob.Storage
-	enc             *encryptedBlobMgr
-	epochMgr        *epoch.Manager
-	timeNow         func() time.Time
-	log             logging.Logger
-	maxPackSize     int
-	indexVersion    int
-	indexShardSize  int
-	retentionMode   string
-	retentionPeriod time.Duration
+	st             blob.Storage
+	enc            *encryptedBlobMgr
+	epochMgr       *epoch.Manager
+	timeNow        func() time.Time
+	log            logging.Logger
+	maxPackSize    int
+	indexVersion   int
+	indexShardSize int
 }
 
 func (m *indexBlobManagerV1) listActiveIndexBlobs(ctx context.Context) ([]IndexBlobInfo, time.Time, error) {
@@ -62,7 +60,7 @@ func (m *indexBlobManagerV1) compact(ctx context.Context, opt CompactOptions) er
 	return errors.Wrap(m.epochMgr.AdvanceDeletionWatermark(ctx, opt.DropDeletedBefore), "error advancing deletion watermark")
 }
 
-func (m *indexBlobManagerV1) compactEpoch(ctx context.Context, blobIDs []blob.ID, outputPrefix blob.ID) error {
+func (m *indexBlobManagerV1) compactEpoch(ctx context.Context, blobIDs []blob.ID, outputPrefix blob.ID, retentionMode string, retentionPeriod time.Duration) error {
 	tmpbld := make(packIndexBuilder)
 
 	for _, indexBlob := range blobIDs {
@@ -98,8 +96,8 @@ func (m *indexBlobManagerV1) compactEpoch(ctx context.Context, blobIDs []blob.ID
 		}
 
 		if err := m.st.PutBlob(ctx, blobID, data2.Bytes(), blob.PutOptions{
-			RetentionMode:   m.retentionMode,
-			RetentionPeriod: m.retentionPeriod,
+			RetentionMode:   retentionMode,
+			RetentionPeriod: retentionPeriod,
 		}); err != nil {
 			return errors.Wrap(err, "error writing index blob")
 		}
@@ -127,7 +125,7 @@ func (m *indexBlobManagerV1) writeIndexBlobs(ctx context.Context, dataShards []g
 	}
 
 	// nolint:wrapcheck
-	return m.epochMgr.WriteIndex(ctx, shards, m.retentionMode, m.retentionPeriod)
+	return m.epochMgr.WriteIndex(ctx, shards)
 }
 
 var _ indexBlobManager = (*indexBlobManagerV1)(nil)
@@ -147,7 +145,7 @@ func (sm *SharedManager) PrepareUpgradeToIndexBlobManagerV1(ctx context.Context,
 		blobIDs = append(blobIDs, ib.BlobID)
 	}
 
-	if err := sm.indexBlobManagerV1.compactEpoch(ctx, blobIDs, epoch.UncompactedEpochBlobPrefix(epoch.FirstEpoch)); err != nil {
+	if err := sm.indexBlobManagerV1.compactEpoch(ctx, blobIDs, epoch.UncompactedEpochBlobPrefix(epoch.FirstEpoch), "", 0); err != nil {
 		return errors.Wrap(err, "unable to generate initial epoch")
 	}
 
