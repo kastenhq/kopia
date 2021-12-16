@@ -25,6 +25,7 @@ import (
 	"github.com/kopia/kopia/internal/blobtesting"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/providervalidation"
+	"github.com/kopia/kopia/internal/retry"
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/internal/timetrack"
@@ -537,19 +538,28 @@ func createBucket(tb testing.TB, opt *Options) {
 func makeBucket(tb testing.TB, cli *minio.Client, opt *Options, objectLocking bool) {
 	tb.Helper()
 
-	if err := cli.MakeBucket(context.Background(), opt.BucketName, minio.MakeBucketOptions{
-		Region:        opt.Region,
-		ObjectLocking: objectLocking,
-	}); err != nil {
-		var er minio.ErrorResponse
+	_, err := retry.WithExponentialBackoff(context.TODO(),
+		fmt.Sprintf("makeBucket - opt: %#v, locking: %t", opt, objectLocking), func() (interface{}, error) {
+			if err := cli.MakeBucket(context.Background(), opt.BucketName, minio.MakeBucketOptions{
+				Region:        opt.Region,
+				ObjectLocking: objectLocking,
+			}); err != nil {
+				var er minio.ErrorResponse
 
-		if errors.As(err, &er) && er.Code == "BucketAlreadyOwnedByYou" {
-			// ignore error
-			return
-		}
+				if !errors.As(err, &er) || er.Code != "BucketAlreadyOwnedByYou" {
+					return nil, err
+				}
+				// ignore error
+			}
 
-		tb.Fatalf("unable to create bucket: %v", err)
-	}
+			return nil, nil
+		}, func(err error) bool {
+			var er minio.ErrorResponse
+
+			return errors.As(err, &er) && er.Code == "OperationAborted"
+		})
+
+	require.NoError(tb, err, "unable to create bucket")
 }
 
 func createMinioSessionToken(t *testing.T, minioEndpoint, kopiaUserName, kopiaUserPasswd, bucketName string) (accessID, secretKey, sessionToken string) {
