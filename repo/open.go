@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -15,6 +16,7 @@ import (
 	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/repo/blob/beforeop"
 	loggingwrapper "github.com/kopia/kopia/repo/blob/logging"
 	"github.com/kopia/kopia/repo/blob/readonly"
 	"github.com/kopia/kopia/repo/blob/throttling"
@@ -31,9 +33,9 @@ const CacheDirMarkerFile = "CACHEDIR.TAG"
 // CacheDirMarkerHeader is the header signature for cache dir marker files.
 const CacheDirMarkerHeader = "Signature: 8a477f597d28d172789f06886806bc55"
 
-// defaultFormatBlobCacheDuration is the duration for which we treat cached kopia.repository
+// DefaultFormatBlobCacheDuration is the duration for which we treat cached kopia.repository
 // as valid.
-const defaultFormatBlobCacheDuration = 15 * time.Minute
+const DefaultFormatBlobCacheDuration = 15 * time.Minute
 
 // throttlingWindow is the duration window during which the throttling token bucket fully replenishes.
 // the maximum number of tokens in the bucket is multiplied by the number of seconds.
@@ -65,10 +67,15 @@ type Options struct {
 	TraceStorage       bool             // Logs all storage access using provided Printf-style function
 	TimeNowFunc        func() time.Time // Time provider
 	DisableInternalLog bool             // Disable internal log
+	UpgradeOwnerID     string           // Owner-ID of any upgrade in progress, when this is not set the access may be restricted
 }
 
 // ErrInvalidPassword is returned when repository password is invalid.
 var ErrInvalidPassword = errors.Errorf("invalid repository password")
+
+// ErrRepositoryUnavailableDueToUpgrageInProgress is returned when repository
+// is undergoing upgrade that requires exclusive access.
+var ErrRepositoryUnavailableDueToUpgrageInProgress = errors.Errorf("repository upgrade in progress")
 
 // Open opens a Repository specified in the configuration file.
 func Open(ctx context.Context, configFile, password string, options *Options) (rep Repository, err error) {
@@ -175,46 +182,87 @@ func openDirect(ctx context.Context, configFile string, lc *LocalConfig, passwor
 	return r, nil
 }
 
-// openWithConfig opens the repository with a given configuration, avoiding the need for a config file.
-// nolint:funlen
-func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, password string, options *Options, caching *content.CachingOptions, configFile string) (DirectRepository, error) {
-	caching = caching.CloneOrDefault()
-
+// nolint:gocritic
+func readAndCacheRepoConfig(
+	ctx context.Context,
+	st blob.Storage,
+	password string,
+	cacheOpts *content.CachingOptions,
+	validDuration time.Duration,
+) (
+	fb []byte,
+	cacheTime time.Time,
+	f *formatBlob,
+	repoConfig *repositoryObjectFormat,
+	formatEncryptionKey []byte,
+	err error,
+) {
 	// Read format blob, potentially from cache.
-	fb, err := readAndCacheFormatBlobBytes(ctx, st, caching.CacheDirectory, lc.FormatBlobCacheDuration)
+	fb, cacheTime, err = readAndCacheFormatBlobBytes(ctx, st, cacheOpts.CacheDirectory, validDuration)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to read format blob")
+		return nil, time.Time{}, nil, nil, nil, errors.Wrap(err, "unable to read format blob")
 	}
 
-	if err = writeCacheMarker(caching.CacheDirectory); err != nil {
-		return nil, errors.Wrap(err, "unable to write cache directory marker")
+	if err = writeCacheMarker(cacheOpts.CacheDirectory); err != nil {
+		return nil, time.Time{}, nil, nil, nil, errors.Wrap(err, "unable to write cache directory marker")
 	}
 
-	f, err := parseFormatBlob(fb)
+	f, err = parseFormatBlob(fb)
 	if err != nil {
-		return nil, errors.Wrap(err, "can't parse format blob")
+		return nil, time.Time{}, nil, nil, nil, errors.Wrap(err, "can't parse format blob")
 	}
 
 	fb, err = addFormatBlobChecksumAndLength(fb)
 	if err != nil {
-		return nil, errors.Errorf("unable to add checksum")
+		return nil, time.Time{}, nil, nil, nil, errors.Errorf("unable to add checksum")
 	}
 
-	formatEncryptionKey, err := f.deriveFormatEncryptionKeyFromPassword(password)
+	formatEncryptionKey, err = f.deriveFormatEncryptionKeyFromPassword(password)
+	if err != nil {
+		return nil, time.Time{}, nil, nil, nil, err
+	}
+
+	repoConfig, err = f.decryptFormatBytes(formatEncryptionKey)
+	if err != nil {
+		return nil, time.Time{}, nil, nil, nil, ErrInvalidPassword
+	}
+
+	return fb, cacheTime, f, repoConfig, formatEncryptionKey, nil
+}
+
+// ReadAndCacheRepoConfig loads the config from cache and returns the cache
+// time and the repo-config object.
+func ReadAndCacheRepoConfig(
+	ctx context.Context,
+	st blob.Storage,
+	password string,
+	cacheOpts *content.CachingOptions,
+	validDuration time.Duration,
+) (
+	cacheTime time.Time,
+	repoConfig *repositoryObjectFormat,
+	err error,
+) {
+	// nolint:dogsled
+	_, cacheTime, _, repoConfig, _, err = readAndCacheRepoConfig(ctx, st, password, cacheOpts, validDuration)
+	return cacheTime, repoConfig, err
+}
+
+// openWithConfig opens the repository with a given configuration, avoiding the need for a config file.
+func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, password string, options *Options, cacheOpts *content.CachingOptions, configFile string) (DirectRepository, error) {
+	cacheOpts = cacheOpts.CloneOrDefault()
+
+	fb, cacheTime, f, repoConfig, formatEncryptionKey, err := readAndCacheRepoConfig(ctx, st, password, cacheOpts,
+		lc.FormatBlobCacheDuration)
 	if err != nil {
 		return nil, err
 	}
 
-	repoConfig, err := f.decryptFormatBytes(formatEncryptionKey)
-	if err != nil {
-		return nil, ErrInvalidPassword
-	}
-
 	if repoConfig.FormattingOptions.EnablePasswordChange {
-		caching.HMACSecret = deriveKeyFromMasterKey(repoConfig.HMACSecret, f.UniqueID, localCacheIntegrityPurpose, localCacheIntegrityHMACSecretLength)
+		cacheOpts.HMACSecret = deriveKeyFromMasterKey(repoConfig.HMACSecret, f.UniqueID, localCacheIntegrityPurpose, localCacheIntegrityHMACSecretLength)
 	} else {
 		// deriving from formatEncryptionKey was actually a bug, that only matters will change when we change the password
-		caching.HMACSecret = deriveKeyFromMasterKey(formatEncryptionKey, f.UniqueID, localCacheIntegrityPurpose, localCacheIntegrityHMACSecretLength)
+		cacheOpts.HMACSecret = deriveKeyFromMasterKey(formatEncryptionKey, f.UniqueID, localCacheIntegrityPurpose, localCacheIntegrityHMACSecretLength)
 	}
 
 	fo := &repoConfig.FormattingOptions
@@ -224,10 +272,19 @@ func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 		fo.MaxPackSize = 20 << 20 // nolint:gomnd
 	}
 
+	// let local-config override when repository cache refresh interval is not set
+	if fo.FormatBlobCacheDuration == 0 {
+		fo.FormatBlobCacheDuration = lc.FormatBlobCacheDuration
+	}
+
 	cmOpts := &content.ManagerOptions{
 		RepositoryFormatBytes: fb,
 		TimeNow:               defaultTime(options.TimeNowFunc),
 		DisableInternalLog:    options.DisableInternalLog,
+	}
+
+	if locked, _ := repoConfig.UpgradeLock.IsLocked(cmOpts.TimeNow()); locked && options.UpgradeOwnerID != repoConfig.UpgradeLock.OwnerID {
+		return nil, ErrRepositoryUnavailableDueToUpgrageInProgress
 	}
 
 	// do not embed repository format info in pack blobs when password change is enabled.
@@ -240,7 +297,11 @@ func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 		return nil, errors.Wrap(err, "unable to add throttler")
 	}
 
-	scm, err := content.NewSharedManager(ctx, st, fo, caching, cmOpts)
+	// background/interleaving upgrade lock storage monitor
+	st = upgradeLockMonitor(ctx, options.UpgradeOwnerID, st, password, cacheOpts, fo.FormatBlobCacheDuration,
+		cacheTime, cmOpts.TimeNow)
+
+	scm, err := content.NewSharedManager(ctx, st, fo, cacheOpts, cmOpts)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to create shared content manager")
 	}
@@ -269,7 +330,7 @@ func openWithConfig(ctx context.Context, st blob.Storage, lc *LocalConfig, passw
 		throttler: throttler,
 		directRepositoryParameters: directRepositoryParameters{
 			uniqueID:            f.UniqueID,
-			cachingOptions:      *caching,
+			cachingOptions:      *cacheOpts,
 			formatBlob:          f,
 			formatEncryptionKey: formatEncryptionKey,
 			timeNow:             cmOpts.TimeNow,
@@ -291,6 +352,49 @@ func addThrottler(ctx context.Context, st blob.Storage) (blob.Storage, throttlin
 	}
 
 	return throttling.NewWrapper(st, throttler), throttler, nil
+}
+
+func upgradeLockMonitor(
+	ctx context.Context,
+	upgradeOwnerID string,
+	st blob.Storage,
+	password string,
+	cacheOpts *content.CachingOptions,
+	lockRefreshInterval time.Duration,
+	lastSync time.Time,
+	now func() time.Time,
+) blob.Storage {
+	var m sync.RWMutex
+
+	return beforeop.NewWrapper(st, func() error {
+		// protected read for lastSync because it will be shared between
+		// parallel storage operations
+		m.RLock()
+		if lastSync.Add(lockRefreshInterval).Before(now()) {
+			m.RUnlock()
+			return nil
+		}
+		m.RUnlock()
+
+		cacheTime, repoConfig, err := ReadAndCacheRepoConfig(ctx, st, password, cacheOpts, lockRefreshInterval)
+		if err != nil {
+			return err
+		}
+
+		// only allow the upgrade owner to perform storage operations
+		if locked, _ := repoConfig.UpgradeLock.IsLocked(now()); locked && upgradeOwnerID != repoConfig.UpgradeLock.OwnerID {
+			return ErrRepositoryUnavailableDueToUpgrageInProgress
+		}
+
+		m.Lock()
+		// prevent backward jumps on lastSync
+		if lastSync.Before(cacheTime) {
+			lastSync = cacheTime
+		}
+		m.Unlock()
+
+		return nil
+	})
 }
 
 func throttlingLimitsFromConnectionInfo(ctx context.Context, ci blob.ConnectionInfo) throttling.Limits {
@@ -347,29 +451,35 @@ func formatBytesCachingEnabled(cacheDirectory string, validDuration time.Duratio
 	return validDuration > 0
 }
 
-func readFormatBlobBytesFromCache(ctx context.Context, cachedFile string, validDuration time.Duration) ([]byte, error) {
+func readFormatBlobBytesFromCache(ctx context.Context, cachedFile string, validDuration time.Duration) ([]byte, time.Time, error) {
 	cst, err := os.Stat(cachedFile)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to open cache file")
+		return nil, time.Time{}, errors.Wrap(err, "unable to open cache file")
 	}
 
-	if clock.Now().Sub(cst.ModTime()) > validDuration {
+	cacheTime := cst.ModTime()
+	if clock.Now().Sub(cacheTime) > validDuration {
 		// got cached file, but it's too old, remove it
-		if err := os.Remove(cachedFile); err != nil {
+		if err = os.Remove(cachedFile); err != nil {
 			log(ctx).Debugf("unable to remove cache file: %v", err)
 		}
 
-		return nil, errors.Errorf("cached file too old")
+		return nil, time.Time{}, errors.Errorf("cached file too old")
 	}
 
-	return os.ReadFile(cachedFile) //nolint:wrapcheck,gosec
+	data, err := os.ReadFile(cachedFile) // nolint:gosec
+	if err != nil {
+		return nil, time.Time{}, errors.Wrapf(err, "failed to read the cache file %q", cachedFile)
+	}
+
+	return data, cacheTime, nil
 }
 
-func readAndCacheFormatBlobBytes(ctx context.Context, st blob.Storage, cacheDirectory string, validDuration time.Duration) ([]byte, error) {
+func readAndCacheFormatBlobBytes(ctx context.Context, st blob.Storage, cacheDirectory string, validDuration time.Duration) ([]byte, time.Time, error) {
 	cachedFile := filepath.Join(cacheDirectory, "kopia.repository")
 
 	if validDuration == 0 {
-		validDuration = defaultFormatBlobCacheDuration
+		validDuration = DefaultFormatBlobCacheDuration
 	}
 
 	if cacheDirectory != "" {
@@ -380,11 +490,11 @@ func readAndCacheFormatBlobBytes(ctx context.Context, st blob.Storage, cacheDire
 
 	cacheEnabled := formatBytesCachingEnabled(cacheDirectory, validDuration)
 	if cacheEnabled {
-		b, err := readFormatBlobBytesFromCache(ctx, cachedFile, validDuration)
+		b, cacheTime, err := readFormatBlobBytesFromCache(ctx, cachedFile, validDuration)
 		if err == nil {
 			log(ctx).Debugf("kopia.repository retrieved from cache")
 
-			return b, nil
+			return b, cacheTime, nil
 		}
 
 		log(ctx).Debugf("kopia.repository could not be fetched from cache: %v", err)
@@ -396,7 +506,7 @@ func readAndCacheFormatBlobBytes(ctx context.Context, st blob.Storage, cacheDire
 	defer b.Close()
 
 	if err := st.GetBlob(ctx, FormatBlobID, 0, -1, &b); err != nil {
-		return nil, errors.Wrap(err, "error getting format blob")
+		return nil, time.Time{}, errors.Wrap(err, "error getting format blob")
 	}
 
 	if cacheEnabled {
@@ -405,5 +515,5 @@ func readAndCacheFormatBlobBytes(ctx context.Context, st blob.Storage, cacheDire
 		}
 	}
 
-	return b.ToByteSlice(), nil
+	return b.ToByteSlice(), clock.Now(), nil
 }

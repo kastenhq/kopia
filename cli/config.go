@@ -63,6 +63,7 @@ func (c *App) optionsFromFlags(ctx context.Context) *repo.Options {
 	return &repo.Options{
 		TraceStorage:       c.traceStorage,
 		DisableInternalLog: c.disableInternalLog,
+		UpgradeOwnerID:     c.upgradeOwnerID,
 	}
 }
 

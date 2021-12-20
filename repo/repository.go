@@ -79,6 +79,10 @@ type DirectRepositoryWriter interface {
 	ContentManager() *content.WriteManager
 	SetParameters(ctx context.Context, m content.MutableParameters) error
 	ChangePassword(ctx context.Context, newPassword string) error
+
+	SetUpgradeLockIntent(ctx context.Context, l content.UpgradeLock) (*content.UpgradeLock, error)
+	CommitUpgrade(ctx context.Context) error
+	RollbackUpgrade(ctx context.Context) error
 }
 
 type directRepositoryParameters struct {
