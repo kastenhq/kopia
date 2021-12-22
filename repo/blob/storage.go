@@ -59,8 +59,9 @@ type Reader interface {
 
 // PutOptions represents put-options for a single BLOB in a storage.
 type PutOptions struct {
-	RetentionMode   string
-	RetentionPeriod time.Duration
+	RetentionMode    string
+	RetentionPeriod  time.Duration
+	RecreateIfExists bool
 }
 
 // HasRetentionOptions returns true when blob-retention settings have been
