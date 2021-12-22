@@ -17,6 +17,9 @@ var ErrSetTimeUnsupported = errors.Errorf("SetTime is not supported")
 // ErrInvalidRange is returned when the requested blob offset or length is invalid.
 var ErrInvalidRange = errors.Errorf("invalid blob offset or length")
 
+// ErrBlobAlreadyExists is returned when attempting to put a blob that already exists.
+var ErrBlobAlreadyExists = errors.New("Blob already exists")
+
 // Bytes encapsulates a sequence of bytes, possibly stored in a non-contiguous buffers,
 // which can be written sequentially or treated as a io.Reader.
 type Bytes interface {
