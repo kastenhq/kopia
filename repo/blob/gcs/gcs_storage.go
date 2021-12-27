@@ -98,7 +98,8 @@ func (gcs *gcsStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes, 
 
 	ctx, cancel := context.WithCancel(ctx)
 
-	obj := gcs.bucket.Object(gcs.getObjectNameString(b))
+	conds := gcsclient.Conditions{DoesNotExist: !opts.RecreateIfExists}
+	obj := gcs.bucket.Object(gcs.getObjectNameString(b)).If(conds)
 	writer := obj.NewWriter(ctx)
 	writer.ChunkSize = writerChunkSize
 	writer.ContentType = "application/x-kopia"
