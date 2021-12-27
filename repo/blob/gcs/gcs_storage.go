@@ -101,7 +101,11 @@ func (gcs *gcsStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes, 
 
 	ctx, cancel := context.WithCancel(ctx)
 
+<<<<<<< HEAD
 	conds := gcsclient.Conditions{DoesNotExist: !opts.RecreateIfExists}
+=======
+	conds := gcsclient.Conditions{DoesNotExist: opts.DoNotRecreate}
+>>>>>>> 18c5d175 (Translate Kopia "DoNotRecreate" into GCS condition)
 	obj := gcs.bucket.Object(gcs.getObjectNameString(b)).If(conds)
 	writer := obj.NewWriter(ctx)
 	writer.ChunkSize = writerChunkSize
