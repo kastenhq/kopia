@@ -76,8 +76,11 @@ func translateError(err error) error {
 	var ae *googleapi.Error
 
 	if errors.As(err, &ae) {
-		if ae.Code == http.StatusRequestedRangeNotSatisfiable {
+		switch ae.Code {
+		case http.StatusRequestedRangeNotSatisfiable:
 			return blob.ErrInvalidRange
+		case http.StatusPreconditionFailed:
+			return blob.ErrBlobAlreadyExists
 		}
 	}
 
