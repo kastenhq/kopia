@@ -108,14 +108,21 @@ func VerifyStorage(ctx context.Context, t *testing.T, r blob.Storage, opts blob.
 	})
 
 	t.Run("OverwriteBlobs", func(t *testing.T) {
+		newContents := []byte{99}
+
 		for _, b := range blocks {
 			b := b
 
 			t.Run(string(b.blk), func(t *testing.T) {
 				t.Parallel()
-
-				require.NoErrorf(t, r.PutBlob(ctx, b.blk, gather.FromSlice(b.contents), blob.PutOptions{}), "can't put blob: %v", b)
-				AssertGetBlob(ctx, t, r, b.blk, b.contents)
+				err := r.PutBlob(ctx, b.blk, gather.FromSlice(newContents), opts)
+				if opts.DoNotRecreate {
+					require.ErrorIsf(t, err, blob.ErrBlobAlreadyExists, "overwrote blob: %v", b)
+					AssertGetBlob(ctx, t, r, b.blk, b.contents)
+				} else {
+					require.NoErrorf(t, err, "can't put blob: %v", b)
+					AssertGetBlob(ctx, t, r, b.blk, newContents)
+				}
 			})
 		}
 	})
