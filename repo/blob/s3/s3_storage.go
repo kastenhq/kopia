@@ -122,6 +122,10 @@ func (s *s3Storage) getVersionMetadata(ctx context.Context, b blob.ID, version s
 }
 
 func (s *s3Storage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes, opts blob.PutOptions) error {
+	if opts.DoNotRecreate {
+		return errors.New("setting blob do-not-recreate is not supported")
+	}
+
 	_, err := s.putBlob(ctx, b, data, opts)
 
 	return err
