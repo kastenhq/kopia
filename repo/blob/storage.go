@@ -62,15 +62,15 @@ type Reader interface {
 
 // PutOptions represents put-options for a single BLOB in a storage.
 type PutOptions struct {
-<<<<<<< HEAD
 	RetentionMode    string
 	RetentionPeriod  time.Duration
-	RecreateIfExists bool
-=======
-	RetentionMode   string
-	RetentionPeriod time.Duration
+  // if true, PutBlob will fail with ErrBlobAlready exists if a blob with the same ID exists.
 	DoNotRecreate   bool
->>>>>>> f4778d9a (Add DoNotRecreate field in PutOptions struct)
+
+	// if not empty, set the provided timestamp on the blob instead of server-assigned,
+	// if unsupported by the server return ErrSetTimeUnsupported
+	SetModTime time.Time
+	GetModTime *time.Time // if != nil, populate the value pointed at with the actual modification time
 }
 
 // HasRetentionOptions returns true when blob-retention settings have been
@@ -96,9 +96,6 @@ type Storage interface {
 	// PutBlob uploads the blob with given data to the repository or replaces existing blob with the provided
 	// id with contents gathered from the specified list of slices.
 	PutBlob(ctx context.Context, blobID ID, data Bytes, opts PutOptions) error
-
-	// SetTime changes last modification time of a given blob, if supported, returns ErrSetTimeUnsupported otherwise.
-	SetTime(ctx context.Context, blobID ID, t time.Time) error
 
 	// DeleteBlob removes the blob from storage. Future Get() operations will fail with ErrNotFound.
 	DeleteBlob(ctx context.Context, blobID ID) error
@@ -267,4 +264,20 @@ func DeleteMultiple(ctx context.Context, st Storage, ids []ID, parallelism int) 
 	}
 
 	return errors.Wrap(eg.Wait(), "error deleting blobs")
+}
+
+// PutBlobAndGetMetadata invokes PutBlob and returns the resulting Metadata.
+func PutBlobAndGetMetadata(ctx context.Context, st Storage, blobID ID, data Bytes, opts PutOptions) (Metadata, error) {
+	// ensure GetModTime is set, or reuse existing one.
+	if opts.GetModTime == nil {
+		opts.GetModTime = new(time.Time)
+	}
+
+	err := st.PutBlob(ctx, blobID, data, opts)
+
+	return Metadata{
+		BlobID:    blobID,
+		Length:    int64(data.Length()),
+		Timestamp: *opts.GetModTime,
+	}, err // nolint:wrapcheck
 }
