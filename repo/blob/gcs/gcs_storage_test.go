@@ -49,6 +49,23 @@ func TestGCSStorage(t *testing.T) {
 	require.NoError(t, providervalidation.ValidateProvider(ctx, st, blobtesting.TestValidationOptions))
 }
 
+func TestGCSStorageBlobRecreateForbidden(t *testing.T) {
+	t.Parallel()
+	testutil.ProviderTest(t)
+
+	ctx := testlogging.Context(t)
+
+	st, err := gcs.New(ctx, mustGetOptionsOrSkip(t, uuid.NewString()))
+	require.NoError(t, err)
+
+	defer st.Close(ctx)
+	defer blobtesting.CleanupOldData(ctx, t, st, 0)
+
+	blobtesting.VerifyStorage(ctx, t, st, blob.PutOptions{DoNotRecreate: true})
+	blobtesting.AssertConnectionInfoRoundTrips(ctx, t, st)
+	require.NoError(t, providervalidation.ValidateProvider(ctx, st, blobtesting.TestValidationOptions))
+}
+
 func TestGCSStorageInvalid(t *testing.T) {
 	t.Parallel()
 	testutil.ProviderTest(t)
