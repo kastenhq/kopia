@@ -62,10 +62,11 @@ type Reader interface {
 
 // PutOptions represents put-options for a single BLOB in a storage.
 type PutOptions struct {
-	RetentionMode    string
-	RetentionPeriod  time.Duration
-  // if true, PutBlob will fail with ErrBlobAlready exists if a blob with the same ID exists.
-	DoNotRecreate   bool
+	RetentionMode   string
+	RetentionPeriod time.Duration
+
+	// if true, PutBlob will fail with ErrBlobAlready exists if a blob with the same ID exists.
+	DoNotRecreate bool
 
 	// if not empty, set the provided timestamp on the blob instead of server-assigned,
 	// if unsupported by the server return ErrSetTimeUnsupported
