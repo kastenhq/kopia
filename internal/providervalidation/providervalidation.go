@@ -188,7 +188,7 @@ func ValidateProvider(ctx context.Context, st blob.Storage, opt Options) error {
 
 	log(ctx).Infof("Validating blob recreation...")
 
-	if opt.SupportIdempotentCreates {
+	if !opt.SupportIdempotentCreates {
 		err := st.PutBlob(ctx, "dummy_id", gather.FromSlice([]byte{99}), blob.PutOptions{DoNotRecreate: true})
 		if err == nil {
 			return errors.New("store should not support put-blob-no-overwrite, expected error")
