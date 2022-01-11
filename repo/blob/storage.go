@@ -65,7 +65,7 @@ type PutOptions struct {
 	RetentionMode   string
 	RetentionPeriod time.Duration
 
-	// if true, PutBlob will fail with ErrBlobAlready exists if a blob with the same ID exists.
+	// if true, PutBlob will fail with ErrBlobAlreadyExists if a blob with the same ID exists.
 	DoNotRecreate bool
 
 	// if not empty, set the provided timestamp on the blob instead of server-assigned,
