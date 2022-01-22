@@ -83,10 +83,14 @@ func (s *s3Storage) getBlobWithVersion(ctx context.Context, b blob.ID, version s
 	return blob.EnsureLengthExactly(output.Length(), length)
 }
 
+func isTokenExpired(err error) bool {
+	return err != nil && strings.Contains(err.Error(), blob.TokenExpiredErrStr)
+}
+
 func translateError(err error) error {
 	var me minio.ErrorResponse
 
-	if err != nil && strings.Contains(err.Error(), blob.TokenExpiredErrStr) {
+	if isTokenExpired(err) {
 		return blob.ErrTokenExpired
 	}
 
@@ -159,7 +163,7 @@ func (s *s3Storage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes, opt
 		Mode:            retentionMode,
 	})
 
-	if err != nil && strings.Contains(err.Error(), blob.TokenExpiredErrStr) {
+	if isTokenExpired(err) {
 		return versionMetadata{}, blob.ErrTokenExpired
 	}
 
@@ -220,7 +224,7 @@ func (s *s3Storage) ListBlobs(ctx context.Context, prefix blob.ID, callback func
 	})
 	for o := range oi {
 		if err := o.Err; err != nil {
-			if strings.Contains(err.Error(), blob.TokenExpiredErrStr) {
+			if isTokenExpired(err) {
 				return blob.ErrTokenExpired
 			}
 

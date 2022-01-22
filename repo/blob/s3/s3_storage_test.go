@@ -130,6 +130,40 @@ func getProviderOptions(tb testing.TB, envName string) *Options {
 	return &o
 }
 
+// verifyTokenExpirationForGetBlob verifies that the token expiration
+// error is returned by GetBlob.
+// nolint:thelper
+func verifyTokenExpirationForGetBlob(ctx context.Context, t *testing.T, r blob.Storage) {
+	blocks := []struct {
+		blk      blob.ID
+		contents []byte
+	}{
+		{blk: "abcdbbf4f0507d054ed5a80a5b65086f602b", contents: []byte{}},
+		{blk: "zxce0e35630770c54668a8cfb4e414c6bf8f", contents: []byte{1}},
+	}
+
+	for _, b := range blocks {
+		blobtesting.AssertTokenExpired(ctx, t, r, b.blk)
+	}
+}
+
+// verifyBlobNotFoundForGetBlob verifies that the ErrBlobNotFound
+// error is returned by GetBlob.
+// nolint:thelper
+func verifyBlobNotFoundForGetBlob(ctx context.Context, t *testing.T, r blob.Storage) {
+	blocks := []struct {
+		blk      blob.ID
+		contents []byte
+	}{
+		{blk: "abcdbbf4f0507d054ed5a80a5b65086f602b", contents: []byte{}},
+		{blk: "zxce0e35630770c54668a8cfb4e414c6bf8f", contents: []byte{1}},
+	}
+
+	for _, b := range blocks {
+		blobtesting.AssertGetBlobNotFound(ctx, t, r, b.blk)
+	}
+}
+
 func TestS3StorageProviders(t *testing.T) {
 	t.Parallel()
 
@@ -275,6 +309,12 @@ func TestTokenExpiration(t *testing.T) {
 	// Get the credentials and custom provider
 	creds, customProvider := customCredentialsAndProvider(awsAccessKeyID, awsSecretAccessKeyID, role, region)
 
+	// Verify that the credentials can be used to get a new value
+	val, err := creds.Get()
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+
 	createBucket(t, &Options{
 		Endpoint:        awsEndpoint,
 		AccessKeyID:     awsAccessKeyID,
@@ -283,12 +323,6 @@ func TestTokenExpiration(t *testing.T) {
 		Region:          region,
 		DoNotUseTLS:     true,
 	})
-
-	// Verify that the credentials can be used to get a new value
-	val, err := creds.Get()
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
 
 	require.NotEqual(t, awsAccessKeyID, val.AccessKeyID)
 	require.NotEqual(t, awsSecretAccessKeyID, val.SecretAccessKey)
@@ -312,18 +346,18 @@ func TestTokenExpiration(t *testing.T) {
 	// we expect errors that indicate that the blob was not found.
 	// customProvider.expired is false at this point since the customProvider
 	// was initialized with false.
-	blobtesting.VerifyBlobNotFoundForGetBlob(ctx, t, rst)
+	verifyBlobNotFoundForGetBlob(ctx, t, rst)
 
 	// Atomic set the expired flag to true here to force token expiration.
 	// After this we expect to get token expiration errors.
-	customProvider.expired.Store(true)
-	blobtesting.VerifyTokenExpirationForGetBlob(ctx, t, rst)
+	customProvider.forceExpired.Store(true)
+	verifyTokenExpirationForGetBlob(ctx, t, rst)
 
 	// Reset the expired flag and expire the credentials, so that a new valid token
 	// is obtained by the client.
 	creds.Expire()
-	customProvider.expired.Store(false)
-	blobtesting.VerifyBlobNotFoundForGetBlob(ctx, t, rst)
+	customProvider.forceExpired.Store(false)
+	verifyBlobNotFoundForGetBlob(ctx, t, rst)
 }
 
 func TestS3StorageMinio(t *testing.T) {
@@ -685,29 +719,31 @@ func createMinioSessionToken(t *testing.T, minioEndpoint, kopiaUserName, kopiaUs
 // provider to force expiration of the credentials. This causes
 // the next call to Retrieve to return expired credentials.
 type customProvider struct {
-	expired     atomic.Value
-	stsProvider miniocreds.STSAssumeRole
+	forceExpired atomic.Value
+	stsProvider  miniocreds.STSAssumeRole
 }
 
+const expiredSessionToken = "IQoJb3JpZ2luX2VjEBMaCXVzLXdlc3QtMiJIM" +
+	"EYCIQDCu87ZTm4eMNLRvcFgkYycknuxWz8yZ8PQaElWZWameAIhAMOQlDkUqO" +
+	"HEsoRqCYAF1anKEuhgdrC8x1KaqlAb81nsKpwCCDwQAxoMMDM2Nzc2MzQwMTA" +
+	"yIgy03tG3mSbTUIsW83kq+QFIl2JcsjOQn2pqVmobXRHhZLmHWhFA0ti99Myn" +
+	"JA5Hj2rp1aK1zhEcA650pocUkXldMMvZ0qSShGggeIy7+6Y9XE7JXZpo/QKna" +
+	"0TJXTcxcjdgmgLm4vdxJRtdMaDdXmx3gKPuti+ez211tVjJLTjKdGMUH8jQoA" +
+	"qLe6jvF3ARWODP0SySAO/q3Q/eQDtwdMf/fYBmRVOtIOzPV7obzCQ45PsJkcE" +
+	"Ae60XFO5C47gbwne4eSEiipKAAA4zCJAA9pfa1S++4il8eMifGc3XDjvddn9i" +
+	"A0/tNI8bjsbCF1t9VtVcvLcaK7MOvMrNeNztLO8GyNxgcv9uUC0w0+KtjwY6n" +
+	"AGTxeDWJUKBfXuc7CeUgpjuflTf4aAq+Gpe5T+m2FbStRMgk6uThtPiw53EUC" +
+	"w/1tyUNysTAn1bYffmLVhRU9CP86Hj23C01/IeLjXzSXAF8T6nv7nmAO50D7l" +
+	"RCcVWcntllxyL/sUZ7VbMr7xZxWWbilu8pVtQqTwwBxZO0rth8XftMzGQ5oyd" +
+	"82CdcwRB+t7K1LEmRErltbteGtM="
+
 func (cp *customProvider) Retrieve() (miniocreds.Value, error) {
-	if cp.IsExpired() {
+	if cp.forceExpired.Load().(bool) {
 		return miniocreds.Value{
-			AccessKeyID:     "ASIAQREAKNKDF6IFPFPF",
-			SecretAccessKey: "/z/ZFyu1oHKvZ8FpTnCHq7nrtCYk21Z3G33aJ1kX",
-			SessionToken: `IQoJb3JpZ2luX2VjEAgaCXVzLXdlc3QtMiJHMEUCIE
-			9ksww79k8+88oFB5gFTM+vfx93UGv95CwbVPWRWjPqAiEA4Inwdu81YlGiXk
-			VVAO8XnTVlDcJZ47oaF45lkebIQ4sqpQII4f//////////ARADGgwwMzY3Nz
-			YzNDAxMDIiDMKMi295qUSc2Ucvvir5AWl8REdzLsvkok88mXaJAAaapLun00
-			7IlSutXnM7V/OYsbR1avxN81xU5MJqq6RGeap1k0pr5NdQuzRBFATcLIwuYG
-			UZw6FxwpUks/tmad8KTe/aNcj0iqXzqElcMV/myDG5B6Mkkg+rtN36bH3b1U
-			TncvYa+OKIdx4x3oGMJpIHCxXeE8jsIww+YyQ2+20/p+H+oPC0i96vlSDMJ4
-			qO9SP18FXcMn5kp5OujIRdebc+ZtIid2UwXgaZ2YeQX2Gtqyb41KNZHSZmXA
-			/qjT95B3ZN2HagNIrieERZfLFTQ5kNZjVeQNEFAyy4I6sDjH3mpuaBjLDzaF
-			nDQjDjp8qNBjqdAQ4EcapiFs9/2AcpwIyi0zcPvoIhR5c1/rrjBW4l63rMTH
-			e/DYQ69n8ZrQNjegxBSDFzSZDgIPGo8stFLvT1x8zUABilkCnnxyDcon/ysV
-			LPYsKo2C/dJokOcipL5oyzZuW7J6JSZuUd/AxCgEbkFxRXQBVx35ROzZDqNp
-			sm3aqkHO0afxVkula9oTbUMDHBGFiCZkLLqFVzBaiS0Z8=`,
-			SignerType: miniocreds.SignatureV4,
+			AccessKeyID:     "ASIAQREAKNKDBR4F5F2I",
+			SecretAccessKey: "EF82nKmZbnFETa96xxx1C3k20hG4Nw+2v+FBNjp3",
+			SessionToken:    expiredSessionToken,
+			SignerType:      miniocreds.SignatureV2,
 		}, nil
 	}
 
@@ -715,7 +751,7 @@ func (cp *customProvider) Retrieve() (miniocreds.Value, error) {
 }
 
 func (cp *customProvider) IsExpired() bool {
-	return cp.expired.Load().(bool)
+	return cp.forceExpired.Load().(bool)
 }
 
 // customCredentialsAndProvider creates a custom provider and returns credentials
@@ -739,7 +775,7 @@ func customCredentialsAndProvider(accessKey, secretKey, roleARN, region string) 
 		},
 	}
 	// Initialize expired to false
-	cp.expired.Store(false)
+	cp.forceExpired.Store(false)
 
 	return miniocreds.New(cp), cp
 }
