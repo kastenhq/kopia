@@ -290,11 +290,8 @@ func TestTokenExpiration(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 
-	stsAccessKeyID := val.AccessKeyID
-	stsSecretKeyID := val.SecretAccessKey
-
-	require.NotEqual(t, awsAccessKeyID, stsAccessKeyID)
-	require.NotEqual(t, awsSecretAccessKeyID, stsSecretKeyID)
+	require.NotEqual(t, awsAccessKeyID, val.AccessKeyID)
+	require.NotEqual(t, awsSecretAccessKeyID, val.SecretAccessKey)
 
 	// Create new storage using the credentials
 	ctx := testlogging.Context(t)
