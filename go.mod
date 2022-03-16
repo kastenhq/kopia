@@ -10,7 +10,7 @@ require (
 	github.com/GehirnInc/crypt v0.0.0-20200316065508-bb7000b8a962 // indirect
 	github.com/alecthomas/kingpin v0.0.0-20200323085623-b6657d9477a6 // this is pulling master, which is newer than v2
 	github.com/alecthomas/units v0.0.0-20210927113745-59d0afb8317a
-	github.com/aws/aws-sdk-go v1.43.9
+	github.com/aws/aws-sdk-go v1.43.20
 	github.com/chmduquesne/rollinghash v4.0.0+incompatible
 	github.com/dustinkirkland/golang-petname v0.0.0-20191129215211-8e5a1ed0cff0
 	github.com/fatih/color v1.13.0
@@ -62,7 +62,7 @@ require (
 	google.golang.org/api v0.70.0
 	google.golang.org/grpc v1.44.0
 	google.golang.org/protobuf v1.27.1
-	gopkg.in/ini.v1 v1.63.2 // indirect
+	gopkg.in/ini.v1 v1.66.2 // indirect
 	gopkg.in/kothar/go-backblaze.v0 v0.0.0-20210124194846-35409b867216
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
