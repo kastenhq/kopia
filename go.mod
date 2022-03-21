@@ -45,7 +45,7 @@ require (
 	github.com/stretchr/testify v1.7.0
 	github.com/studio-b12/gowebdav v0.0.0-20211106090535-29e74efa701f
 	github.com/tg123/go-htpasswd v1.2.0
-	github.com/zalando/go-keyring v0.1.1
+	github.com/zalando/go-keyring v0.2.0
 	github.com/zeebo/blake3 v0.2.2
 	go.opencensus.io v0.23.0 // indirect
 	go.uber.org/zap v1.21.0
@@ -78,7 +78,7 @@ require (
 	github.com/danieljoos/wincred v1.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
-	github.com/godbus/dbus/v5 v5.0.5 // indirect
+	github.com/godbus/dbus/v5 v5.0.6 // indirect
 	github.com/golang/glog v1.0.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/googleapis/gax-go/v2 v2.1.1 // indirect
@@ -108,16 +108,17 @@ require (
 require (
 	github.com/chromedp/cdproto v0.0.0-20220217222649-d8c14a5c6edf
 	github.com/chromedp/chromedp v0.7.8
+	github.com/hashicorp/golang-lru v0.5.4
 )
 
 require (
 	cloud.google.com/go/compute v1.3.0 // indirect
 	cloud.google.com/go/iam v0.1.1 // indirect
+	github.com/alessio/shellescape v1.4.1 // indirect
 	github.com/chromedp/sysutil v1.0.0 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.1.0 // indirect
-	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 )
