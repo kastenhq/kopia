@@ -1,0 +1,75 @@
+name: Build boring image
+on:
+  push:
+    branches: [ boring ]
+  workflow_dispatch:
+    inputs:
+      goversion:
+        description: 'Go version'
+        required: true
+        default: '1.17.9b7'
+      tarsha256:
+        description: 'SHA-256 for the downloaded Go distribution tar file'
+        required: true
+        default: '9469d1b4c10f59c921c4666c52baba5f6ca63b1cce0eca95e03b5713ef27577c'
+
+jobs:
+  build-image:
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: "${{ github.repository_owner }}/goboring"
+
+
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - name: Generate image tag
+        id: image-version
+        env:
+          DEFAULT_GO_VERSION: '1.17.9b7'
+          DEFAULT_TAR_SHA256: '9469d1b4c10f59c921c4666c52baba5f6ca63b1cce0eca95e03b5713ef27577c'
+          GO_VERSION: ${{ inputs.goversion }}
+          TAR_SHA256: ${{ inputs.tarsha256 }}
+        run: |
+          echo Basic Metadata
+          echo "goversion: ${{ github.event.inputs.goversion }}"
+          echo "event: ${{ github.event_name }}"
+          echo "repository: ${{ github.repository }}"
+          echo "git ref: ${{ github.ref }}"
+          echo "context URL: ${{ github.repositoryUrl }}#${{ github.ref }}"
+          echo "context URL: ${{ github.server_url }}/${{ github.repository }}/raw/${{ github.ref_name }}/tools/docker-goboring/Dockerfile"
+          echo "DEFAULT_GO_VERSION: ${DEFAULT_GO_VERSION}"
+          echo "GO_VERSION=${GO_VERSION:-${DEFAULT_GO_VERSION}}" >> "${GITHUB_ENV}"
+          echo "TAR_SHA256=${TAR_SHA256:-${DEFAULT_TAR_SHA256}}" >> "${GITHUB_ENV}"
+
+      - name: Docker image metadata
+        id: meta
+        uses: docker/metadata-action@v3
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            ${{ env.GO_VERSION }}
+            ${{ env.GO_VERSION }}-{{date 'YYYY.MM.DD-hhmm'}}
+
+      - name: Log to container registry
+        uses: docker/login-action@v1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v2
+        with:
+          context: ${{ github.server_url }}/${{ github.repository }}/raw/${{ github.ref_name }}/tools/docker-goboring/Dockerfile
+          build-args: |
+            goVersion=${{ env.GO_VERSION }}
+            tarSha256=${{ env.TAR_SHA256 }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
