@@ -1,0 +1,75 @@
+name: Build boring kopia image
+on:
+  push:
+    branches: [ "boring" ]
+  workflow_dispatch:
+    inputs:
+      goversion:
+        description: 'Go version'
+        required: true
+        default: '1.17.9b7'
+      kopiaCommit:
+        description: 'branch, tag or ref for kopia commit'
+        required: true
+        default: 'kasten'
+
+jobs:
+  build-image:
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: "${{ github.repository_owner }}/boring-kopia"
+
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - name: Generate image tag
+        id: image-version
+        env:
+          DEFAULT_GO_VERSION: '1.17.9b7'
+          DEFAULT_KOPIA_COMMIT: 'kasten'
+          GO_VERSION: ${{ inputs.goversion }}
+          KOPIA_COMMIT: ${{ inputs.kopiaCommit }}
+
+        run: |
+          echo Basic Metadata
+          echo "goversion: ${{ github.event.inputs.goversion }}"
+          echo "event: ${{ github.event_name }}"
+          echo "repository: ${{ github.repository }}"
+          echo "git ref: ${{ github.ref }}"
+          echo "context URL: ${{ github.repositoryUrl }}#${{ github.ref }}"
+          echo "context URL: ${{ github.server_url }}/${{ github.repository }}/raw/${{ github.ref_name }}/tools/docker-boring/Dockerfile"
+          echo "GO_VERSION=${GO_VERSION:-${DEFAULT_GO_VERSION}}" >> "${GITHUB_ENV}"
+          echo "KOPIA_COMMIT=${KOPIA_COMMIT:-${DEFAULT_KOPIA_COMMIT}}" >> "${GITHUB_ENV}"
+
+
+      - name: Docker image metadata
+        id: meta
+        uses: docker/metadata-action@v3
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            {{date 'YYYY.MM.DD-hhmm'}}-${{ env.KOPIA_COMMIT }}
+            {{date 'YYYY.MM.DD-hhmm'}}-${{ env.KOPIA_COMMIT }}-${{ env.GO_VERSION }}
+
+      - name: Log to container registry
+        uses: docker/login-action@v1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v2
+        with:
+          context: ${{ github.server_url }}/${{ github.repository }}/raw/${{ github.ref_name }}/tools/docker-boring/Dockerfile
+          build-args: |
+            goVersion=${{ env.GO_VERSION }}
+            kopiaCommit=${{ env.KOPIA_COMMIT }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
