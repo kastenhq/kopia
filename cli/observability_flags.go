@@ -15,13 +15,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 	"github.com/prometheus/common/expfmt"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/jaeger"
-	"go.opentelemetry.io/otel/sdk/resource"
-	"go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
-
-	"github.com/kopia/kopia/repo"
 )
 
 // nolint:gochecknoglobals
@@ -48,8 +41,6 @@ type observabilityFlags struct {
 
 	stopPusher chan struct{}
 	pusherWG   sync.WaitGroup
-
-	traceProvider *trace.TracerProvider
 }
 
 func (c *observabilityFlags) setup(svc appServices, app *kingpin.Application) {
@@ -131,43 +122,7 @@ func (c *observabilityFlags) startMetrics(ctx context.Context) error {
 		go c.pushPeriodically(ctx, pusher)
 	}
 
-	se, err := c.getSpanExporter()
-	if err != nil {
-		return err
-	}
-
-	r := resource.NewWithAttributes(
-		semconv.SchemaURL,
-		semconv.ServiceNameKey.String("kopia"),
-		semconv.ServiceVersionKey.String(repo.BuildVersion),
-	)
-
-	if se != nil {
-		tp := trace.NewTracerProvider(
-			trace.WithBatcher(se),
-			trace.WithResource(r),
-		)
-
-		otel.SetTracerProvider(tp)
-
-		c.traceProvider = tp
-	}
-
 	return nil
-}
-
-func (c *observabilityFlags) getSpanExporter() (trace.SpanExporter, error) {
-	if c.enableJaeger {
-		// Create the Jaeger exporter
-		exp, err := jaeger.New(jaeger.WithCollectorEndpoint())
-		if err != nil {
-			return nil, errors.Wrap(err, "unable to create Jaeger exporter")
-		}
-
-		return exp, nil
-	}
-
-	return nil, nil
 }
 
 func (c *observabilityFlags) stopMetrics(ctx context.Context) {
@@ -175,12 +130,6 @@ func (c *observabilityFlags) stopMetrics(ctx context.Context) {
 		close(c.stopPusher)
 
 		c.pusherWG.Wait()
-	}
-
-	if c.traceProvider != nil {
-		if err := c.traceProvider.Shutdown(ctx); err != nil {
-			log(ctx).Warnf("unable to shutdown trace provicer: %v", err)
-		}
 	}
 }
 
