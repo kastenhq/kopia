@@ -142,7 +142,7 @@ func (ks *KopiaSnapshotter) CreateSnapshot(source string) (snapID string, err er
 
 	log.Printf("done with snapshot create with output:\nSTDOUT:\n%s\nSTDERR:\n%s", stdOut, errOut)
 
-	return parseSnapID(strings.Split(errOut, "\n"))
+	return parseSnapID(strings.Split(stdOut, "\n"))
 }
 
 // RestoreSnapshot implements the Snapshotter interface, issues a kopia snapshot
@@ -295,8 +295,10 @@ func parseSnapID(lines []string) (string, error) {
 	pattern := regexp.MustCompile(`Created snapshot with root \S+ and ID (\S+)`)
 
 	for _, l := range lines {
+		log.Println("Parsing line: ", l)
 		match := pattern.FindAllStringSubmatch(l, 1)
 		if len(match) > 0 && len(match[0]) > 1 {
+			log.Println("match found for line: ", l)
 			return match[0][1], nil
 		}
 	}
