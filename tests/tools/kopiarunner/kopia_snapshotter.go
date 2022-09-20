@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,8 +140,7 @@ func (ks *KopiaSnapshotter) CreateSnapshot(source string) (snapID string, err er
 		return "", err
 	}
 
-	fmt.Println("snapsot create stdOut: ", stdOut)
-	fmt.Println("snapsot create stdErr: ", errOut)
+	log.Printf("done with snapshot create with output:\nSTDOUT:\n%s\nSTDERR:\n%s", stdOut, errOut)
 
 	return parseSnapID(strings.Split(errOut, "\n"))
 }
