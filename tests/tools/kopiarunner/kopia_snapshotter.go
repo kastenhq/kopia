@@ -134,10 +134,13 @@ func (ks *KopiaSnapshotter) ConnectOrCreateFilesystem(repoPath string) error {
 // CreateSnapshot implements the Snapshotter interface, issues a kopia snapshot
 // create command on the provided source path.
 func (ks *KopiaSnapshotter) CreateSnapshot(source string) (snapID string, err error) {
-	_, errOut, err := ks.Runner.Run("snapshot", "create", parallelFlag, strconv.Itoa(parallelSetting), noProgressFlag, source)
+	stdOut, errOut, err := ks.Runner.Run("snapshot", "create", parallelFlag, strconv.Itoa(parallelSetting), noProgressFlag, source)
 	if err != nil {
 		return "", err
 	}
+
+	fmt.Println("snapsot create stdOut: ", stdOut)
+	fmt.Println("snapsot create stdErr: ", errOut)
 
 	return parseSnapID(strings.Split(errOut, "\n"))
 }
