@@ -3,7 +3,7 @@
 builds:
 - env:
     - CGO_ENABLED={{ if index .Env "CGO_ENABLED"  }}{{ .Env.CGO_ENABLED }}{{ else }}0{{ end }}
-    - GOEXPERIMENT={{ if index .Env "GOEXPERIMENT"  }}{{ .Env.GOEXPERIMENT }}{{ else }}{{ end }}
+    - GOEXPERIMENT={{ .Env.GOEXPERIMENT }}
   goos:
     - linux
     - freebsd
