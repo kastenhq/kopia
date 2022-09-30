@@ -5,6 +5,7 @@ builds:
     env:
       - CGO_ENABLED=1 # required for go-sqlite3
       - GOEXPERIMENT=boringcrypto
+      - CC=gcc
     ldflags:
       - "-linkmode=external -extldflags=-static -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}"
     goos: [linux]
