@@ -2,7 +2,8 @@
 # Make sure to check the documentation at http://goreleaser.com
 builds:
 - env:
-  - CGO_ENABLED=0
+  - CGO_ENABLED={{ if index .Env "CGO_ENABLED"  }}{{ .Env.CGO_ENABLED }}{{ else }}0{{ end }}
+  - GOEXPERIMENT={{ if index .Env "GOEXPERIMENT"  }}{{ .Env.GOEXPERIMENT }}{{ else }}{{ end }}
   goos:
   - linux
   - freebsd
@@ -24,7 +25,7 @@ archives:
       freebsd: freebsd-experimental
       openbsd: openbsd-experimental
       amd64: x64
-    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}-{{ .Env.GOEXPERIMENT }}"
     wrap_in_directory: true
     format_overrides:
     - goos: windows
