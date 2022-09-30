@@ -3,7 +3,7 @@
 builds:
 - env:
     - CGO_ENABLED={{ if index .Env "CGO_ENABLED"  }}{{ .Env.CGO_ENABLED }}{{ else }}0{{ end }}
-    - GOEXPERIMENT={{ .Env.GOEXPERIMENT }}
+    - GOEXPERIMENT=boringcrypto
   goos:
     - linux
     - freebsd
