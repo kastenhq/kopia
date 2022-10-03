@@ -13,7 +13,7 @@ builds:
       - arm64
     ldflags:
     - -s -w -X "github.com/kopia/kopia/repo.BuildVersion={{.Version}}" -X "github.com/kopia/kopia/repo.BuildInfo={{.Commit}}" -X "github.com/kopia/kopia/repo.BuildGitHubRepo={{.Env.GITHUB_REPOSITORY}}"
-  - id: boring
+  - id: kopia_boring
     binary: kopia_boring
     env:
       - CGO_ENABLED=1
