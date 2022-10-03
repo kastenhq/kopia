@@ -14,6 +14,7 @@ builds:
     ldflags:
     - -s -w -X "github.com/kopia/kopia/repo.BuildVersion={{.Version}}" -X "github.com/kopia/kopia/repo.BuildInfo={{.Commit}}" -X "github.com/kopia/kopia/repo.BuildGitHubRepo={{.Env.GITHUB_REPOSITORY}}"
   - id: boring
+    binary: kopia_boring
     env:
       - CGO_ENABLED=1
       - GOEXPERIMENT=boringcrypto
@@ -33,7 +34,7 @@ archives:
       freebsd: freebsd-experimental
       openbsd: openbsd-experimental
       amd64: x64
-    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ .Experiment }}"
+    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}{{ .Binary }}"
     wrap_in_directory: true
     format_overrides:
     - goos: windows
@@ -51,7 +52,7 @@ nfpms:
     maintainer: Kopia Project <kopia-pmc@googlegroups.com>
     description: Fast and secure open source backup.
     license: Apache 2.0
-    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ .Binary }}"
     replacements:
       arm: armhf
     formats:
@@ -60,7 +61,7 @@ nfpms:
     bindir: /usr/bin
     overrides:
       rpm:
-        file_name_template: "{{ .ProjectName }}-{{ .Version }}.{{ .Arch }}"
+        file_name_template: "{{ .ProjectName }}-{{ .Version }}.{{ .Arch }}{{ .Binary }}"
         replacements:
           amd64: x86_64
           arm64: aarch64
