@@ -12,6 +12,7 @@ dist/
 .tools/
 tools/docker/bin-*
 kopia
+kopia_boring
 kopia.exe
 Makefile.local.mk
 .linterr.txt
