@@ -21,7 +21,7 @@ builds:
       - CC=gcc
       - CXX=g++
     ldflags:
-      - -s -w -X "github.com/kopia/kopia/repo.BuildVersion={{.Version}}" -X "github.com/kopia/kopia/repo.BuildInfo={{.Commit}}" -X "github.com/kopia/kopia/repo.BuildGitHubRepo={{.Env.GITHUB_REPOSITORY}}"
+      - -s -w -extldflags "-static" -X "github.com/kopia/kopia/repo.BuildVersion={{.Version}}" -X "github.com/kopia/kopia/repo.BuildInfo={{.Commit}}" -X "github.com/kopia/kopia/repo.BuildGitHubRepo={{.Env.GITHUB_REPOSITORY}}"
     goos: [linux]
     goarch: [amd64]
 release:
