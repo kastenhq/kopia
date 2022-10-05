@@ -19,6 +19,7 @@ builds:
       - CGO_ENABLED=1
       - GOEXPERIMENT=boringcrypto
       - CC=gcc
+      - CXX=g++
     ldflags:
       - -s -w -X "github.com/kopia/kopia/repo.BuildVersion={{.Version}}" -X "github.com/kopia/kopia/repo.BuildInfo={{.Commit}}" -X "github.com/kopia/kopia/repo.BuildGitHubRepo={{.Env.GITHUB_REPOSITORY}}"
     goos: [linux]
