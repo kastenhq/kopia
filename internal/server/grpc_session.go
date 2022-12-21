@@ -10,7 +10,6 @@ import (
 
 	"github.com/pkg/errors"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/propagation"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -149,11 +148,6 @@ func (s *Server) Session(srv grpcapi.KopiaRepository_SessionServer) error {
 var tracer = otel.Tracer("kopia/grpc")
 
 func handleSessionRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.SessionRequest) *grpcapi.SessionResponse {
-	if req.TraceContext != nil {
-		var tc propagation.TraceContext
-		ctx = tc.Extract(ctx, propagation.MapCarrier(req.TraceContext))
-	}
-
 	switch inner := req.GetRequest().(type) {
 	case *grpcapi.SessionRequest_GetContentInfo:
 		return handleGetContentInfoRequest(ctx, dw, authz, inner.GetContentInfo)
@@ -191,9 +185,6 @@ func handleSessionRequest(ctx context.Context, dw repo.DirectRepositoryWriter, a
 }
 
 func handleGetContentInfoRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.GetContentInfoRequest) *grpcapi.SessionResponse {
-	ctx, span := tracer.Start(ctx, "GRPCSession.GetContentInfo")
-	defer span.End()
-
 	if authz.ContentAccessLevel() < auth.AccessLevelRead {
 		return accessDeniedResponse()
 	}
@@ -227,9 +218,6 @@ func handleGetContentInfoRequest(ctx context.Context, dw repo.DirectRepositoryWr
 }
 
 func handleGetContentRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.GetContentRequest) *grpcapi.SessionResponse {
-	ctx, span := tracer.Start(ctx, "GRPCSession.GetContent")
-	defer span.End()
-
 	if authz.ContentAccessLevel() < auth.AccessLevelRead {
 		return accessDeniedResponse()
 	}
@@ -254,9 +242,6 @@ func handleGetContentRequest(ctx context.Context, dw repo.DirectRepositoryWriter
 }
 
 func handleWriteContentRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.WriteContentRequest) *grpcapi.SessionResponse {
-	ctx, span := tracer.Start(ctx, "GRPCSession.WriteContent")
-	defer span.End()
-
 	if authz.ContentAccessLevel() < auth.AccessLevelAppend {
 		return accessDeniedResponse()
 	}
@@ -298,9 +283,6 @@ func handleFlushRequest(ctx context.Context, dw repo.DirectRepositoryWriter, aut
 }
 
 func handleGetManifestRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.GetManifestRequest) *grpcapi.SessionResponse {
-	ctx, span := tracer.Start(ctx, "GRPCSession.GetManifest")
-	defer span.End()
-
 	var data json.RawMessage
 
 	em, err := dw.GetManifest(ctx, manifest.ID(req.GetManifestId()), &data)
@@ -323,9 +305,6 @@ func handleGetManifestRequest(ctx context.Context, dw repo.DirectRepositoryWrite
 }
 
 func handlePutManifestRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.PutManifestRequest) *grpcapi.SessionResponse {
-	ctx, span := tracer.Start(ctx, "GRPCSession.PutManifest")
-	defer span.End()
-
 	if authz.ManifestAccessLevel(req.GetLabels()) < auth.AccessLevelAppend {
 		return accessDeniedResponse()
 	}
@@ -345,9 +324,6 @@ func handlePutManifestRequest(ctx context.Context, dw repo.DirectRepositoryWrite
 }
 
 func handleFindManifestsRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.FindManifestsRequest) *grpcapi.SessionResponse {
-	ctx, span := tracer.Start(ctx, "GRPCSession.FindManifests")
-	defer span.End()
-
 	em, err := dw.FindManifests(ctx, req.GetLabels())
 	if err != nil {
 		return errorResponse(err)
@@ -374,9 +350,6 @@ func handleFindManifestsRequest(ctx context.Context, dw repo.DirectRepositoryWri
 }
 
 func handleDeleteManifestRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.DeleteManifestRequest) *grpcapi.SessionResponse {
-	ctx, span := tracer.Start(ctx, "GRPCSession.DeleteManifest")
-	defer span.End()
-
 	var data json.RawMessage
 
 	em, err := dw.GetManifest(ctx, manifest.ID(req.GetManifestId()), &data)
@@ -400,9 +373,6 @@ func handleDeleteManifestRequest(ctx context.Context, dw repo.DirectRepositoryWr
 }
 
 func handlePrefetchContentsRequest(ctx context.Context, rep repo.Repository, authz auth.AuthorizationInfo, req *grpcapi.PrefetchContentsRequest) *grpcapi.SessionResponse {
-	ctx, span := tracer.Start(ctx, "GRPCSession.PrefetchContents")
-	defer span.End()
-
 	if authz.ContentAccessLevel() < auth.AccessLevelRead {
 		return accessDeniedResponse()
 	}

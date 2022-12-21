@@ -108,10 +108,8 @@ require (
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/klauspost/reedsolomon v1.11.3
 	github.com/prometheus/client_model v0.3.0
-	go.opentelemetry.io/otel v1.11.1
-	go.opentelemetry.io/otel/exporters/jaeger v1.11.1
-	go.opentelemetry.io/otel/sdk v1.11.1
-	go.opentelemetry.io/otel/trace v1.11.1
+	go.opentelemetry.io/otel v0.20.0
+ 	go.opentelemetry.io/otel/trace v0.20.0
 	golang.org/x/exp v0.0.0-20221028150844-83b7d23a625f
 )
 
@@ -122,8 +120,6 @@ require (
 	github.com/alessio/shellescape v1.4.1 // indirect
 	github.com/chromedp/sysutil v1.0.0 // indirect
 	github.com/felixge/fgprof v0.9.3 // indirect
-	github.com/go-logr/logr v1.2.3 // indirect
-	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.1.0 // indirect
@@ -132,4 +128,5 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/xhit/go-str2duration v1.2.0 // indirect
+	go.opentelemetry.io/otel/metric v0.20.0 // indirect
 )
