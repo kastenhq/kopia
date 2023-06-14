@@ -213,26 +213,28 @@ func (gcs *gcsStorage) FlushCaches(ctx context.Context) error {
 }
 
 func tokenSourceFromCredentialsFile(ctx context.Context, fn string, scopes ...string) (oauth2.TokenSource, error) {
+	fmt.Println("tokenSourceFromCredentialsFile")
 	data, err := os.ReadFile(fn) //nolint:gosec
 	if err != nil {
 		return nil, errors.Wrap(err, "error reading credentials file")
 	}
 
-	cfg, err := google.JWTConfigFromJSON(data, scopes...)
+	creds, err := google.CredentialsFromJSON(ctx, data, scopes...)
 	if err != nil {
-		return nil, errors.Wrap(err, "google.JWTConfigFromJSON")
+		return nil, errors.Wrap(err, "google.CredentialsFromJSON")
 	}
 
-	return cfg.TokenSource(ctx), nil
+	return creds.TokenSource, nil
 }
 
 func tokenSourceFromCredentialsJSON(ctx context.Context, data json.RawMessage, scopes ...string) (oauth2.TokenSource, error) {
-	cfg, err := google.JWTConfigFromJSON([]byte(data), scopes...)
+	fmt.Println("tokenSourceFromCredentialsJSON")
+	creds, err := google.CredentialsFromJSON(ctx, []byte(data), scopes...)
 	if err != nil {
-		return nil, errors.Wrap(err, "google.JWTConfigFromJSON")
+		return nil, errors.Wrap(err, "google.CredentialsFromJSON")
 	}
 
-	return cfg.TokenSource(ctx), nil
+	return creds.TokenSource, nil
 }
 
 // New creates new Google Cloud Storage-backed storage with specified options:
