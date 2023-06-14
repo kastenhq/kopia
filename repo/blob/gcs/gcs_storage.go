@@ -213,7 +213,6 @@ func (gcs *gcsStorage) FlushCaches(ctx context.Context) error {
 }
 
 func tokenSourceFromCredentialsFile(ctx context.Context, fn string, scopes ...string) (oauth2.TokenSource, error) {
-	fmt.Println("tokenSourceFromCredentialsFile")
 	data, err := os.ReadFile(fn) //nolint:gosec
 	if err != nil {
 		return nil, errors.Wrap(err, "error reading credentials file")
@@ -228,7 +227,6 @@ func tokenSourceFromCredentialsFile(ctx context.Context, fn string, scopes ...st
 }
 
 func tokenSourceFromCredentialsJSON(ctx context.Context, data json.RawMessage, scopes ...string) (oauth2.TokenSource, error) {
-	fmt.Println("tokenSourceFromCredentialsJSON")
 	creds, err := google.CredentialsFromJSON(ctx, []byte(data), scopes...)
 	if err != nil {
 		return nil, errors.Wrap(err, "google.CredentialsFromJSON")
