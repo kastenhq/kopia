@@ -192,7 +192,7 @@ func TestConsistencyWhenKill9AfterModify(t *testing.T) {
 	bm.DataRepoPath = dataRepoPath
 
 	// create a snapshot for initialized data
-	snapID, err := bm.SetUpSystemWithOneSnapshot()
+	_, err = bm.SetUpSystemWithOneSnapshot()
 	require.NoError(t, err)
 
 	cmpDir := bm.PathToTakeSnapshot
@@ -247,7 +247,7 @@ func TestConsistencyWhenKill9AfterModify(t *testing.T) {
 	require.NotEmpty(t, restoreDir, "TempDir() did not generate a valid dir")
 
 	// try to restore a snapshot without any error messages.
-	stdout, err := bm.RestoreGivenOrRandomSnapshot(snapID, restoreDir)
+	stdout, err := bm.RestoreGivenOrRandomSnapshot("", restoreDir)
 	require.NoError(t, err)
 
 	t.Logf(stdout)

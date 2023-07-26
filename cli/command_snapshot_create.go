@@ -271,6 +271,18 @@ func (c *commandSnapshotCreate) snapshotSingleSource(ctx context.Context, fsEntr
 		return errors.Wrap(err, "unable to get policy tree")
 	}
 
+	s := &snapshot.Manifest{
+		Source: sourceInfo,
+	}
+
+	snapid, err := snapshot.SaveSnapshot(ctx, rep, s)
+	if err != nil {
+		return errors.Wrap(err, "cannot save manifest")
+	}
+
+	log(ctx).Infof("%s", snapid)
+	log(ctx).Infof("hashing hashed uploaded %v ... %s", sourceInfo, snapid)
+
 	manifest, err := u.Upload(ctx, fsEntry, policyTree, sourceInfo, previous...)
 	if err != nil {
 		// fail-fast uploads will fail here without recording a manifest, other uploads will
