@@ -8,9 +8,10 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
-	"github.com/kopia/kopia/repo/logging"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/kopia/kopia/repo/logging"
 )
 
 var log = logging.Module("blob")

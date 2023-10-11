@@ -181,7 +181,7 @@ func (az *azStorage) DeleteBlob(ctx context.Context, b blob.ID) error {
 		return nil
 	case errors.Is(err, blob.ErrBlobImmutableDueToPolicy):
 		// if a policy prevents the deletion then try to create a delete marker file to hide it
-		return az.createDeleteMarkerFile(ctx, az.container, string(b))
+		return az.createDeleteMarkerFile(ctx, string(b))
 	}
 
 	return err
@@ -301,11 +301,11 @@ func (az *azStorage) DisplayName() string {
 }
 
 // createDeleteMarkerFile creates a delete marker file based on an originalFile to note that the originalFile should be ignored.
-func (az *azStorage) createDeleteMarkerFile(ctx context.Context, container string, originalFile string) error {
+func (az *azStorage) createDeleteMarkerFile(ctx context.Context, originalFile string) error {
 	fileName := fmt.Sprintf("%s_%s", blob.BlobIDPrefixDeleteMarker, originalFile)
 	deleteMarkerFile := az.getObjectNameString(blob.ID(fileName))
 	_, err := az.service.ServiceClient().
-		NewContainerClient(container).
+		NewContainerClient(az.container).
 		NewBlobClient(deleteMarkerFile).
 		GetProperties(ctx, nil)
 	if err == nil {
@@ -313,7 +313,7 @@ func (az *azStorage) createDeleteMarkerFile(ctx context.Context, container strin
 		return nil
 	}
 
-	_, err = az.service.UploadBuffer(ctx, container, deleteMarkerFile, []byte(nil), nil)
+	_, err = az.service.UploadBuffer(ctx, az.container, deleteMarkerFile, []byte(nil), nil)
 	return err
 }
 
@@ -358,12 +358,12 @@ func (az *azStorage) isOrphanedDeleteMarkerFile(ctx context.Context, b blob.ID) 
 	if !strings.HasPrefix(blobName, string(blob.BlobIDPrefixDeleteMarker)) {
 		return false
 	}
-	fileName := strings.SplitN(blobName, "_", 2)
-	if len(fileName) != 2 || fileName[0] != string(blob.BlobIDPrefixDeleteMarker) {
+	originalFile, ok := getOriginalFile(blobName)
+	if !ok {
 		return false
 	}
 
-	originalBlob := blob.ID(fileName[1])
+	originalBlob := blob.ID(originalFile)
 
 	_, err := az.service.ServiceClient().
 		NewContainerClient(az.container).
