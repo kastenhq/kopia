@@ -40,6 +40,7 @@ var Counters = NewMapping(map[string]int{
 	"content_uploaded_bytes":                       33,
 	"content_write_bytes":                          34,
 	"content_write_duration_nanos":                 35,
+	"blob_errors[method:Cleanup]":                  36,
 	// add new items here, use consecutive values
 })
 
@@ -56,6 +57,7 @@ var DurationDistributions = NewMapping(map[string]int{
 	"blob_storage_latency[method:GetMetadata]":     7,
 	"blob_storage_latency[method:ListBlobs]":       8,
 	"blob_storage_latency[method:PutBlob]":         9,
+	"blob_storage_latency[method:Cleanup]":         10,
 	// add new items here, use consecutive values
 })
 
