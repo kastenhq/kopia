@@ -76,6 +76,9 @@ func isRetriable(err error) bool {
 		// hard-fail when upgrade is in progress
 		return false
 
+	case errors.Is(err, blob.ErrBlobImmutableDueToPolicy):
+		return false
+
 	default:
 		return true
 	}

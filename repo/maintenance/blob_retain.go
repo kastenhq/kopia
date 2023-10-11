@@ -67,6 +67,10 @@ func ExtendBlobRetentionTime(ctx context.Context, rep repo.DirectRepositoryWrite
 
 				for bm := range extend {
 					if err1 := rep.BlobStorage().ExtendBlobRetention(ctx, bm.BlobID, extendOpts); err1 != nil {
+						if errors.Is(err1, blob.ErrOrphanedDeleteMarkerBlob) {
+							log(ctx).Debugf("Skipping extending blob %v: %v", bm.BlobID, err1)
+							continue
+						}
 						log(ctx).Errorf("Failed to extend blob %v: %v", bm.BlobID, err1)
 						atomic.AddUint32(failedCnt, 1)
 

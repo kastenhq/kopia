@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	"github.com/kopia/kopia/repo/logging"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/kopia/kopia/repo/logging"
 )
 
 var log = logging.Module("blob")
@@ -20,6 +20,10 @@ var ErrSetTimeUnsupported = errors.Errorf("SetTime is not supported")
 
 // ErrInvalidRange is returned when the requested blob offset or length is invalid.
 var ErrInvalidRange = errors.Errorf("invalid blob offset or length")
+
+var ErrBlobImmutableDueToPolicy = errors.Errorf("blob immutable due to policy")
+
+var ErrOrphanedDeleteMarkerBlob = errors.Errorf("cannot extend retention of orphaned delete marker blob")
 
 // InvalidCredentialsErrStr is the error string returned by the provider
 // when a token has expired.
@@ -107,7 +111,12 @@ const (
 
 	// Compliance - compliance mode.
 	Compliance RetentionMode = "COMPLIANCE"
+
+	// Locked - Locked policy mode for Azure.
+	Locked RetentionMode = RetentionMode(blob.ImmutabilityPolicyModeLocked)
 )
+
+const BlobIDPrefixDeleteMarker ID = "d"
 
 func (r RetentionMode) String() string {
 	return string(r)
@@ -115,7 +124,17 @@ func (r RetentionMode) String() string {
 
 // IsValid - check whether this retention mode is valid or not.
 func (r RetentionMode) IsValid() bool {
+	return r == Governance || r == Compliance || r == Locked
+}
+
+// IsValidS3 - check whether this retention mode is valid for S3.
+func (r RetentionMode) IsValidS3() bool {
 	return r == Governance || r == Compliance
+}
+
+// IsValidAzure - check whether this retention mode is valid for Azure.
+func (r RetentionMode) IsValidAzure() bool {
+	return r == Locked
 }
 
 // PutOptions represents put-options for a single BLOB in a storage.
@@ -142,7 +161,7 @@ type ExtendOptions struct {
 // common functions that are mostly provider independent and have a sensible
 // default.
 //
-// Storage providers should imbed this struct and override functions that they
+// Storage providers should embed this struct and override functions that they
 // have different return values for.
 type DefaultProviderImplementation struct{}
 
@@ -169,6 +188,11 @@ func (s DefaultProviderImplementation) FlushCaches(context.Context) error {
 // GetCapacity complies with the Storage interface.
 func (s DefaultProviderImplementation) GetCapacity(context.Context) (Capacity, error) {
 	return Capacity{}, ErrNotAVolume
+}
+
+// Cleanup complies with the Storage interface.
+func (s DefaultProviderImplementation) Cleanup(c context.Context, l logging.Logger) error {
+	return nil
 }
 
 // HasRetentionOptions returns true when blob-retention settings have been
@@ -211,6 +235,9 @@ type Storage interface {
 	// IsReadOnly returns whether this Storage is in read-only mode. When in
 	// read-only mode all mutation operations will fail.
 	IsReadOnly() bool
+
+	// Cleanup covers any ad hoc cleanup tasks that may be vendor specific.
+	Cleanup(ctx context.Context, logger logging.Logger) error
 }
 
 // ID is a string that represents blob identifier.

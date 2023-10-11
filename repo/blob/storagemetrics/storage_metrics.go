@@ -8,6 +8,7 @@ import (
 	"github.com/kopia/kopia/internal/metrics"
 	"github.com/kopia/kopia/internal/timetrack"
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/repo/logging"
 )
 
 type blobMetrics struct {
@@ -28,6 +29,7 @@ type blobMetrics struct {
 	listBlobsDuration           *metrics.Distribution[time.Duration]
 	closeDuration               *metrics.Distribution[time.Duration]
 	flushCachesDuration         *metrics.Distribution[time.Duration]
+	cleanupDuration             *metrics.Distribution[time.Duration]
 
 	getBlobErrors             *metrics.Counter
 	getCapacityErrors         *metrics.Counter
@@ -38,6 +40,7 @@ type blobMetrics struct {
 	listBlobsErrors           *metrics.Counter
 	closeErrors               *metrics.Counter
 	flushCachesErrors         *metrics.Counter
+	cleanupErrors             *metrics.Counter
 }
 
 func (s *blobMetrics) GetBlob(ctx context.Context, id blob.ID, offset, length int64, output blob.OutputBuffer) error {
@@ -177,6 +180,19 @@ func (s *blobMetrics) Close(ctx context.Context) error {
 	return err
 }
 
+func (s *blobMetrics) Cleanup(ctx context.Context, logger logging.Logger) error {
+	timer := timetrack.StartTimer()
+	err := s.base.Cleanup(ctx, logger)
+	dt := timer.Elapsed()
+
+	s.cleanupDuration.Observe(dt)
+	if err != nil {
+		s.cleanupErrors.Add(1)
+	}
+
+	return err
+}
+
 func (s *blobMetrics) ConnectionInfo() blob.ConnectionInfo {
 	return s.base.ConnectionInfo()
 }
@@ -236,6 +252,7 @@ func NewWrapper(wrapped blob.Storage, mr *metrics.Registry) blob.Storage {
 		listBlobsDuration:      durationSummaryForMethod("ListBlobs"),
 		closeDuration:          durationSummaryForMethod("Close"),
 		flushCachesDuration:    durationSummaryForMethod("FlushCaches"),
+		cleanupDuration:        durationSummaryForMethod("Cleanup"),
 
 		getBlobErrors:     errorCounterForMethod("GetBlob"),
 		getCapacityErrors: errorCounterForMethod("GetCapacity"),
@@ -245,5 +262,6 @@ func NewWrapper(wrapped blob.Storage, mr *metrics.Registry) blob.Storage {
 		listBlobsErrors:   errorCounterForMethod("ListBlobs"),
 		closeErrors:       errorCounterForMethod("Close"),
 		flushCachesErrors: errorCounterForMethod("FlushCaches"),
+		cleanupErrors:     errorCounterForMethod("Cleanup"),
 	}
 }

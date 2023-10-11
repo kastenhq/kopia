@@ -4,20 +4,26 @@ package azure
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
-
+	azblobblob "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
-	"github.com/pkg/errors"
-
+	"github.com/google/martian/v3/log"
 	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/iocopy"
 	"github.com/kopia/kopia/internal/timestampmeta"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/retrying"
+	"github.com/kopia/kopia/repo/logging"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -108,6 +114,8 @@ func translateError(err error) error {
 			return blob.ErrBlobNotFound
 		case string(bloberror.InvalidRange):
 			return blob.ErrInvalidRange
+		case string(bloberror.BlobImmutableDueToPolicy):
+			return blob.ErrBlobImmutableDueToPolicy
 		}
 	}
 
@@ -116,8 +124,8 @@ func translateError(err error) error {
 
 func (az *azStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes, opts blob.PutOptions) error {
 	switch {
-	case opts.HasRetentionOptions():
-		return errors.Wrap(blob.ErrUnsupportedPutBlobOption, "blob-retention")
+	case opts.HasRetentionOptions() && !opts.RetentionMode.IsValidAzure():
+		return errors.Wrap(blob.ErrUnsupportedPutBlobOption, "blob retention mode is not valid for Azure")
 	case opts.DoNotRecreate:
 		return errors.Wrap(blob.ErrUnsupportedPutBlobOption, "do-not-recreate")
 	}
@@ -142,6 +150,19 @@ func (az *azStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes, op
 		return translateError(err)
 	}
 
+	if opts.RetentionPeriod != 0 {
+		// it will fail if the retentionPeriod set by the user is lower than that on the policy.
+		retainUntilDate := clock.Now().Add(opts.RetentionPeriod).UTC()
+
+		_, err = az.service.ServiceClient().
+			NewContainerClient(az.Container).
+			NewBlobClient(az.getObjectNameString(b)).
+			SetImmutabilityPolicy(ctx, retainUntilDate, &azblobblob.SetImmutabilityPolicyOptions{})
+		if err != nil {
+			return errors.Wrap(err, "unable to extend retention period")
+		}
+	}
+
 	if opts.GetModTime != nil {
 		*opts.GetModTime = *resp.LastModified
 	}
@@ -154,11 +175,53 @@ func (az *azStorage) DeleteBlob(ctx context.Context, b blob.ID) error {
 	_, err := az.service.DeleteBlob(ctx, az.container, az.getObjectNameString(b), nil)
 	err = translateError(err)
 
-	// don't return error if blob is already deleted
-	if errors.Is(err, blob.ErrBlobNotFound) {
+	switch {
+	case errors.Is(err, blob.ErrBlobNotFound):
+		// don't return error if blob is already deleted
 		return nil
+	case errors.Is(err, blob.ErrBlobImmutableDueToPolicy):
+		// if a policy prevents the deletion then try to create a delete marker file to hide it
+		return az.createDeleteMarkerFile(ctx, az.container, string(b))
 	}
 
+	return err
+}
+
+// ExtendBlobRetention extends a blob unless it is a delete marker file and the original file no longer exists.
+// If the original file still exists then the delete marker file will be extended but the original file will not.
+// This ensures the delete marker file survives longer than the original.
+func (az *azStorage) ExtendBlobRetention(ctx context.Context, b blob.ID, opts blob.ExtendOptions) error {
+	if az.isOrphanedDeleteMarkerFile(ctx, b) {
+		return blob.ErrOrphanedDeleteMarkerBlob
+	}
+
+	retainUntilDate := clock.Now().Add(opts.RetentionPeriod).UTC()
+
+	_, err := az.service.ServiceClient().
+		NewContainerClient(az.Container).
+		NewBlobClient(az.getObjectNameString(b)).
+		SetImmutabilityPolicy(ctx, retainUntilDate, &azblobblob.SetImmutabilityPolicyOptions{})
+	if err != nil {
+		return errors.Wrap(err, "unable to extend retention period")
+	}
+
+	return nil
+}
+
+// Cleanup removes files that have a matching delete marker file, providing the retention period has passed.
+// If the original file has been deleted then the delete marker file is also deleted, providing the retention period has passed.
+func (az *azStorage) Cleanup(ctx context.Context, logger logging.Logger) error {
+	deleteMarkerBlobs, err := blob.ListAllBlobs(ctx, az, blob.BlobIDPrefixDeleteMarker)
+	if err != nil {
+		return errors.Wrap(err, "failed to retrieve delete marker blobs")
+	}
+
+	if err != nil {
+		return errors.Wrap(err, "failure in blob cleanup")
+	}
+
+	deletedBlobs, deletedMarkers, err := az.cleanupParallel(ctx, logger, deleteMarkerBlobs)
+	logger.Infof("deleted %d blobs and %d delete marker blobs", deletedBlobs, deletedMarkers)
 	return err
 }
 
@@ -169,6 +232,11 @@ func (az *azStorage) getObjectNameString(b blob.ID) string {
 // ListBlobs list azure blobs with given prefix.
 func (az *azStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback func(blob.Metadata) error) error {
 	prefixStr := az.Prefix + string(prefix)
+
+	blobsToSkip, err := az.getBlobsToSkip(ctx, prefix)
+	if err != nil {
+		return errors.Wrap(err, "failed to get blobs to skip")
+	}
 
 	pager := az.service.NewListBlobsFlatPager(az.container, &azblob.ListBlobsFlatOptions{
 		Prefix: &prefixStr,
@@ -185,6 +253,12 @@ func (az *azStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback fun
 
 		for _, it := range page.Segment.BlobItems {
 			n := *it.Name
+
+			if blobsToSkip[n] {
+				log.Debugf("excluded blob from ListBlobs: %s", n)
+				// skip those set for deletion
+				continue
+			}
 
 			bm := blob.Metadata{
 				BlobID: blob.ID(n[len(az.Prefix):]),
@@ -224,6 +298,176 @@ func (az *azStorage) ConnectionInfo() blob.ConnectionInfo {
 
 func (az *azStorage) DisplayName() string {
 	return fmt.Sprintf("Azure: %v", az.Options.Container)
+}
+
+// createDeleteMarkerFile creates a delete marker file based on an originalFile to note that the originalFile should be ignored.
+func (az *azStorage) createDeleteMarkerFile(ctx context.Context, container string, originalFile string) error {
+	fileName := fmt.Sprintf("%s_%s", blob.BlobIDPrefixDeleteMarker, originalFile)
+	deleteMarkerFile := az.getObjectNameString(blob.ID(fileName))
+	_, err := az.service.ServiceClient().
+		NewContainerClient(container).
+		NewBlobClient(deleteMarkerFile).
+		GetProperties(ctx, nil)
+	if err == nil {
+		// file already exists
+		return nil
+	}
+
+	_, err = az.service.UploadBuffer(ctx, container, deleteMarkerFile, []byte(nil), nil)
+	return err
+}
+
+// getBlobsToSkip returns a list of blobs to skip, those marked for deletion via an associated delete marker file.
+func (az *azStorage) getBlobsToSkip(ctx context.Context, prefix blob.ID) (map[string]bool, error) {
+	if prefix == blob.BlobIDPrefixDeleteMarker {
+		return nil, nil
+	}
+	return az.getFilesPendingDeletion(ctx)
+}
+
+// getFilesPendingDeletion returns a list of blobs that have an associated delete marker file.
+// The original blobs may have already been deleted but the delete marker files are still pending deletion.
+func (az *azStorage) getFilesPendingDeletion(ctx context.Context) (map[string]bool, error) {
+	prefixStr := az.Prefix + string(blob.BlobIDPrefixDeleteMarker)
+	pendingDeletionFiles := make(map[string]bool)
+	pager := az.service.NewListBlobsFlatPager(az.container, &azblob.ListBlobsFlatOptions{
+		Prefix: &prefixStr,
+	})
+
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, translateError(err)
+		}
+
+		for _, it := range page.Segment.BlobItems {
+			originalFile, ok := getOriginalFile(*it.Name)
+			if !ok {
+				continue
+			}
+			pendingDeletionFiles[originalFile] = true
+		}
+	}
+
+	return pendingDeletionFiles, nil
+}
+
+// isOrphanedDeleteMarkerFile checks if the original blob the delete marker file represents still exists.
+func (az *azStorage) isOrphanedDeleteMarkerFile(ctx context.Context, b blob.ID) bool {
+	blobName := string(b)
+	if !strings.HasPrefix(blobName, string(blob.BlobIDPrefixDeleteMarker)) {
+		return false
+	}
+	fileName := strings.SplitN(blobName, "_", 2)
+	if len(fileName) != 2 || fileName[0] != string(blob.BlobIDPrefixDeleteMarker) {
+		return false
+	}
+
+	originalBlob := blob.ID(fileName[1])
+
+	_, err := az.service.ServiceClient().
+		NewContainerClient(az.container).
+		NewBlobClient(az.getObjectNameString(originalBlob)).
+		GetProperties(ctx, nil)
+
+	return errors.Is(translateError(err), blob.ErrBlobNotFound)
+}
+
+// cleanupParallel removes files that have a matching delete marker file, providing the retention period has passed.
+// If the original file has been deleted then the delete marker file is also deleted, providing the retention period has passed.
+func (az *azStorage) cleanupParallel(ctx context.Context, logger logging.Logger, deleteMarkerFiles []blob.Metadata) (deletedBlobs, deletedMarkers int, err error) {
+	var (
+		parallel          = runtime.NumCPU()
+		wg                sync.WaitGroup
+		deletedBlobsCtr   = new(uint32)
+		deletedMarkersCtr = new(uint32)
+		errChan           = make(chan error, parallel)
+	)
+
+	deleteMarkerBlobs := make(chan blob.Metadata, len(deleteMarkerFiles))
+
+	for i := 0; i < parallel; i++ {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			for bm := range deleteMarkerBlobs {
+				originalFile, ok := getOriginalFile(string(bm.BlobID))
+				if !ok {
+					continue
+				}
+				blobsDeleted, fileRemoved, err := az.attemptFileDeletion(ctx, blob.ID(originalFile))
+				if err != nil {
+					errChan <- errors.Wrap(err, "failed to delete original blob")
+					return
+				}
+				atomic.AddUint32(deletedBlobsCtr, uint32(blobsDeleted))
+				if !fileRemoved {
+					logger.Debugf("skipped cleanup of file %s, too early to delete", originalFile)
+					continue
+				}
+
+				blobsDeleted, fileRemoved, err = az.attemptFileDeletion(ctx, bm.BlobID)
+				if err != nil {
+					errChan <- errors.Wrap(err, "failed to delete original blob")
+					return
+				}
+				if !fileRemoved {
+					logger.Debugf("skipped cleanup of file %s, too early to delete", string(bm.BlobID))
+				}
+				atomic.AddUint32(deletedMarkersCtr, uint32(blobsDeleted))
+			}
+		}()
+	}
+
+	for _, bm := range deleteMarkerFiles {
+		deleteMarkerBlobs <- bm
+	}
+
+	close(deleteMarkerBlobs)
+
+	wg.Wait()
+	close(errChan)
+
+	return int(*deletedBlobsCtr), int(*deletedMarkersCtr), <-errChan
+}
+
+// attemptFileDeletion tries to delete a blob if it still exists and its retention period has passed.
+func (az *azStorage) attemptFileDeletion(ctx context.Context, b blob.ID) (deletedBlobs int, fileRemoved bool, err error) {
+	props, err := az.service.ServiceClient().
+		NewContainerClient(az.container).
+		NewBlobClient(az.getObjectNameString(b)).
+		GetProperties(ctx, nil)
+	if err != nil && !errors.Is(translateError(err), blob.ErrBlobNotFound) {
+		return 0, false, err
+	}
+	if errors.Is(translateError(err), blob.ErrBlobNotFound) {
+		return 0, true, nil
+	}
+
+	var expiryDate time.Time
+	if props.ImmutabilityPolicyExpiresOn != nil {
+		expiryDate = *props.ImmutabilityPolicyExpiresOn
+	}
+	if !expiryDate.Before(time.Now()) {
+		return 0, false, nil
+	}
+
+	err = az.DeleteBlob(ctx, b)
+	if err != nil {
+		return 0, false, errors.Wrap(err, "failed to delete blob")
+	}
+	return 1, true, nil
+}
+
+// getOriginalFile takes a delete marker file and returns the name of the original file.
+func getOriginalFile(deleteMarkerFile string) (originalFile string, ok bool) {
+	fileName := strings.SplitN(deleteMarkerFile, "_", 2)
+	if len(fileName) != 2 || fileName[0] != string(blob.BlobIDPrefixDeleteMarker) {
+		return "", false
+	}
+	return fileName[1], true
 }
 
 // New creates new Azure Blob Storage-backed storage with specified options:

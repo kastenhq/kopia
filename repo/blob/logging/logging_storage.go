@@ -235,6 +235,25 @@ func (s *loggingStorage) ExtendBlobRetention(ctx context.Context, b blob.ID, opt
 	return err
 }
 
+func (s *loggingStorage) Cleanup(ctx context.Context, logger logging.Logger) error {
+	ctx, span := tracer.Start(ctx, "Cleanup")
+	defer span.End()
+
+	s.beginConcurrency()
+	defer s.endConcurrency()
+
+	timer := timetrack.StartTimer()
+	err := s.base.Cleanup(ctx, logger)
+	dt := timer.Elapsed()
+
+	s.logger.Debugw(s.prefix+"Cleanup",
+		"error", s.translateError(err),
+		"duration", dt,
+	)
+
+	return err
+}
+
 func (s *loggingStorage) translateError(err error) interface{} {
 	if err == nil {
 		return nil
