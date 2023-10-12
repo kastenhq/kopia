@@ -216,10 +216,6 @@ func (az *azStorage) Cleanup(ctx context.Context, logger logging.Logger) error {
 		return errors.Wrap(err, "failed to retrieve delete marker blobs")
 	}
 
-	if err != nil {
-		return errors.Wrap(err, "failure in blob cleanup")
-	}
-
 	deletedBlobs, deletedMarkers, err := az.cleanupParallel(ctx, logger, deleteMarkerBlobs)
 	logger.Infof("deleted %d blobs and %d delete marker blobs", deletedBlobs, deletedMarkers)
 	return err
