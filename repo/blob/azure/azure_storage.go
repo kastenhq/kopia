@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
@@ -17,13 +16,14 @@ import (
 	azblobblob "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/google/martian/v3/log"
+	"github.com/pkg/errors"
+
 	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/iocopy"
 	"github.com/kopia/kopia/internal/timestampmeta"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/retrying"
 	"github.com/kopia/kopia/repo/logging"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -435,30 +435,18 @@ func (az *azStorage) cleanupParallel(ctx context.Context, logger logging.Logger,
 
 // attemptFileDeletion tries to delete a blob if it still exists and its retention period has passed.
 func (az *azStorage) attemptFileDeletion(ctx context.Context, b blob.ID) (deletedBlobs int, fileRemoved bool, err error) {
-	props, err := az.service.ServiceClient().
-		NewContainerClient(az.container).
-		NewBlobClient(az.getObjectNameString(b)).
-		GetProperties(ctx, nil)
-	if err != nil && !errors.Is(translateError(err), blob.ErrBlobNotFound) {
-		return 0, false, err
+	_, err = az.service.DeleteBlob(ctx, az.container, az.getObjectNameString(b), nil)
+	if err == nil {
+		return 1, true, nil
 	}
-	if errors.Is(translateError(err), blob.ErrBlobNotFound) {
+	translatedErr := translateError(err)
+	switch {
+	case errors.Is(translatedErr, blob.ErrBlobNotFound):
 		return 0, true, nil
-	}
-
-	var expiryDate time.Time
-	if props.ImmutabilityPolicyExpiresOn != nil {
-		expiryDate = *props.ImmutabilityPolicyExpiresOn
-	}
-	if !expiryDate.Before(time.Now()) {
+	case errors.Is(translatedErr, blob.ErrBlobImmutableDueToPolicy):
 		return 0, false, nil
 	}
-
-	err = az.DeleteBlob(ctx, b)
-	if err != nil {
-		return 0, false, errors.Wrap(err, "failed to delete blob")
-	}
-	return 1, true, nil
+	return 0, false, errors.Wrap(translatedErr, "failed to delete blob")
 }
 
 // getOriginalFile takes a delete marker file and returns the name of the original file.
