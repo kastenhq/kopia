@@ -153,11 +153,14 @@ func (az *azStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes, op
 	if opts.RetentionPeriod != 0 {
 		// it will fail if the retentionPeriod set by the user is lower than that on the policy.
 		retainUntilDate := clock.Now().Add(opts.RetentionPeriod).UTC()
+		mode := azblobblob.ImmutabilityPolicySetting(opts.RetentionMode)
 
 		_, err = az.service.ServiceClient().
 			NewContainerClient(az.Container).
 			NewBlobClient(az.getObjectNameString(b)).
-			SetImmutabilityPolicy(ctx, retainUntilDate, &azblobblob.SetImmutabilityPolicyOptions{})
+			SetImmutabilityPolicy(ctx, retainUntilDate, &azblobblob.SetImmutabilityPolicyOptions{
+				Mode: &mode,
+			})
 		if err != nil {
 			return errors.Wrap(err, "unable to extend retention period")
 		}
@@ -196,11 +199,14 @@ func (az *azStorage) ExtendBlobRetention(ctx context.Context, b blob.ID, opts bl
 	}
 
 	retainUntilDate := clock.Now().Add(opts.RetentionPeriod).UTC()
+	mode := azblobblob.ImmutabilityPolicySetting(opts.RetentionMode)
 
 	_, err := az.service.ServiceClient().
 		NewContainerClient(az.Container).
 		NewBlobClient(az.getObjectNameString(b)).
-		SetImmutabilityPolicy(ctx, retainUntilDate, &azblobblob.SetImmutabilityPolicyOptions{})
+		SetImmutabilityPolicy(ctx, retainUntilDate, &azblobblob.SetImmutabilityPolicyOptions{
+			Mode: &mode,
+		})
 	if err != nil {
 		return errors.Wrap(err, "unable to extend retention period")
 	}
@@ -249,15 +255,16 @@ func (az *azStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback fun
 
 		for _, it := range page.Segment.BlobItems {
 			n := *it.Name
+			blobName := n[len(az.Prefix):]
 
-			if blobsToSkip[n] {
-				log.Debugf("excluded blob from ListBlobs: %s", n)
+			if blobsToSkip[blobName] {
+				log.Debugf("excluded blob from ListBlobs: %s", blobName)
 				// skip those set for deletion
 				continue
 			}
 
 			bm := blob.Metadata{
-				BlobID: blob.ID(n[len(az.Prefix):]),
+				BlobID: blob.ID(blobName),
 				Length: *it.Properties.ContentLength,
 			}
 
@@ -337,7 +344,8 @@ func (az *azStorage) getFilesPendingDeletion(ctx context.Context) (map[string]bo
 		}
 
 		for _, it := range page.Segment.BlobItems {
-			originalFile, ok := getOriginalFile(*it.Name)
+			n := *it.Name
+			originalFile, ok := getOriginalFile(n[len(az.Prefix):])
 			if !ok {
 				continue
 			}
