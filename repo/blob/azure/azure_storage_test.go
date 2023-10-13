@@ -7,8 +7,10 @@ import (
 	"net/url"
 	"os"
 	"testing"
+	"time"
 
-	"github.com/Azure/azure-storage-blob-go/azblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	legacyazblob "github.com/Azure/azure-storage-blob-go/azblob"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 
@@ -46,30 +48,30 @@ func getEnvOrSkip(t *testing.T, name string) string {
 func createContainer(t *testing.T, container, storageAccount, storageKey string) {
 	t.Helper()
 
-	credential, err := azblob.NewSharedKeyCredential(storageAccount, storageKey)
+	credential, err := legacyazblob.NewSharedKeyCredential(storageAccount, storageKey)
 	if err != nil {
 		t.Fatalf("failed to create Azure credentials: %v", err)
 	}
 
-	p := azblob.NewPipeline(credential, azblob.PipelineOptions{})
+	p := legacyazblob.NewPipeline(credential, legacyazblob.PipelineOptions{})
 
 	u, err := url.Parse(fmt.Sprintf("https://%s.blob.core.windows.net", storageAccount))
 	if err != nil {
 		t.Fatalf("failed to parse container URL: %v", err)
 	}
 
-	serviceURL := azblob.NewServiceURL(*u, p)
+	serviceURL := legacyazblob.NewServiceURL(*u, p)
 	containerURL := serviceURL.NewContainerURL(container)
 
-	_, err = containerURL.Create(context.Background(), azblob.Metadata{}, azblob.PublicAccessNone)
+	_, err = containerURL.Create(context.Background(), legacyazblob.Metadata{}, legacyazblob.PublicAccessNone)
 	if err == nil {
 		return
 	}
 
 	// return if already exists
-	var stgErr azblob.StorageError
+	var stgErr legacyazblob.StorageError
 	if errors.As(err, &stgErr) {
-		if stgErr.ServiceCode() == azblob.ServiceCodeContainerAlreadyExists {
+		if stgErr.ServiceCode() == legacyazblob.ServiceCodeContainerAlreadyExists {
 			return
 		}
 	}
@@ -269,4 +271,176 @@ func TestAzureStorageInvalidCreds(t *testing.T) {
 	if err == nil {
 		t.Errorf("unexpected success connecting to Azure blob storage, wanted error")
 	}
+}
+
+// TestAzureStorageRansomwareProtection runs through the behaviour of Azure ransomware protection.
+// 1. blob is created then the retention is extended.
+// 2. blob is logically deleted while the retention period is in place, by creating a delete marker (d_) file.
+// 3. delete marker blob is extended.
+// 4. original blob is deleted.
+// 5. delete marker blob further extension fails, then it is deleted.
+func TestAzureStorageRansomwareProtection(t *testing.T) {
+	t.Parallel()
+	testutil.ProviderTest(t)
+
+	// must be without locked policy or the retention period will be too high (1+ days)
+	container := getEnvOrSkip(t, testContainerEnv)
+	storageAccount := getEnvOrSkip(t, testStorageAccountEnv)
+	storageKey := getEnvOrSkip(t, testStorageKeyEnv)
+
+	// create container if does not exist
+	createContainer(t, container, storageAccount, storageKey)
+
+	data := make([]byte, 8)
+	rand.Read(data)
+
+	ctx := testlogging.Context(t)
+
+	// use context that gets canceled after opening storage to ensure it's not used beyond New().
+	newctx, cancel := context.WithCancel(ctx)
+	prefix := fmt.Sprintf("test-%v-%x-", clock.Now().Unix(), data)
+	st, err := azure.New(newctx, &azure.Options{
+		Container:      container,
+		StorageAccount: storageAccount,
+		StorageKey:     storageKey,
+		Prefix:         prefix,
+	}, false)
+
+	cancel()
+	require.NoError(t, err)
+
+	defer st.Close(ctx)
+
+	const blobName = "sExample"
+	const dummyBlob = blob.ID(blobName)
+	blobNameFullPath := prefix + blobName
+
+	putOpts := blob.PutOptions{
+		RetentionMode:   blob.Locked,
+		RetentionPeriod: 3 * time.Second,
+	}
+	if err := st.PutBlob(ctx, dummyBlob, gather.FromSlice([]byte(nil)), putOpts); err != nil {
+		t.Fatalf("couldn't put blob: %v", err)
+	}
+
+	if count := getBlobCount(ctx, t, st); count != 1 {
+		t.Fatalf("got %d blobs but expected %d", count, 1)
+	}
+
+	currentTime := clock.Now().UTC()
+
+	cli := getAzureCLI(t, storageAccount, storageKey)
+	blobRetention := getBlobRetention(ctx, t, cli, container, blobNameFullPath)
+	if !blobRetention.After(currentTime) {
+		t.Fatalf("blob retention period not in the future: %v", blobRetention)
+	}
+
+	extendOpts := blob.ExtendOptions{
+		RetentionMode:   blob.Locked,
+		RetentionPeriod: 4 * time.Second,
+	}
+	if err := st.ExtendBlobRetention(ctx, dummyBlob, extendOpts); err != nil {
+		t.Fatalf("couldn't extend blob: %v", err)
+	}
+
+	extendedRetention := getBlobRetention(ctx, t, cli, container, blobNameFullPath)
+	if !extendedRetention.After(blobRetention) {
+		t.Fatalf("blob retention period not extended. was %v, now %v", blobRetention, extendedRetention)
+	}
+
+	if err := st.DeleteBlob(ctx, dummyBlob); err != nil {
+		t.Fatalf("can't delete blob: %v", err)
+	}
+
+	if count := getBlobCount(ctx, t, st); count != 0 {
+		t.Fatalf("got %d blobs but expected %d", count, 0)
+	}
+
+	// blob still exists although ListBlobs can't see it
+	_ = getBlobRetention(ctx, t, cli, container, blobNameFullPath)
+
+	const deleteMarkerName string = string(blob.BlobIDPrefixDeleteMarker) + "_" + blobName
+	deleteMarkerFullPath := prefix + deleteMarkerName
+
+	// delete marker file exists
+	if err := st.ExtendBlobRetention(ctx, blob.ID(deleteMarkerName), extendOpts); err != nil {
+		t.Fatalf("couldn't extend blob: %v", err)
+	}
+
+	deleteMarkerRetention := getBlobRetention(ctx, t, cli, container, deleteMarkerFullPath)
+
+	if err := deleteBlob(ctx, cli, container, blobNameFullPath); err != nil {
+		t.Fatalf("failed to delete blob: %v", err)
+	}
+	t.Logf("blob %s deleted", blobNameFullPath)
+
+	err = st.ExtendBlobRetention(ctx, blob.ID(deleteMarkerName), extendOpts)
+	if err == nil || !errors.Is(err, blob.ErrOrphanedDeleteMarkerBlob) {
+		t.Fatalf("delete marker extension should have had an orphaned blob error but didn't: %v", err)
+	}
+
+	deleteMarkerRetentionLatest := getBlobRetention(ctx, t, cli, container, deleteMarkerFullPath)
+	if !deleteMarkerRetentionLatest.Equal(deleteMarkerRetention) {
+		t.Fatalf("blob retention period should be unchanged. was %v, now %v", deleteMarkerRetention, deleteMarkerRetentionLatest)
+	}
+
+	if err := deleteBlob(ctx, cli, container, deleteMarkerFullPath); err != nil {
+		t.Fatalf("failed to delete blob: %v", err)
+	}
+	t.Logf("blob %s deleted", deleteMarkerFullPath)
+}
+
+func deleteBlob(ctx context.Context, cli *azblob.Client, container, blob string) error {
+	timeout := time.After(15 * time.Second)
+	tick := time.Tick(1 * time.Second)
+	for {
+		select {
+		case <-timeout:
+			return errors.New("failed to delete blob")
+		case <-tick:
+			_, err := cli.DeleteBlob(ctx, container, blob, nil)
+			if err == nil {
+				return nil
+			}
+		}
+	}
+}
+
+func getBlobCount(ctx context.Context, t *testing.T, st blob.Storage) int {
+	count := 0
+	if err := st.ListBlobs(ctx, "s", func(bm blob.Metadata) error {
+		count++
+		return nil
+	}); err != nil {
+		t.Fatalf("can't list blobs: %v", err)
+	}
+	return count
+}
+
+func getBlobRetention(ctx context.Context, t *testing.T, cli *azblob.Client, container string, blobName string) time.Time {
+	props, err := cli.ServiceClient().
+		NewContainerClient(container).
+		NewBlobClient(blobName).
+		GetProperties(ctx, nil)
+	if err != nil {
+		t.Fatalf("can't get blob properties: %v", err)
+	}
+	return *props.ImmutabilityPolicyExpiresOn
+}
+
+// getAzureCLI returns a separate client to verify things the Storage interface doesn't support.
+func getAzureCLI(t *testing.T, storageAccount, storageKey string) *azblob.Client {
+	cred, err := azblob.NewSharedKeyCredential(storageAccount, storageKey)
+	if err != nil {
+		t.Fatal("can't create new credential")
+	}
+
+	storageHostname := fmt.Sprintf("%v.blob.core.windows.net", storageAccount)
+	cli, err := azblob.NewClientWithSharedKeyCredential(
+		fmt.Sprintf("https://%s/", storageHostname), cred, nil,
+	)
+	if err != nil {
+		t.Fatal("can't create new client")
+	}
+	return cli
 }
