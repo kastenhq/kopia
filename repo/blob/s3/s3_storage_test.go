@@ -278,7 +278,6 @@ func TestS3StorageRetentionLockedBucket(t *testing.T) {
 	})
 
 	t.Run("invalid mode", func(t *testing.T) {
-		t.Fatalf("just a test")
 		options.Prefix = ""
 		testPutBlobWithInvalidRetention(t, options, blob.PutOptions{
 			RetentionMode:   blob.Locked, // Azure mode
