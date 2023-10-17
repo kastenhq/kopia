@@ -335,7 +335,7 @@ func (az *azStorage) getDeleteMarkerBlobs(ctx context.Context) ([]blob.Metadata,
 		Prefix: &prefixStr,
 	})
 
-	var deleteMarketBlobs []blob.Metadata
+	var deleteMarkerBlobs []blob.Metadata
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
@@ -344,11 +344,11 @@ func (az *azStorage) getDeleteMarkerBlobs(ctx context.Context) ([]blob.Metadata,
 
 		for _, it := range page.Segment.BlobItems {
 			bm := az.getBlobMeta(it)
-			deleteMarketBlobs = append(deleteMarketBlobs, bm)
+			deleteMarkerBlobs = append(deleteMarkerBlobs, bm)
 		}
 	}
 
-	return deleteMarketBlobs, nil
+	return deleteMarkerBlobs, nil
 }
 
 func (az *azStorage) getDeleteMarkerOriginalFilesMap(dmBlobs []blob.Metadata) map[string]bool {
