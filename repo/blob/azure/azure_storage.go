@@ -15,6 +15,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	azblobblob "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
+	azblobmodels "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/google/martian/v3/log"
 	"github.com/pkg/errors"
 
@@ -233,7 +234,7 @@ func (az *azStorage) getObjectNameString(b blob.ID) string {
 
 // ListBlobs list azure blobs with given prefix.
 func (az *azStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback func(blob.Metadata) error) error {
-	prefixStr := az.Prefix + string(prefix)
+	prefixStr := az.getObjectNameString(prefix)
 
 	blobsToSkip, err := az.getBlobsToSkip(ctx, prefix)
 	if err != nil {
@@ -254,8 +255,7 @@ func (az *azStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback fun
 		}
 
 		for _, it := range page.Segment.BlobItems {
-			n := *it.Name
-			blobName := n[len(az.Prefix):]
+			blobName := az.getBlobName(it)
 
 			if blobsToSkip[blobName] {
 				log.Debugf("excluded blob from ListBlobs: %s", blobName)
@@ -263,17 +263,7 @@ func (az *azStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback fun
 				continue
 			}
 
-			bm := blob.Metadata{
-				BlobID: blob.ID(blobName),
-				Length: *it.Properties.ContentLength,
-			}
-
-			// see if we have 'Kopiamtime' metadata, if so - trust it.
-			if t, ok := timestampmeta.FromValue(stringDefault(it.Metadata["kopiamtime"], "")); ok {
-				bm.Timestamp = t
-			} else {
-				bm.Timestamp = *it.Properties.LastModified
-			}
+			bm := az.getBlobMeta(it)
 
 			if err := callback(bm); err != nil {
 				return err
@@ -331,12 +321,21 @@ func (az *azStorage) getBlobsToSkip(ctx context.Context, prefix blob.ID) (map[st
 // getFilesPendingDeletion returns a list of blobs that have an associated delete marker file.
 // The original blobs may have already been deleted but the delete marker files are still pending deletion.
 func (az *azStorage) getFilesPendingDeletion(ctx context.Context) (map[string]bool, error) {
-	prefixStr := az.Prefix + string(blob.BlobIDPrefixDeleteMarker)
-	pendingDeletionFiles := make(map[string]bool)
+	dmBlobs, err := az.getDeleteMarkerBlobs(ctx)
+	if err != nil {
+		return nil, translateError(err)
+	}
+
+	return az.getDeleteMarkerOriginalFilesMap(dmBlobs), nil
+}
+
+func (az *azStorage) getDeleteMarkerBlobs(ctx context.Context) ([]blob.Metadata, error) {
+	prefixStr := az.getObjectNameString(blob.BlobIDPrefixDeleteMarker)
 	pager := az.service.NewListBlobsFlatPager(az.container, &azblob.ListBlobsFlatOptions{
 		Prefix: &prefixStr,
 	})
 
+	var deleteMarketBlobs []blob.Metadata
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
@@ -344,16 +343,25 @@ func (az *azStorage) getFilesPendingDeletion(ctx context.Context) (map[string]bo
 		}
 
 		for _, it := range page.Segment.BlobItems {
-			n := *it.Name
-			originalFile, ok := getOriginalFile(n[len(az.Prefix):])
-			if !ok {
-				continue
-			}
-			pendingDeletionFiles[originalFile] = true
+			bm := az.getBlobMeta(it)
+			deleteMarketBlobs = append(deleteMarketBlobs, bm)
 		}
 	}
 
-	return pendingDeletionFiles, nil
+	return deleteMarketBlobs, nil
+}
+
+func (az *azStorage) getDeleteMarkerOriginalFilesMap(dmBlobs []blob.Metadata) map[string]bool {
+	pendingDeletionFiles := make(map[string]bool)
+	for _, dm := range dmBlobs {
+		originalFile, ok := getOriginalFile(string(dm.BlobID))
+		if !ok {
+			continue
+		}
+		pendingDeletionFiles[originalFile] = true
+	}
+
+	return pendingDeletionFiles
 }
 
 // isOrphanedDeleteMarkerFile checks if the original blob the delete marker file represents still exists.
@@ -375,6 +383,26 @@ func (az *azStorage) isOrphanedDeleteMarkerFile(ctx context.Context, b blob.ID) 
 		GetProperties(ctx, nil)
 
 	return errors.Is(translateError(err), blob.ErrBlobNotFound)
+}
+
+func (az *azStorage) getBlobName(it *azblobmodels.BlobItem) string {
+	n := *it.Name
+	return n[len(az.Prefix):]
+}
+
+func (az *azStorage) getBlobMeta(it *azblobmodels.BlobItem) blob.Metadata {
+	bm := blob.Metadata{
+		BlobID: blob.ID(az.getBlobName(it)),
+		Length: *it.Properties.ContentLength,
+	}
+
+	// see if we have 'Kopiamtime' metadata, if so - trust it.
+	if t, ok := timestampmeta.FromValue(stringDefault(it.Metadata["kopiamtime"], "")); ok {
+		bm.Timestamp = t
+	} else {
+		bm.Timestamp = *it.Properties.LastModified
+	}
+	return bm
 }
 
 // cleanupParallel removes files that have a matching delete marker file, providing the retention period has passed.
