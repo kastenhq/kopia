@@ -312,6 +312,7 @@ func (az *azStorage) createDeleteMarkerFile(ctx context.Context, originalFile st
 
 // getBlobsToSkip returns a list of blobs to skip, those marked for deletion via an associated delete marker file.
 func (az *azStorage) getBlobsToSkip(ctx context.Context, prefix blob.ID) (map[string]bool, error) {
+	// maintenance delete marker cleanup via azStorage.Cleanup
 	if prefix == blob.BlobIDPrefixDeleteMarker {
 		return nil, nil
 	}
@@ -416,7 +417,7 @@ func (az *azStorage) cleanupParallel(ctx context.Context, logger logging.Logger,
 		errChan           = make(chan error, parallel)
 	)
 
-	deleteMarkerBlobs := make(chan blob.Metadata, len(deleteMarkerFiles))
+	deleteMarkerBlobs := make(chan blob.Metadata, parallel)
 
 	for i := 0; i < parallel; i++ {
 		wg.Add(1)

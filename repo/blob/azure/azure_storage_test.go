@@ -22,6 +22,7 @@ import (
 	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/azure"
+	"github.com/kopia/kopia/repo/content"
 )
 
 const (
@@ -323,7 +324,7 @@ func TestAzureStorageRansomwareProtection(t *testing.T) {
 		t.Fatalf("couldn't put blob: %v", err)
 	}
 
-	if count := getBlobCount(ctx, t, st); count != 1 {
+	if count := getBlobCount(ctx, t, st, content.BlobIDPrefixSession); count != 1 {
 		t.Fatalf("got %d blobs but expected %d", count, 1)
 	}
 
@@ -352,7 +353,7 @@ func TestAzureStorageRansomwareProtection(t *testing.T) {
 		t.Fatalf("can't delete blob: %v", err)
 	}
 
-	if count := getBlobCount(ctx, t, st); count != 0 {
+	if count := getBlobCount(ctx, t, st, content.BlobIDPrefixSession); count != 0 {
 		t.Fatalf("got %d blobs but expected %d", count, 0)
 	}
 
@@ -406,9 +407,9 @@ func deleteBlob(ctx context.Context, cli *azblob.Client, container, blob string)
 	}
 }
 
-func getBlobCount(ctx context.Context, t *testing.T, st blob.Storage) int {
+func getBlobCount(ctx context.Context, t *testing.T, st blob.Storage, prefix blob.ID) int {
 	count := 0
-	if err := st.ListBlobs(ctx, "s", func(bm blob.Metadata) error {
+	if err := st.ListBlobs(ctx, prefix, func(bm blob.Metadata) error {
 		count++
 		return nil
 	}); err != nil {

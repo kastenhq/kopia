@@ -125,7 +125,7 @@ func (r RetentionMode) String() string {
 
 // IsValid - check whether this retention mode is valid or not.
 func (r RetentionMode) IsValid() bool {
-	return r == Governance || r == Compliance || r == Locked
+	return r.IsValidS3() || r.IsValidAzure()
 }
 
 // IsValidS3 - check whether this retention mode is valid for S3.
