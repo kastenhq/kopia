@@ -28,7 +28,8 @@ import (
 )
 
 const (
-	azStorageType = "azureBlob"
+	azStorageType   = "azureBlob"
+	latestVersionID = ""
 
 	timeMapKey = "Kopiamtime" // this must be capital letter followed by lowercase, to comply with AZ tags naming convention.
 )
@@ -42,6 +43,10 @@ type azStorage struct {
 }
 
 func (az *azStorage) GetBlob(ctx context.Context, b blob.ID, offset, length int64, output blob.OutputBuffer) error {
+	return az.getBlobWithVersion(ctx, b, latestVersionID, offset, length, output)
+}
+
+func (az *azStorage) getBlobWithVersion(ctx context.Context, b blob.ID, versionID string, offset, length int64, output blob.OutputBuffer) error {
 	if offset < 0 {
 		return errors.Wrap(blob.ErrInvalidRange, "invalid offset")
 	}
@@ -59,7 +64,14 @@ func (az *azStorage) GetBlob(ctx context.Context, b blob.ID, offset, length int6
 		opt.Range.Count = l1
 	}
 
-	resp, err := az.service.DownloadStream(ctx, az.container, az.getObjectNameString(b), opt)
+	bc, err := az.service.ServiceClient().
+		NewContainerClient(az.container).
+		NewBlobClient(az.getObjectNameString(b)).
+		WithVersionID(versionID)
+	if err != nil {
+		return err
+	}
+	resp, err := bc.DownloadStream(ctx, opt)
 	if err != nil {
 		return translateError(err)
 	}
@@ -497,6 +509,31 @@ func getOriginalFile(deleteMarkerFile string) (originalFile string, ok bool) {
 func New(ctx context.Context, opt *Options, isCreate bool) (blob.Storage, error) {
 	_ = isCreate
 
+	raw, err := newStorage(opt)
+	if err != nil {
+		return nil, err
+	}
+
+	st, err := maybePointInTimeStore(ctx, raw, opt.PointInTime)
+	if err != nil {
+		return nil, err
+	}
+
+	az := retrying.NewWrapper(st)
+
+	// verify Azure connection is functional by listing blobs in a bucket, which will fail if the container
+	// does not exist. We list with a prefix that will not exist, to avoid iterating through any objects.
+	nonExistentPrefix := fmt.Sprintf("kopia-azure-storage-initializing-%v", clock.Now().UnixNano())
+	if err := st.ListBlobs(ctx, blob.ID(nonExistentPrefix), func(md blob.Metadata) error {
+		return nil
+	}); err != nil {
+		return nil, errors.Wrap(err, "unable to list from the bucket")
+	}
+
+	return az, nil
+}
+
+func newStorage(opt *Options) (*azStorage, error) {
 	if opt.Container == "" {
 		return nil, errors.New("container name must be specified")
 	}
@@ -547,24 +584,11 @@ func New(ctx context.Context, opt *Options, isCreate bool) (blob.Storage, error)
 		return nil, errors.Wrap(serviceErr, "opening azure service")
 	}
 
-	raw := &azStorage{
+	return &azStorage{
 		Options:   *opt,
 		container: opt.Container,
 		service:   service,
-	}
-
-	az := retrying.NewWrapper(raw)
-
-	// verify Azure connection is functional by listing blobs in a bucket, which will fail if the container
-	// does not exist. We list with a prefix that will not exist, to avoid iterating through any objects.
-	nonExistentPrefix := fmt.Sprintf("kopia-azure-storage-initializing-%v", clock.Now().UnixNano())
-	if err := raw.ListBlobs(ctx, blob.ID(nonExistentPrefix), func(md blob.Metadata) error {
-		return nil
-	}); err != nil {
-		return nil, errors.Wrap(err, "unable to list from the bucket")
-	}
-
-	return az, nil
+	}, nil
 }
 
 func init() {

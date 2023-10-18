@@ -285,6 +285,7 @@ func TestAzureStorageRansomwareProtection(t *testing.T) {
 	testutil.ProviderTest(t)
 
 	// must be without locked policy or the retention period will be too high (1+ days)
+	// and must be with IsImmutableStorageWithVersioning enabled
 	container := getEnvOrSkip(t, testContainerEnv)
 	storageAccount := getEnvOrSkip(t, testStorageAccountEnv)
 	storageKey := getEnvOrSkip(t, testStorageKeyEnv)
