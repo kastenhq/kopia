@@ -68,11 +68,10 @@ func TestGetBlobVersions(t *testing.T) {
 	futurePIT := time.Now().Add(1 * time.Hour).UTC()
 
 	for _, tt := range []struct {
-		testName                   string
-		pointInTime                *time.Time
-		expectedBlobData           string
-		expectedError              error
-		expectedVersionsAccessible int
+		testName         string
+		pointInTime      *time.Time
+		expectedBlobData string
+		expectedError    error
 	}{
 		{
 			testName:         "unset PIT",
