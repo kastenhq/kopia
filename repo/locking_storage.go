@@ -2,7 +2,6 @@ package repo
 
 import (
 	"github.com/kopia/kopia/internal/epoch"
-	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/content/indexblob"
 	"github.com/kopia/kopia/repo/format"
@@ -17,7 +16,7 @@ func GetLockingStoragePrefixes() []string {
 	}
 
 	prefixes = append(prefixes, indexblob.V0IndexBlobPrefix, epoch.EpochManagerIndexUberPrefix, format.KopiaRepositoryBlobID,
-		format.KopiaBlobCfgBlobID, string(blob.BlobIDPrefixDeleteMarker))
+		format.KopiaBlobCfgBlobID)
 
 	return prefixes
 }

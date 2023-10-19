@@ -274,17 +274,13 @@ func TestAzureStorageInvalidCreds(t *testing.T) {
 	}
 }
 
-// TestAzureStorageRansomwareProtection runs through the behaviour of Azure ransomware protection.
-// 1. blob is created then the retention is extended.
-// 2. blob is logically deleted while the retention period is in place, by creating a delete marker (d_) blob.
-// 3. delete marker blob is extended.
-// 4. original blob is deleted.
-// 5. delete marker blob further extension fails, then it is deleted.
-func TestAzureStorageRansomwareProtection(t *testing.T) {
+// TestAzureStorageImmutabilityProtection runs through the behaviour of Azure immutability protection.
+func TestAzureStorageImmutabilityProtection(t *testing.T) {
 	t.Parallel()
 	testutil.ProviderTest(t)
 
 	// must be without locked policy or the retention period will be too high (1+ days)
+	// and must be with IsImmutableStorageWithVersioning enabled
 	container := getEnvOrSkip(t, testContainerEnv)
 	storageAccount := getEnvOrSkip(t, testStorageAccountEnv)
 	storageKey := getEnvOrSkip(t, testStorageKeyEnv)
@@ -320,17 +316,16 @@ func TestAzureStorageRansomwareProtection(t *testing.T) {
 		RetentionMode:   blob.Locked,
 		RetentionPeriod: 3 * time.Second,
 	}
-	if err := st.PutBlob(ctx, dummyBlob, gather.FromSlice([]byte(nil)), putOpts); err != nil {
-		t.Fatalf("couldn't put blob: %v", err)
-	}
+	err = st.PutBlob(ctx, dummyBlob, gather.FromSlice([]byte(nil)), putOpts)
+	require.NoError(t, err)
+	cli := getAzureCLI(t, storageAccount, storageKey)
+	defer deleteBlob(ctx, t, cli, container, blobNameFullPath)
 
-	if count := getBlobCount(ctx, t, st, content.BlobIDPrefixSession); count != 1 {
-		t.Fatalf("got %d blobs but expected %d", count, 1)
-	}
+	count := getBlobCount(ctx, t, st, content.BlobIDPrefixSession)
+	require.Equal(t, 1, count)
 
 	currentTime := clock.Now().UTC()
 
-	cli := getAzureCLI(t, storageAccount, storageKey)
 	blobRetention := getBlobRetention(ctx, t, cli, container, blobNameFullPath)
 	if !blobRetention.After(currentTime) {
 		t.Fatalf("blob retention period not in the future: %v", blobRetention)
@@ -340,68 +335,39 @@ func TestAzureStorageRansomwareProtection(t *testing.T) {
 		RetentionMode:   blob.Locked,
 		RetentionPeriod: 4 * time.Second,
 	}
-	if err := st.ExtendBlobRetention(ctx, dummyBlob, extendOpts); err != nil {
-		t.Fatalf("couldn't extend blob: %v", err)
-	}
+	err = st.ExtendBlobRetention(ctx, dummyBlob, extendOpts)
+	require.NoError(t, err)
 
 	extendedRetention := getBlobRetention(ctx, t, cli, container, blobNameFullPath)
 	if !extendedRetention.After(blobRetention) {
 		t.Fatalf("blob retention period not extended. was %v, now %v", blobRetention, extendedRetention)
 	}
 
-	if err := st.DeleteBlob(ctx, dummyBlob); err != nil {
-		t.Fatalf("can't delete blob: %v", err)
-	}
+	err = st.DeleteBlob(ctx, dummyBlob)
+	require.NoError(t, err)
 
-	if count := getBlobCount(ctx, t, st, content.BlobIDPrefixSession); count != 0 {
-		t.Fatalf("got %d blobs but expected %d", count, 0)
-	}
+	count = getBlobCount(ctx, t, st, content.BlobIDPrefixSession)
+	require.Equal(t, 0, count)
 
 	// blob still exists although ListBlobs can't see it
 	_ = getBlobRetention(ctx, t, cli, container, blobNameFullPath)
 
-	const deleteMarkerName string = string(blob.BlobIDPrefixDeleteMarker) + "_" + blobName
-	deleteMarkerFullPath := prefix + deleteMarkerName
-
-	// delete marker blob exists
-	if err := st.ExtendBlobRetention(ctx, blob.ID(deleteMarkerName), extendOpts); err != nil {
-		t.Fatalf("couldn't extend blob: %v", err)
-	}
-
-	deleteMarkerRetention := getBlobRetention(ctx, t, cli, container, deleteMarkerFullPath)
-
-	if err := deleteBlob(ctx, cli, container, blobNameFullPath); err != nil {
-		t.Fatalf("failed to delete blob: %v", err)
-	}
-	t.Logf("blob %s deleted", blobNameFullPath)
-
-	err = st.ExtendBlobRetention(ctx, blob.ID(deleteMarkerName), extendOpts)
-	if err == nil || !errors.Is(err, blob.ErrOrphanedDeleteMarkerBlob) {
-		t.Fatalf("delete marker extension should have had an orphaned blob error but didn't: %v", err)
-	}
-
-	deleteMarkerRetentionLatest := getBlobRetention(ctx, t, cli, container, deleteMarkerFullPath)
-	if !deleteMarkerRetentionLatest.Equal(deleteMarkerRetention) {
-		t.Fatalf("blob retention period should be unchanged. was %v, now %v", deleteMarkerRetention, deleteMarkerRetentionLatest)
-	}
-
-	if err := deleteBlob(ctx, cli, container, deleteMarkerFullPath); err != nil {
-		t.Fatalf("failed to delete blob: %v", err)
-	}
-	t.Logf("blob %s deleted", deleteMarkerFullPath)
+	// set the retention of the latest version so it can be cleaned up
+	err = st.ExtendBlobRetention(ctx, dummyBlob, extendOpts)
+	require.NoError(t, err)
 }
 
-func deleteBlob(ctx context.Context, cli *azblob.Client, container, blob string) error {
+func deleteBlob(ctx context.Context, t *testing.T, cli *azblob.Client, container, blobName string) {
 	timeout := time.After(15 * time.Second)
 	tick := time.Tick(1 * time.Second)
 	for {
 		select {
 		case <-timeout:
-			return errors.New("failed to delete blob")
+			t.Fatalf("failed to delete blob in time %s", blobName)
 		case <-tick:
-			_, err := cli.DeleteBlob(ctx, container, blob, nil)
+			_, err := cli.DeleteBlob(ctx, container, blobName, nil)
 			if err == nil {
-				return nil
+				return
 			}
 		}
 	}

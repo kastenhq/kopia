@@ -46,7 +46,7 @@ const (
 	TaskExtendBlobRetentionTimeFull = "extend-blob-retention-time"
 	TaskCleanupLogs                 = "cleanup-logs"
 	TaskCleanupEpochManager         = "cleanup-epoch-manager"
-	TaskCleanup                     = "cleanup-immutable-azure-blobs"
+	TaskCleanup                     = "miscellaneous-cleanup"
 )
 
 // shouldRun returns Mode if repository is due for periodic maintenance.
