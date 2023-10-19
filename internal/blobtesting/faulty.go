@@ -6,7 +6,6 @@ import (
 
 	"github.com/kopia/kopia/internal/fault"
 	"github.com/kopia/kopia/repo/blob"
-	"github.com/kopia/kopia/repo/logging"
 )
 
 // Supported faulty methods.
@@ -131,11 +130,6 @@ func (s *FaultyStorage) FlushCaches(ctx context.Context) error {
 // ExtendBlobRetention implements blob.Storage.
 func (s *FaultyStorage) ExtendBlobRetention(ctx context.Context, b blob.ID, opts blob.ExtendOptions) error {
 	return s.base.ExtendBlobRetention(ctx, b, opts)
-}
-
-// Cleanup implements blob.Storage.
-func (s *FaultyStorage) Cleanup(ctx context.Context, logger logging.Logger) error {
-	return s.base.Cleanup(ctx, logger)
 }
 
 var _ blob.Storage = (*FaultyStorage)(nil)
