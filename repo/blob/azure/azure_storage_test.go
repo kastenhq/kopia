@@ -276,7 +276,7 @@ func TestAzureStorageInvalidCreds(t *testing.T) {
 
 // TestAzureStorageRansomwareProtection runs through the behaviour of Azure ransomware protection.
 // 1. blob is created then the retention is extended.
-// 2. blob is logically deleted while the retention period is in place, by creating a delete marker (d_) file.
+// 2. blob is logically deleted while the retention period is in place, by creating a delete marker (d_) blob.
 // 3. delete marker blob is extended.
 // 4. original blob is deleted.
 // 5. delete marker blob further extension fails, then it is deleted.
@@ -363,7 +363,7 @@ func TestAzureStorageRansomwareProtection(t *testing.T) {
 	const deleteMarkerName string = string(blob.BlobIDPrefixDeleteMarker) + "_" + blobName
 	deleteMarkerFullPath := prefix + deleteMarkerName
 
-	// delete marker file exists
+	// delete marker blob exists
 	if err := st.ExtendBlobRetention(ctx, blob.ID(deleteMarkerName), extendOpts); err != nil {
 		t.Fatalf("couldn't extend blob: %v", err)
 	}
