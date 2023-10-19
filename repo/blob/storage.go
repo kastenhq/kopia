@@ -24,8 +24,6 @@ var ErrInvalidRange = errors.Errorf("invalid blob offset or length")
 
 var ErrBlobImmutableDueToPolicy = errors.Errorf("blob immutable due to policy")
 
-var ErrOrphanedDeleteMarkerBlob = errors.Errorf("cannot extend retention of orphaned delete marker blob")
-
 // InvalidCredentialsErrStr is the error string returned by the provider
 // when a token has expired.
 const InvalidCredentialsErrStr = "The provided token has expired"
@@ -116,8 +114,6 @@ const (
 	// Locked - Locked policy mode for Azure.
 	Locked RetentionMode = RetentionMode(blob.ImmutabilityPolicyModeLocked)
 )
-
-const BlobIDPrefixDeleteMarker ID = "d"
 
 func (r RetentionMode) String() string {
 	return string(r)

@@ -46,7 +46,7 @@ const (
 	TaskExtendBlobRetentionTimeFull = "extend-blob-retention-time"
 	TaskCleanupLogs                 = "cleanup-logs"
 	TaskCleanupEpochManager         = "cleanup-epoch-manager"
-	TaskCleanup                     = "cleanup-immutable-azure-blobs"
+	TaskCleanup                     = "miscellaneous-cleanup"
 )
 
 // shouldRun returns Mode if repository is due for periodic maintenance.
@@ -466,7 +466,6 @@ func runFullMaintenance(ctx context.Context, runParams RunParameters, safety Saf
 
 func runTaskCleanup(ctx context.Context, rep repo.DirectRepositoryWriter, s *Schedule) error {
 	return ReportRun(ctx, rep, TaskCleanup, s, func() error {
-		log(ctx).Infof("runTaskCleanup called...")
 		return rep.BlobStorage().Cleanup(ctx, log(ctx))
 	})
 }
