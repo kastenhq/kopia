@@ -152,18 +152,12 @@ func (az *azStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes, op
 	}
 
 	if opts.RetentionPeriod != 0 {
-		// it will fail if the retentionPeriod set by the user is lower than that on the policy.
-		retainUntilDate := clock.Now().Add(opts.RetentionPeriod).UTC()
-		mode := azblobblob.ImmutabilityPolicySetting(opts.RetentionMode)
-
-		_, err = az.service.ServiceClient().
-			NewContainerClient(az.Container).
-			NewBlobClient(az.getObjectNameString(b)).
-			SetImmutabilityPolicy(ctx, retainUntilDate, &azblobblob.SetImmutabilityPolicyOptions{
-				Mode: &mode,
-			})
+		err = az.setImmutabilityPolicy(ctx, b, blob.ExtendOptions{
+			RetentionMode:   opts.RetentionMode,
+			RetentionPeriod: opts.RetentionPeriod,
+		})
 		if err != nil {
-			return errors.Wrap(err, "unable to extend retention period")
+			return errors.Wrap(err, "putting a blob")
 		}
 	}
 
@@ -171,6 +165,23 @@ func (az *azStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes, op
 		*opts.GetModTime = *resp.LastModified
 	}
 
+	return nil
+}
+
+func (az *azStorage) setImmutabilityPolicy(ctx context.Context, b blob.ID, opts blob.ExtendOptions) error {
+	// it will fail if the retentionPeriod set by the user is lower than that on the policy.
+	retainUntilDate := clock.Now().Add(opts.RetentionPeriod).UTC()
+	mode := azblobblob.ImmutabilityPolicySetting(opts.RetentionMode)
+
+	_, err := az.service.ServiceClient().
+		NewContainerClient(az.Container).
+		NewBlobClient(az.getObjectNameString(b)).
+		SetImmutabilityPolicy(ctx, retainUntilDate, &azblobblob.SetImmutabilityPolicyOptions{
+			Mode: &mode,
+		})
+	if err != nil {
+		return errors.Wrap(err, "unable to extend retention period")
+	}
 	return nil
 }
 
@@ -199,17 +210,9 @@ func (az *azStorage) ExtendBlobRetention(ctx context.Context, b blob.ID, opts bl
 		return blob.ErrOrphanedDeleteMarkerBlob
 	}
 
-	retainUntilDate := clock.Now().Add(opts.RetentionPeriod).UTC()
-	mode := azblobblob.ImmutabilityPolicySetting(opts.RetentionMode)
-
-	_, err := az.service.ServiceClient().
-		NewContainerClient(az.Container).
-		NewBlobClient(az.getObjectNameString(b)).
-		SetImmutabilityPolicy(ctx, retainUntilDate, &azblobblob.SetImmutabilityPolicyOptions{
-			Mode: &mode,
-		})
+	err := az.setImmutabilityPolicy(ctx, b, opts)
 	if err != nil {
-		return errors.Wrap(err, "unable to extend retention period")
+		return errors.Wrap(err, "extending a blob")
 	}
 
 	return nil

@@ -466,7 +466,6 @@ func runFullMaintenance(ctx context.Context, runParams RunParameters, safety Saf
 
 func runTaskCleanup(ctx context.Context, rep repo.DirectRepositoryWriter, s *Schedule) error {
 	return ReportRun(ctx, rep, TaskCleanup, s, func() error {
-		log(ctx).Infof("runTaskCleanup called...")
 		return rep.BlobStorage().Cleanup(ctx, log(ctx))
 	})
 }
