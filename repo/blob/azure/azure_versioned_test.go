@@ -62,7 +62,7 @@ func TestGetBlobVersions(t *testing.T) {
 	dataTimestamps, err := putBlobs(ctx, st, blobID, dataBlobs)
 	require.NoError(t, err)
 	cli := getAzureCLI(t, storageAccount, storageKey)
-	defer deleteBlob(ctx, cli, container, blobNameFullPath)
+	defer deleteBlob(ctx, t, cli, container, blobNameFullPath)
 
 	pastPIT := time.Now().Add(-1 * time.Hour).UTC()
 	futurePIT := time.Now().Add(1 * time.Hour).UTC()
@@ -165,23 +165,20 @@ func TestGetBlobVersionsWithDeletion(t *testing.T) {
 	dataTimestamps, err := putBlobs(ctx, st, blobID, dataBlobs)
 	require.NoError(t, err)
 	cli := getAzureCLI(t, storageAccount, storageKey)
-	defer deleteBlob(ctx, cli, container, blobNameFullPath)
+	defer deleteBlob(ctx, t, cli, container, blobNameFullPath)
 
 	count := getBlobCount(ctx, t, st, blobID)
 	require.Equal(t, 1, count)
 
 	err = st.DeleteBlob(ctx, blobID)
 	require.NoError(t, err)
-	const deleteMarkerName string = string(blob.BlobIDPrefixDeleteMarker) + "_" + blobName
-	deleteMarkerFullPath := prefix + deleteMarkerName
-	defer deleteBlob(ctx, cli, container, deleteMarkerFullPath)
 
-	// explicitly set the delete marker retention to a short time period to enable deletion.
+	// set the retention of the latest version so it can be cleaned up
 	extendOpts := blob.ExtendOptions{
 		RetentionMode:   blob.Locked,
 		RetentionPeriod: 3 * time.Second,
 	}
-	err = st.ExtendBlobRetention(ctx, blob.ID(deleteMarkerName), extendOpts)
+	err = st.ExtendBlobRetention(ctx, blobID, extendOpts)
 	require.NoError(t, err)
 
 	// blob no longer found

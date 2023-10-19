@@ -91,43 +91,8 @@ func getOlderThan(vs []versionMetadata, t time.Time) []versionMetadata {
 	return vs
 }
 
-func (az *azPointInTimeStorage) getVersionedBlobsToSkip(ctx context.Context) (map[string]bool, error) {
-	return az.getVersionedFilesPendingDeletion(ctx)
-}
-
-// getFilesPendingDeletion returns a list of blobs that have an associated delete marker file.
-// The original blobs may have already been deleted but the delete marker files are still pending deletion.
-func (az *azPointInTimeStorage) getVersionedFilesPendingDeletion(ctx context.Context) (map[string]bool, error) {
-	dmBlobs, err := az.getVersionedDeleteMarkerBlobs(ctx)
-	if err != nil {
-		return nil, translateError(err)
-	}
-
-	return az.getDeleteMarkerOriginalFilesMap(dmBlobs), nil
-}
-
-func (az *azPointInTimeStorage) getVersionedDeleteMarkerBlobs(ctx context.Context) ([]blob.Metadata, error) {
-	dmBlobs, err := az.getDeleteMarkerBlobs(ctx)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get delete marker blobs")
-	}
-	var versionedDMBlobs []blob.Metadata
-	for _, dm := range dmBlobs {
-		if dm.Timestamp.After(az.pointInTime) {
-			continue
-		}
-		versionedDMBlobs = append(versionedDMBlobs, dm)
-	}
-	return versionedDMBlobs, nil
-}
-
 func (az *azPointInTimeStorage) listBlobVersions(ctx context.Context, prefix blob.ID, callback func(vm versionMetadata) error) error {
 	prefixStr := az.getObjectNameString(prefix)
-
-	blobsToSkip, err := az.getVersionedBlobsToSkip(ctx)
-	if err != nil {
-		return errors.Wrap(err, "failed to get blobs to skip")
-	}
 
 	pager := az.service.NewListBlobsFlatPager(az.container, &azblob.ListBlobsFlatOptions{
 		Prefix: &prefixStr,
@@ -146,7 +111,7 @@ func (az *azPointInTimeStorage) listBlobVersions(ctx context.Context, prefix blo
 		for _, it := range page.Segment.BlobItems {
 			blobName := az.getBlobName(it)
 
-			if blobsToSkip[blobName] {
+			if az.isMarkedForDeletion(it) {
 				log.Debugf("excluded blob from ListBlobs: %s", blobName)
 				// skip those set for deletion
 				continue
