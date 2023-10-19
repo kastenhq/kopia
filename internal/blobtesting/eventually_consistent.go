@@ -293,10 +293,6 @@ func (s *eventuallyConsistentStorage) ExtendBlobRetention(ctx context.Context, b
 	return s.realStorage.ExtendBlobRetention(ctx, b, opts)
 }
 
-func (s *eventuallyConsistentStorage) Cleanup(ctx context.Context, logger logging.Logger) error {
-	return s.realStorage.Cleanup(ctx, logger)
-}
-
 // NewEventuallyConsistentStorage returns an eventually-consistent storage wrapper on top
 // of provided storage.
 func NewEventuallyConsistentStorage(st blob.Storage, listSettleTime time.Duration, timeNow func() time.Time) blob.Storage {

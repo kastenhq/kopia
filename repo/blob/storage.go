@@ -232,9 +232,6 @@ type Storage interface {
 	// IsReadOnly returns whether this Storage is in read-only mode. When in
 	// read-only mode all mutation operations will fail.
 	IsReadOnly() bool
-
-	// Cleanup covers any ad hoc cleanup tasks that may be vendor specific.
-	Cleanup(ctx context.Context, logger logging.Logger) error
 }
 
 // ID is a string that represents blob identifier.

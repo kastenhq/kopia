@@ -8,7 +8,6 @@ import (
 	"github.com/kopia/kopia/internal/metrics"
 	"github.com/kopia/kopia/internal/timetrack"
 	"github.com/kopia/kopia/repo/blob"
-	"github.com/kopia/kopia/repo/logging"
 )
 
 type blobMetrics struct {
@@ -177,19 +176,6 @@ func (s *blobMetrics) Close(ctx context.Context) error {
 	}
 
 	//nolint:wrapcheck
-	return err
-}
-
-func (s *blobMetrics) Cleanup(ctx context.Context, logger logging.Logger) error {
-	timer := timetrack.StartTimer()
-	err := s.base.Cleanup(ctx, logger)
-	dt := timer.Elapsed()
-
-	s.cleanupDuration.Observe(dt)
-	if err != nil {
-		s.cleanupErrors.Add(1)
-	}
-
 	return err
 }
 

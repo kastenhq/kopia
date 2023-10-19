@@ -319,7 +319,6 @@ func TestAzureStorageImmutabilityProtection(t *testing.T) {
 	err = st.PutBlob(ctx, dummyBlob, gather.FromSlice([]byte(nil)), putOpts)
 	require.NoError(t, err)
 	cli := getAzureCLI(t, storageAccount, storageKey)
-	defer deleteBlob(ctx, t, cli, container, blobNameFullPath)
 
 	count := getBlobCount(ctx, t, st, content.BlobIDPrefixSession)
 	require.Equal(t, 1, count)
@@ -348,29 +347,6 @@ func TestAzureStorageImmutabilityProtection(t *testing.T) {
 
 	count = getBlobCount(ctx, t, st, content.BlobIDPrefixSession)
 	require.Equal(t, 0, count)
-
-	// blob still exists although ListBlobs can't see it
-	_ = getBlobRetention(ctx, t, cli, container, blobNameFullPath)
-
-	// set the retention of the latest version so it can be cleaned up
-	err = st.ExtendBlobRetention(ctx, dummyBlob, extendOpts)
-	require.NoError(t, err)
-}
-
-func deleteBlob(ctx context.Context, t *testing.T, cli *azblob.Client, container, blobName string) {
-	timeout := time.After(15 * time.Second)
-	tick := time.Tick(1 * time.Second)
-	for {
-		select {
-		case <-timeout:
-			t.Fatalf("failed to delete blob in time %s", blobName)
-		case <-tick:
-			_, err := cli.DeleteBlob(ctx, container, blobName, nil)
-			if err == nil {
-				return
-			}
-		}
-	}
 }
 
 func getBlobCount(ctx context.Context, t *testing.T, st blob.Storage, prefix blob.ID) int {

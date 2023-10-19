@@ -46,7 +46,6 @@ const (
 	TaskExtendBlobRetentionTimeFull = "extend-blob-retention-time"
 	TaskCleanupLogs                 = "cleanup-logs"
 	TaskCleanupEpochManager         = "cleanup-epoch-manager"
-	TaskCleanup                     = "miscellaneous-cleanup"
 )
 
 // shouldRun returns Mode if repository is due for periodic maintenance.
@@ -457,17 +456,7 @@ func runFullMaintenance(ctx context.Context, runParams RunParameters, safety Saf
 		return errors.Wrap(err, "error cleaning up epoch manager")
 	}
 
-	if err := runTaskCleanup(ctx, runParams.rep, s); err != nil {
-		return errors.Wrap(err, "error running cleanup task")
-	}
-
 	return nil
-}
-
-func runTaskCleanup(ctx context.Context, rep repo.DirectRepositoryWriter, s *Schedule) error {
-	return ReportRun(ctx, rep, TaskCleanup, s, func() error {
-		return rep.BlobStorage().Cleanup(ctx, log(ctx))
-	})
 }
 
 // shouldRewriteContents returns true if it's currently ok to rewrite contents.
