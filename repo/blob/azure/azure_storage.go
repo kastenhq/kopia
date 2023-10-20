@@ -28,8 +28,6 @@ const (
 	azStorageType   = "azureBlob"
 	latestVersionID = ""
 
-	deleteMarkerVersion = "delete marker"
-
 	timeMapKey = "Kopiamtime" // this must be capital letter followed by lowercase, to comply with AZ tags naming convention.
 )
 
@@ -292,7 +290,7 @@ func (az *azStorage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes, op
 // retryDeleteBlob creates a delete marker version which is set to unlocked state.
 // This protection is then removed and the blob is deleted. Finally, delete the delete marker version.
 func (az *azStorage) retryDeleteBlob(ctx context.Context, b blob.ID) error {
-	resp, err := az.putBlob(ctx, b, gather.FromSlice([]byte(deleteMarkerVersion)), blob.PutOptions{
+	resp, err := az.putBlob(ctx, b, gather.FromSlice([]byte(nil)), blob.PutOptions{
 		RetentionMode:   blob.RetentionMode(azblobblob.ImmutabilityPolicySettingUnlocked),
 		RetentionPeriod: time.Minute,
 	})

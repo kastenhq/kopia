@@ -279,8 +279,7 @@ func TestAzureStorageImmutabilityProtection(t *testing.T) {
 	t.Parallel()
 	testutil.ProviderTest(t)
 
-	// must be without locked policy or the retention period will be too high (1+ days)
-	// and must be with IsImmutableStorageWithVersioning enabled
+	// must be with ImmutableStorage with Versioning enabled
 	container := getEnvOrSkip(t, testContainerEnv)
 	storageAccount := getEnvOrSkip(t, testStorageAccountEnv)
 	storageKey := getEnvOrSkip(t, testStorageKeyEnv)
@@ -316,7 +315,8 @@ func TestAzureStorageImmutabilityProtection(t *testing.T) {
 		RetentionMode:   blob.Locked,
 		RetentionPeriod: 3 * time.Second,
 	}
-	err = st.PutBlob(ctx, dummyBlob, gather.FromSlice([]byte(nil)), putOpts)
+	// non-nil blob to distinguish against delete marker version
+	err = st.PutBlob(ctx, dummyBlob, gather.FromSlice([]byte("x")), putOpts)
 	require.NoError(t, err)
 	cli := getAzureCLI(t, storageAccount, storageKey)
 
