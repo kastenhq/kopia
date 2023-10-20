@@ -142,7 +142,8 @@ func (az *azStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes, op
 		return errors.Wrap(blob.ErrUnsupportedPutBlobOption, "do-not-recreate")
 	}
 
-	return az.putBlob(ctx, b, data, opts)
+	_, err := az.putBlob(ctx, b, data, opts)
+	return err
 }
 
 // DeleteBlob deletes azure blob from container with given ID.
@@ -164,11 +165,18 @@ func (az *azStorage) DeleteBlob(ctx context.Context, b blob.ID) error {
 
 // ExtendBlobRetention extends a blob retention period.
 func (az *azStorage) ExtendBlobRetention(ctx context.Context, b blob.ID, opts blob.ExtendOptions) error {
-	err := az.setImmutabilityPolicy(ctx, b, opts)
-	if err != nil {
-		return errors.Wrap(err, "extending a blob")
-	}
+	retainUntilDate := clock.Now().Add(opts.RetentionPeriod).UTC()
+	mode := azblobblob.ImmutabilityPolicySetting(opts.RetentionMode)
 
+	_, err := az.service.ServiceClient().
+		NewContainerClient(az.Container).
+		NewBlobClient(az.getObjectNameString(b)).
+		SetImmutabilityPolicy(ctx, retainUntilDate, &azblobblob.SetImmutabilityPolicyOptions{
+			Mode: &mode,
+		})
+	if err != nil {
+		return errors.Wrap(err, "unable to extend retention period")
+	}
 	return nil
 }
 
@@ -244,7 +252,7 @@ func (az *azStorage) getBlobMeta(it *azblobmodels.BlobItem) blob.Metadata {
 	return bm
 }
 
-func (az *azStorage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes, opts blob.PutOptions) error {
+func (az *azStorage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes, opts blob.PutOptions) (azblockblob.UploadResponse, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -271,37 +279,20 @@ func (az *azStorage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes, op
 		NewBlockBlobClient(az.getObjectNameString(b)).
 		Upload(ctx, data.Reader(), uo)
 	if err != nil {
-		return translateError(err)
+		return resp, translateError(err)
 	}
 
 	if opts.GetModTime != nil {
 		*opts.GetModTime = *resp.LastModified
 	}
 
-	return nil
+	return resp, nil
 }
 
-func (az *azStorage) setImmutabilityPolicy(ctx context.Context, b blob.ID, opts blob.ExtendOptions) error {
-	// it will fail if the retentionPeriod set by the user is lower than that on the policy.
-	retainUntilDate := clock.Now().Add(opts.RetentionPeriod).UTC()
-	mode := azblobblob.ImmutabilityPolicySetting(opts.RetentionMode)
-
-	_, err := az.service.ServiceClient().
-		NewContainerClient(az.Container).
-		NewBlobClient(az.getObjectNameString(b)).
-		SetImmutabilityPolicy(ctx, retainUntilDate, &azblobblob.SetImmutabilityPolicyOptions{
-			Mode: &mode,
-		})
-	if err != nil {
-		return errors.Wrap(err, "unable to extend retention period")
-	}
-	return nil
-}
-
-// retryDeleteBlob creates a delete marker version which is set to unlocked state. This protection is then removed
-// and the blob is deleted.
+// retryDeleteBlob creates a delete marker version which is set to unlocked state.
+// This protection is then removed and the blob is deleted. Finally, delete the delete marker version.
 func (az *azStorage) retryDeleteBlob(ctx context.Context, b blob.ID) error {
-	err := az.putBlob(ctx, b, gather.FromSlice([]byte(deleteMarkerVersion)), blob.PutOptions{
+	resp, err := az.putBlob(ctx, b, gather.FromSlice([]byte(deleteMarkerVersion)), blob.PutOptions{
 		RetentionMode:   blob.RetentionMode(azblobblob.ImmutabilityPolicySettingUnlocked),
 		RetentionPeriod: time.Minute,
 	})
@@ -318,6 +309,23 @@ func (az *azStorage) retryDeleteBlob(ctx context.Context, b blob.ID) error {
 	}
 
 	_, err = az.service.DeleteBlob(ctx, az.container, az.getObjectNameString(b), nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to soft delete blob")
+	}
+
+	bc, err := az.service.ServiceClient().
+		NewContainerClient(az.container).
+		NewBlobClient(az.getObjectNameString(b)).
+		WithVersionID(*resp.VersionID)
+	if err != nil {
+		return errors.Wrap(err, "failed to get versioned blob client")
+	}
+
+	_, err = bc.Delete(ctx, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to delete the delete marker blob version")
+	}
+
 	return err
 }
 
