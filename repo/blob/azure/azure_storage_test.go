@@ -315,7 +315,8 @@ func TestAzureStorageImmutabilityProtection(t *testing.T) {
 		RetentionMode:   blob.Locked,
 		RetentionPeriod: 3 * time.Second,
 	}
-	err = st.PutBlob(ctx, dummyBlob, gather.FromSlice([]byte(nil)), putOpts)
+	// non-nil blob to distinguish against delete marker version
+	err = st.PutBlob(ctx, dummyBlob, gather.FromSlice([]byte("x")), putOpts)
 	require.NoError(t, err)
 	cli := getAzureCLI(t, storageAccount, storageKey)
 
