@@ -187,11 +187,6 @@ func (s DefaultProviderImplementation) GetCapacity(context.Context) (Capacity, e
 	return Capacity{}, ErrNotAVolume
 }
 
-// Cleanup complies with the Storage interface.
-func (s DefaultProviderImplementation) Cleanup(c context.Context, l logging.Logger) error {
-	return nil
-}
-
 // HasRetentionOptions returns true when blob-retention settings have been
 // specified, otherwise returns false.
 func (o PutOptions) HasRetentionOptions() bool {

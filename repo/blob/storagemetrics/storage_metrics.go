@@ -28,7 +28,6 @@ type blobMetrics struct {
 	listBlobsDuration           *metrics.Distribution[time.Duration]
 	closeDuration               *metrics.Distribution[time.Duration]
 	flushCachesDuration         *metrics.Distribution[time.Duration]
-	cleanupDuration             *metrics.Distribution[time.Duration]
 
 	getBlobErrors             *metrics.Counter
 	getCapacityErrors         *metrics.Counter
@@ -39,7 +38,6 @@ type blobMetrics struct {
 	listBlobsErrors           *metrics.Counter
 	closeErrors               *metrics.Counter
 	flushCachesErrors         *metrics.Counter
-	cleanupErrors             *metrics.Counter
 }
 
 func (s *blobMetrics) GetBlob(ctx context.Context, id blob.ID, offset, length int64, output blob.OutputBuffer) error {
@@ -238,7 +236,6 @@ func NewWrapper(wrapped blob.Storage, mr *metrics.Registry) blob.Storage {
 		listBlobsDuration:      durationSummaryForMethod("ListBlobs"),
 		closeDuration:          durationSummaryForMethod("Close"),
 		flushCachesDuration:    durationSummaryForMethod("FlushCaches"),
-		cleanupDuration:        durationSummaryForMethod("Cleanup"),
 
 		getBlobErrors:     errorCounterForMethod("GetBlob"),
 		getCapacityErrors: errorCounterForMethod("GetCapacity"),
@@ -248,6 +245,5 @@ func NewWrapper(wrapped blob.Storage, mr *metrics.Registry) blob.Storage {
 		listBlobsErrors:   errorCounterForMethod("ListBlobs"),
 		closeErrors:       errorCounterForMethod("Close"),
 		flushCachesErrors: errorCounterForMethod("FlushCaches"),
-		cleanupErrors:     errorCounterForMethod("Cleanup"),
 	}
 }
