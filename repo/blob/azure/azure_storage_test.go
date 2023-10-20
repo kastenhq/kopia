@@ -279,8 +279,7 @@ func TestAzureStorageImmutabilityProtection(t *testing.T) {
 	t.Parallel()
 	testutil.ProviderTest(t)
 
-	// must be without locked policy or the retention period will be too high (1+ days)
-	// and must be with IsImmutableStorageWithVersioning enabled
+	// must be with ImmutableStorage with Versioning enabled
 	container := getEnvOrSkip(t, testContainerEnv)
 	storageAccount := getEnvOrSkip(t, testStorageAccountEnv)
 	storageKey := getEnvOrSkip(t, testStorageKeyEnv)
