@@ -129,7 +129,8 @@ func (az *azStorage) PutBlob(ctx context.Context, b blob.ID, data blob.Bytes, op
 		return errors.Wrap(blob.ErrUnsupportedPutBlobOption, "do-not-recreate")
 	}
 
-	return az.putBlob(ctx, b, data, opts)
+	_, err := az.putBlob(ctx, b, data, opts)
+	return err
 }
 
 // DeleteBlob deletes azure blob from container with given ID.
@@ -238,7 +239,7 @@ func (az *azStorage) getBlobMeta(it *azblobmodels.BlobItem) blob.Metadata {
 	return bm
 }
 
-func (az *azStorage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes, opts blob.PutOptions) error {
+func (az *azStorage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes, opts blob.PutOptions) (azblockblob.UploadResponse, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -265,20 +266,20 @@ func (az *azStorage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes, op
 		NewBlockBlobClient(az.getObjectNameString(b)).
 		Upload(ctx, data.Reader(), uo)
 	if err != nil {
-		return translateError(err)
+		return resp, translateError(err)
 	}
 
 	if opts.GetModTime != nil {
 		*opts.GetModTime = *resp.LastModified
 	}
 
-	return nil
+	return resp, nil
 }
 
 // retryDeleteBlob creates a delete marker version which is set to unlocked state.
-// This protection is then removed and the blob is deleted.
+// This protection is then removed and the blob is deleted. Finally, delete the delete marker version.
 func (az *azStorage) retryDeleteBlob(ctx context.Context, b blob.ID) error {
-	err := az.putBlob(ctx, b, gather.FromSlice([]byte(deleteMarkerVersion)), blob.PutOptions{
+	resp, err := az.putBlob(ctx, b, gather.FromSlice([]byte(deleteMarkerVersion)), blob.PutOptions{
 		RetentionMode:   blob.RetentionMode(azblobblob.ImmutabilityPolicySettingUnlocked),
 		RetentionPeriod: time.Minute,
 	})
@@ -295,6 +296,23 @@ func (az *azStorage) retryDeleteBlob(ctx context.Context, b blob.ID) error {
 	}
 
 	_, err = az.service.DeleteBlob(ctx, az.container, az.getObjectNameString(b), nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to soft delete blob")
+	}
+
+	bc, err := az.service.ServiceClient().
+		NewContainerClient(az.container).
+		NewBlobClient(az.getObjectNameString(b)).
+		WithVersionID(*resp.VersionID)
+	if err != nil {
+		return errors.Wrap(err, "failed to get versioned blob client")
+	}
+
+	_, err = bc.Delete(ctx, nil)
+	if err != nil {
+		return errors.Wrap(err, "failed to delete the delete marker blob version")
+	}
+
 	return err
 }
 
