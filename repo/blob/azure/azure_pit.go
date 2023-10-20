@@ -2,9 +2,11 @@ package azure
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	azblobmodels "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/google/martian/v3/log"
 	"github.com/pkg/errors"
 
@@ -27,7 +29,7 @@ func (az *azPointInTimeStorage) ListBlobs(ctx context.Context, blobIDPrefix blob
 	err := az.listBlobVersions(ctx, blobIDPrefix, func(vm versionMetadata) error {
 		if vm.BlobID != previousID {
 			// different blob, process previous one
-			if v, found := newestAt(vs, az.pointInTime); found {
+			if v, found := newestAtUnlessDeleted(vs, az.pointInTime); found {
 				if err := cb(v.Metadata); err != nil {
 					return err
 				}
@@ -46,7 +48,7 @@ func (az *azPointInTimeStorage) ListBlobs(ctx context.Context, blobIDPrefix blob
 	}
 
 	// process last blob
-	if v, found := newestAt(vs, az.pointInTime); found {
+	if v, found := newestAtUnlessDeleted(vs, az.pointInTime); found {
 		if err := cb(v.Metadata); err != nil {
 			return err
 		}
@@ -65,9 +67,9 @@ func (az *azPointInTimeStorage) GetBlob(ctx context.Context, blobID blob.ID, off
 	return az.getBlobWithVersion(ctx, blobID, m.Version, offset, length, output)
 }
 
-// newestAt returns the last version in the list older than the PIT.
+// newestAtUnlessDeleted returns the last version in the list older than the PIT.
 // Azure sorts in ascending order so return the last element in the list.
-func newestAt(vs []versionMetadata, t time.Time) (v versionMetadata, found bool) {
+func newestAtUnlessDeleted(vs []versionMetadata, t time.Time) (v versionMetadata, found bool) {
 	vs = getOlderThan(vs, t)
 
 	if len(vs) == 0 {
@@ -75,7 +77,7 @@ func newestAt(vs []versionMetadata, t time.Time) (v versionMetadata, found bool)
 	}
 
 	v = vs[len(vs)-1]
-	return v, true
+	return v, !v.IsDeleteMarker
 }
 
 // Removes versions that are newer than t. The filtering is done in place
@@ -91,14 +93,17 @@ func getOlderThan(vs []versionMetadata, t time.Time) []versionMetadata {
 	return vs
 }
 
+// listBlobVersions returns a list of blob versions but the blob is deleted, it returns Azure's delete marker version but excludes
+// the Kopia delete marker version that is used to get around immutability protections.
 func (az *azPointInTimeStorage) listBlobVersions(ctx context.Context, prefix blob.ID, callback func(vm versionMetadata) error) error {
 	prefixStr := az.getObjectNameString(prefix)
 
 	pager := az.service.NewListBlobsFlatPager(az.container, &azblob.ListBlobsFlatOptions{
 		Prefix: &prefixStr,
 		Include: azblob.ListBlobsInclude{
-			Metadata: true,
-			Versions: true,
+			Metadata:            true,
+			DeletedWithVersions: true, // this shows DeleteMarkers aka blobs with HasVersionsOnly set to true
+			Versions:            true,
 		},
 	})
 
@@ -111,9 +116,14 @@ func (az *azPointInTimeStorage) listBlobVersions(ctx context.Context, prefix blo
 		for _, it := range page.Segment.BlobItems {
 			blobName := az.getBlobName(it)
 
-			if az.isMarkedForDeletion(it) {
-				log.Debugf("excluded blob from ListBlobs: %s", blobName)
-				// skip those set for deletion
+			if strings.HasSuffix(blobName, "/") {
+				// ignore directories
+				continue
+			}
+
+			if az.isKopiaDeleteMarkerVersion(it) {
+				log.Debugf("excluded blob version from ListBlobs: %s", blobName)
+				// skip delete marker versions
 				continue
 			}
 
@@ -141,11 +151,26 @@ func (az *azPointInTimeStorage) getVersionedMetadata(ctx context.Context, blobID
 		return versionMetadata{}, errors.Wrapf(err, "could not get version metadata for blob %s", blobID)
 	}
 
-	if v, found := newestAt(vml, az.pointInTime); found {
+	if v, found := newestAtUnlessDeleted(vml, az.pointInTime); found {
 		return v, nil
 	}
 
 	return versionMetadata{}, blob.ErrBlobNotFound
+}
+
+// isKopiaDeleteMarkerVersion checks for kopia created delete markers.
+func (az *azPointInTimeStorage) isKopiaDeleteMarkerVersion(it *azblobmodels.BlobItem) bool {
+	return !az.isAzureDeleteMarker(it) && *it.Properties.ContentLength == int64(len(deleteMarkerContent))
+}
+
+// isAzureDeleteMarker checks for Azure created delete markers.
+func (az *azPointInTimeStorage) isAzureDeleteMarker(it *azblobmodels.BlobItem) bool {
+	var isDeleteMarker bool
+	// HasVersionsOnly - Indicates that this root blob has been deleted
+	if it.HasVersionsOnly != nil {
+		isDeleteMarker = *it.HasVersionsOnly
+	}
+	return isDeleteMarker
 }
 
 // maybePointInTimeStore wraps s with a point-in-time store when s is versioned

@@ -4,6 +4,7 @@ package azure
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -27,6 +28,9 @@ import (
 const (
 	azStorageType   = "azureBlob"
 	latestVersionID = ""
+
+	// should not be altered casually as it will affect isKopiaDeleteMarkerVersion
+	deleteMarkerContent = ""
 
 	timeMapKey = "Kopiamtime" // this must be capital letter followed by lowercase, to comply with AZ tags naming convention.
 )
@@ -200,6 +204,13 @@ func (az *azStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback fun
 		}
 
 		for _, it := range page.Segment.BlobItems {
+			blobName := az.getBlobName(it)
+
+			if strings.HasSuffix(blobName, "/") {
+				// ignore directories
+				continue
+			}
+
 			bm := az.getBlobMeta(it)
 
 			if err := callback(bm); err != nil {
@@ -290,7 +301,7 @@ func (az *azStorage) putBlob(ctx context.Context, b blob.ID, data blob.Bytes, op
 // retryDeleteBlob creates a delete marker version which is set to unlocked state.
 // This protection is then removed and the blob is deleted. Finally, delete the delete marker version.
 func (az *azStorage) retryDeleteBlob(ctx context.Context, b blob.ID) error {
-	resp, err := az.putBlob(ctx, b, gather.FromSlice([]byte(nil)), blob.PutOptions{
+	resp, err := az.putBlob(ctx, b, gather.FromSlice([]byte(deleteMarkerContent)), blob.PutOptions{
 		RetentionMode:   blob.RetentionMode(azblobblob.ImmutabilityPolicySettingUnlocked),
 		RetentionPeriod: time.Minute,
 	})
@@ -409,11 +420,10 @@ func newStorage(opt *Options) (*azStorage, error) {
 	}
 
 	return &azStorage{
-		Options:                *opt,
-		container:              opt.Container,
-		service:                service,
+		Options:   *opt,
+		container: opt.Container,
+		service:   service,
 	}, nil
-}
 }
 
 func init() {

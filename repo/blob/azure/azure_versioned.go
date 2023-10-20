@@ -13,7 +13,8 @@ type versionMetadata struct {
 	blob.Metadata
 
 	// Version has the format of time.RFC3339Nano
-	Version string
+	Version        string
+	IsDeleteMarker bool
 }
 
 type versionMetadataCallback func(versionMetadata) error
@@ -22,8 +23,9 @@ func (az *azPointInTimeStorage) getVersionedBlobMeta(it *azblobmodels.BlobItem) 
 	bm := az.getBlobMeta(it)
 
 	return versionMetadata{
-		Metadata: bm,
-		Version:  *it.VersionID,
+		Metadata:       bm,
+		Version:        *it.VersionID,
+		IsDeleteMarker: az.isAzureDeleteMarker(it),
 	}
 }
 

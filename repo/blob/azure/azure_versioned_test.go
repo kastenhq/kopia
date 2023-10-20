@@ -22,8 +22,7 @@ func TestGetBlobVersions(t *testing.T) {
 	t.Parallel()
 	testutil.ProviderTest(t)
 
-	// must be without locked policy or the retention period will be too high (1+ days)
-	// and must be with IsImmutableStorageWithVersioning enabled
+	// must be with Immutable Storage with Versioning enabled
 	container := getEnvOrSkip(t, testContainerEnv)
 	storageAccount := getEnvOrSkip(t, testStorageAccountEnv)
 	storageKey := getEnvOrSkip(t, testStorageKeyEnv)
@@ -58,11 +57,8 @@ func TestGetBlobVersions(t *testing.T) {
 
 	const blobName = "TestGetBlobVersions"
 	blobID := blob.ID(blobName)
-	blobNameFullPath := prefix + blobName
 	dataTimestamps, err := putBlobs(ctx, st, blobID, dataBlobs)
 	require.NoError(t, err)
-	cli := getAzureCLI(t, storageAccount, storageKey)
-	defer deleteBlob(ctx, t, cli, container, blobNameFullPath)
 
 	pastPIT := time.Now().Add(-1 * time.Hour).UTC()
 	futurePIT := time.Now().Add(1 * time.Hour).UTC()
@@ -126,8 +122,7 @@ func TestGetBlobVersionsWithDeletion(t *testing.T) {
 	t.Parallel()
 	testutil.ProviderTest(t)
 
-	// must be without locked policy or the retention period will be too high (1+ days)
-	// and must be with IsImmutableStorageWithVersioning enabled
+	// must be with Immutable Storage with Versioning enabled
 	container := getEnvOrSkip(t, testContainerEnv)
 	storageAccount := getEnvOrSkip(t, testStorageAccountEnv)
 	storageKey := getEnvOrSkip(t, testStorageKeyEnv)
@@ -161,24 +156,13 @@ func TestGetBlobVersionsWithDeletion(t *testing.T) {
 
 	const blobName = "TestGetBlobVersionsWithDeletion"
 	blobID := blob.ID(blobName)
-	blobNameFullPath := prefix + blobName
 	dataTimestamps, err := putBlobs(ctx, st, blobID, dataBlobs)
 	require.NoError(t, err)
-	cli := getAzureCLI(t, storageAccount, storageKey)
-	defer deleteBlob(ctx, t, cli, container, blobNameFullPath)
 
 	count := getBlobCount(ctx, t, st, blobID)
 	require.Equal(t, 1, count)
 
 	err = st.DeleteBlob(ctx, blobID)
-	require.NoError(t, err)
-
-	// set the retention of the latest version so it can be cleaned up
-	extendOpts := blob.ExtendOptions{
-		RetentionMode:   blob.Locked,
-		RetentionPeriod: 3 * time.Second,
-	}
-	err = st.ExtendBlobRetention(ctx, blobID, extendOpts)
 	require.NoError(t, err)
 
 	// blob no longer found
@@ -188,6 +172,7 @@ func TestGetBlobVersionsWithDeletion(t *testing.T) {
 	opts.PointInTime = &dataTimestamps[1]
 	st, err = azure.New(ctx, opts, false)
 	require.NoError(t, err)
+
 	// blob visible again with PIT set.
 	count = getBlobCount(ctx, t, st, blobID)
 	require.Equal(t, 1, count)
