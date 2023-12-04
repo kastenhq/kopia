@@ -455,6 +455,28 @@ func (e *Manager) refreshLocked(ctx context.Context) error {
 		}
 	}
 
+	return e.maybeCompactAndCleanup(ctx, *p)
+}
+
+func (e *Manager) maybeCompactAndCleanup(ctx context.Context, p Parameters) error {
+	// Disable compaction and cleanup operations when running in read-only mode
+	// since they'll just fail when they try to mutate the underlying storage.
+	if e.st.IsReadOnly() {
+		return nil
+	}
+
+	cs := e.lastKnownState
+
+	if shouldAdvance(cs.UncompactedEpochSets[cs.WriteEpoch], p.MinEpochDuration, p.EpochAdvanceOnCountThreshold, p.EpochAdvanceOnTotalSizeBytesThreshold) {
+		if err := e.advanceEpochMarker(ctx, cs); err != nil {
+			return errors.Wrap(err, "error advancing epoch")
+		}
+	}
+
+	e.maybeGenerateNextRangeCheckpointAsync(ctx, cs, p)
+	e.maybeStartCleanupAsync(ctx, cs, p)
+	e.maybeOptimizeRangeCheckpointsAsync(ctx, cs)
+
 	return nil
 }
 
@@ -544,7 +566,7 @@ func (e *Manager) loadSingleEpochCompactions(ctx context.Context, cs *CurrentSna
 	return nil
 }
 
-func (e *Manager) maybeGenerateNextRangeCheckpointAsync(ctx context.Context, cs CurrentSnapshot, p *Parameters) {
+func (e *Manager) maybeGenerateNextRangeCheckpointAsync(ctx context.Context, cs CurrentSnapshot, p Parameters) {
 	latestSettled := cs.WriteEpoch - numUnsettledEpochs
 	if latestSettled < 0 {
 		return
@@ -580,14 +602,14 @@ func (e *Manager) maybeOptimizeRangeCheckpointsAsync(ctx context.Context, cs Cur
 	_ = cs
 }
 
-func (e *Manager) maybeStartCleanupAsync(ctx context.Context, cs CurrentSnapshot, p *Parameters) {
+func (e *Manager) maybeStartCleanupAsync(ctx context.Context, cs CurrentSnapshot, p Parameters) {
 	e.backgroundWork.Add(1)
 
 	// we're starting background work, ignore parent cancellation signal.
 	ctxutil.GoDetached(ctx, func(ctx context.Context) {
 		defer e.backgroundWork.Done()
 
-		if err := e.cleanupInternal(ctx, cs, p); err != nil {
+		if err := e.cleanupInternal(ctx, cs, &p); err != nil {
 			e.log.Errorf("error cleaning up index blobs: %v, performance may be affected", err)
 		}
 	})
@@ -691,14 +713,6 @@ func (e *Manager) refreshAttemptLocked(ctx context.Context) error {
 	}
 
 	e.lastKnownState = cs
-
-	// Disable compaction and cleanup operations when running in read-only mode
-	// since they'll just fail when they try to mutate the underlying storage.
-	if !e.st.IsReadOnly() {
-		e.maybeGenerateNextRangeCheckpointAsync(ctx, cs, p)
-		e.maybeStartCleanupAsync(ctx, cs, p)
-		e.maybeOptimizeRangeCheckpointsAsync(ctx, cs)
-	}
 
 	return nil
 }
