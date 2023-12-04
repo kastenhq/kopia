@@ -700,12 +700,6 @@ func (e *Manager) refreshAttemptLocked(ctx context.Context) error {
 		len(ues[cs.WriteEpoch+1]),
 		cs.ValidUntil.Format(time.RFC3339Nano))
 
-	if !e.st.IsReadOnly() && shouldAdvance(cs.UncompactedEpochSets[cs.WriteEpoch], p.MinEpochDuration, p.EpochAdvanceOnCountThreshold, p.EpochAdvanceOnTotalSizeBytesThreshold) {
-		if err := e.advanceEpochMarker(ctx, cs); err != nil {
-			return errors.Wrap(err, "error advancing epoch")
-		}
-	}
-
 	if now := e.timeFunc(); now.After(cs.ValidUntil) {
 		atomic.AddInt32(e.committedStateRefreshTooSlow, 1)
 
