@@ -186,6 +186,8 @@ type Manager struct {
 	log      logging.Logger
 	timeFunc func() time.Time
 
+	allowCleanupWritesOnIndexLoad bool
+
 	// wait group that waits for all compaction and cleanup goroutines.
 	backgroundWork sync.WaitGroup
 
@@ -458,10 +460,14 @@ func (e *Manager) refreshLocked(ctx context.Context) error {
 	return e.maybeCompactAndCleanup(ctx, *p)
 }
 
-func (e *Manager) maybeCompactAndCleanup(ctx context.Context, p Parameters) error {
+func (e *Manager) allowWrites() bool {
 	// Disable compaction and cleanup operations when running in read-only mode
 	// since they'll just fail when they try to mutate the underlying storage.
-	if e.st.IsReadOnly() {
+	return e.allowCleanupWritesOnIndexLoad && !e.st.IsReadOnly()
+}
+
+func (e *Manager) maybeCompactAndCleanup(ctx context.Context, p Parameters) error {
+	if !e.allowWrites() {
 		return nil
 	}
 
@@ -956,7 +962,7 @@ func (e *Manager) getIndexesFromEpochInternal(ctx context.Context, cs CurrentSna
 		uncompactedBlobs = ue
 	}
 
-	if epochSettled {
+	if epochSettled && e.allowWrites() {
 		e.backgroundWork.Add(1)
 
 		// we're starting background work, ignore parent cancellation signal.
