@@ -945,6 +945,9 @@ type ManagerOptions struct {
 	TimeNow                func() time.Time // Time provider
 	DisableInternalLog     bool
 	PermissiveCacheLoading bool
+	// Whether or not writes, for index compaction and cleanup, are permitted
+	// while reading the indexes.
+	AllowCleanupWritesOnIndexLoad bool
 }
 
 // CloneOrDefault returns a clone of provided ManagerOptions or default empty struct if nil.
