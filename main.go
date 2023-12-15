@@ -6,6 +6,8 @@ Usage:
 	$ kopia [<flags>] <subcommand> [<args> ...]
 
 Use 'kopia help' to see more details.
+
+Simulate changes.
 */
 package main
 
