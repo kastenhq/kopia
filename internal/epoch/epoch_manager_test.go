@@ -335,6 +335,64 @@ func TestIndexEpochManager_DeletionFailing(t *testing.T) {
 	verifySequentialWrites(t, te)
 }
 
+func TestEpochAdvanceOnIndexWrite(t *testing.T) {
+	const epochs = 3
+
+	t.Parallel()
+
+	ctx := testlogging.Context(t)
+	te := newTestEnv(t)
+
+	p, err := te.mgr.getParameters()
+	require.NoError(t, err)
+
+	count := p.GetEpochAdvanceOnCountThreshold()
+	minDuration := p.MinEpochDuration
+
+	cs, err := te.mgr.Current(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, cs.WriteEpoch, "write epoch mismatch")
+
+	// Write enough index blobs such that the next time the manager loads
+	// indexes it should attempt to advance the epoch.
+	// Write exactly the number of index blobs that will cause it to advance so
+	// we can keep track of which one is the current epoch.
+	for j := 0; j < epochs; j++ {
+		for i := 0; i < count-1; i++ {
+			te.mustWriteIndexFiles(ctx, t, newFakeIndexWithEntries(i))
+		}
+
+		te.ft.Advance(3*minDuration + time.Second)
+		te.mustWriteIndexFiles(ctx, t, newFakeIndexWithEntries(count-1))
+
+		cs, err = te.mgr.Current(ctx)
+
+		require.NoError(t, err)
+		require.Equal(t, j, cs.WriteEpoch, "epoch is not expected to have advanced yet")
+
+		// force epoch advancement
+		te.mustWriteIndexFiles(ctx, t, newFakeIndexWithEntries(count-1))
+
+		cs, err = te.mgr.Current(ctx)
+
+		require.NoError(t, err)
+		require.Equal(t, j+1, cs.WriteEpoch, "epoch should have advanced")
+	}
+
+	te.mgr.Flush() // wait for background work
+
+	// check what blobs were written
+	te.st.ListBlobs(ctx, "", func(bm blob.Metadata) error {
+		t.Log("index blob:", bm.BlobID, bm.Timestamp)
+		return nil
+	})
+
+	cs, err = te.mgr.Current(ctx)
+
+	require.NoError(t, err)
+	require.Equal(t, epochs, cs.WriteEpoch, "epoch should have advanced")
+}
+
 func TestIndexEpochManager_NoCompactionInReadOnly(t *testing.T) {
 	t.Parallel()
 
