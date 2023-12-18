@@ -790,6 +790,42 @@ func (e *Manager) GetCompleteIndexSet(ctx context.Context, maxEpoch int) ([]blob
 
 var errWriteIndexTryAgain = errors.Errorf("try again")
 
+// It is intended to only be used during index writes.
+// When an epoch needs to be advanced, it writes a new epoch marker blob and
+// reloads the index snapshot so `CurrentSnapshot.WriteEpoch“ is consistent
+// with the newly written epoch marker blob.
+func (e *Manager) committedStateForWritingIndex(ctx context.Context) (CurrentSnapshot, error) {
+	e.log.Debug("committedStateForWritingIndex")
+
+	for {
+		p, err := e.getParameters()
+		if err != nil {
+			return CurrentSnapshot{}, err
+		}
+
+		// make sure we have at least 75% of remaining time
+		//nolint:gomnd
+		cs, err := e.committedState(ctx, 3*p.EpochRefreshFrequency/4)
+		if err != nil {
+			return cs, errors.Wrap(err, "error getting committed index state")
+		}
+
+		if shouldAdvance(cs.UncompactedEpochSets[cs.WriteEpoch], p.MinEpochDuration, p.EpochAdvanceOnCountThreshold, p.EpochAdvanceOnTotalSizeBytesThreshold) {
+			if err := e.advanceEpochMarker(ctx, cs); err != nil {
+				return CurrentSnapshot{}, errors.Wrap(err, "error advancing epoch")
+			}
+
+			// ensure index snapshot is re-loaded and consistent with the new
+			// epoch marker blob
+			e.Invalidate()
+
+			continue
+		}
+
+		return cs, nil
+	}
+}
+
 // WriteIndex writes new index blob by picking the appropriate prefix based on current epoch.
 func (e *Manager) WriteIndex(ctx context.Context, dataShards map[blob.ID]blob.Bytes) ([]blob.Metadata, error) {
 	written := map[blob.ID]blob.Metadata{}
