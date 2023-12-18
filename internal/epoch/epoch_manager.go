@@ -810,19 +810,17 @@ func (e *Manager) committedStateForWritingIndex(ctx context.Context) (CurrentSna
 			return cs, errors.Wrap(err, "error getting committed index state")
 		}
 
-		if shouldAdvance(cs.UncompactedEpochSets[cs.WriteEpoch], p.MinEpochDuration, p.EpochAdvanceOnCountThreshold, p.EpochAdvanceOnTotalSizeBytesThreshold) {
-			if err := e.advanceEpochMarker(ctx, cs); err != nil {
-				return CurrentSnapshot{}, errors.Wrap(err, "error advancing epoch")
-			}
-
-			// ensure index snapshot is re-loaded and consistent with the new
-			// epoch marker blob
-			e.Invalidate()
-
-			continue
+		if !shouldAdvance(cs.UncompactedEpochSets[cs.WriteEpoch], p.MinEpochDuration, p.EpochAdvanceOnCountThreshold, p.EpochAdvanceOnTotalSizeBytesThreshold) {
+			return cs, nil
 		}
 
-		return cs, nil
+		if err := e.advanceEpochMarker(ctx, cs); err != nil {
+			return CurrentSnapshot{}, errors.Wrap(err, "error advancing epoch")
+		}
+
+		// ensure index snapshot is re-loaded and consistent with the new epoch
+		// marker blob
+		e.Invalidate()
 	}
 }
 
