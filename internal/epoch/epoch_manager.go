@@ -832,16 +832,9 @@ func (e *Manager) WriteIndex(ctx context.Context, dataShards map[blob.ID]blob.By
 	for {
 		e.log.Debug("WriteIndex")
 
-		p, err := e.getParameters()
+		cs, err := e.committedStateForWritingIndex(ctx)
 		if err != nil {
 			return nil, err
-		}
-
-		// make sure we have at least 75% of remaining time
-		//nolint:gomnd
-		cs, err := e.committedState(ctx, 3*p.EpochRefreshFrequency/4)
-		if err != nil {
-			return nil, errors.Wrap(err, "error getting committed state")
 		}
 
 		if cs.WriteEpoch != writtenForEpoch {
