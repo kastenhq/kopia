@@ -1014,15 +1014,23 @@ func rangeCheckpointBlobPrefix(epoch1, epoch2 int) blob.ID {
 }
 
 // NewManager creates new epoch manager.
-func NewManager(st blob.Storage, paramProvider ParametersProvider, compactor CompactionFunc, log logging.Logger, timeNow func() time.Time) *Manager {
+func NewManager(
+	st blob.Storage,
+	paramProvider ParametersProvider,
+	compactor CompactionFunc,
+	log logging.Logger,
+	timeNow func() time.Time,
+	allowCleanupWritesOnIndexLoad bool,
+) *Manager {
 	return &Manager{
-		st:                           st,
-		log:                          log,
-		compact:                      compactor,
-		timeFunc:                     timeNow,
-		paramProvider:                paramProvider,
-		getCompleteIndexSetTooSlow:   new(int32),
-		committedStateRefreshTooSlow: new(int32),
-		writeIndexTooSlow:            new(int32),
+		st:                            st,
+		allowCleanupWritesOnIndexLoad: allowCleanupWritesOnIndexLoad,
+		log:                           log,
+		compact:                       compactor,
+		timeFunc:                      timeNow,
+		paramProvider:                 paramProvider,
+		getCompleteIndexSetTooSlow:    new(int32),
+		committedStateRefreshTooSlow:  new(int32),
+		writeIndexTooSlow:             new(int32),
 	}
 }
