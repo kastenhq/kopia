@@ -443,7 +443,7 @@ func indexBlobCacheSweepSettings(caching *CachingOptions) cache.SweepSettings {
 	}
 }
 
-func (sm *SharedManager) setupCachesAndIndexManagers(ctx context.Context, caching *CachingOptions, mr *metrics.Registry) error {
+func (sm *SharedManager) setupCachesAndIndexManagers(ctx context.Context, caching *CachingOptions, mr *metrics.Registry, writeOnIndexLoads bool) error {
 	dataCache, err := cache.NewContentCache(ctx, sm.st, cache.Options{
 		BaseCacheDirectory: caching.CacheDirectory,
 		CacheSubDir:        "contents",
@@ -515,7 +515,7 @@ func (sm *SharedManager) setupCachesAndIndexManagers(ctx context.Context, cachin
 			},
 			sm.namedLogger("epoch-manager"),
 			sm.timeNow,
-			false,
+			writeOnIndexLoads,
 		),
 		sm.timeNow,
 		sm.format,
@@ -643,8 +643,9 @@ func NewSharedManager(ctx context.Context, st blob.Storage, prov format.Provider
 	sm.log = sm.namedLogger("shared-manager")
 
 	caching = caching.CloneOrDefault()
+	writesOnIndexLoad := opts.AllowCleanupWritesOnIndexLoad
 
-	if err := sm.setupCachesAndIndexManagers(ctx, caching, mr); err != nil {
+	if err := sm.setupCachesAndIndexManagers(ctx, caching, mr, writesOnIndexLoad); err != nil {
 		return nil, errors.Wrap(err, "error setting up read manager caches")
 	}
 
