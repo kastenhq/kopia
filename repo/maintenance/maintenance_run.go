@@ -46,6 +46,7 @@ const (
 	TaskExtendBlobRetentionTimeFull  = "extend-blob-retention-time"
 	TaskCleanupLogs                  = "cleanup-logs"
 	TaskEpochDeleteSupersededIndexes = "delete-superseded-epoch-indexes"
+	TaskEpochCleanupMarkers          = "cleanup-epoch-markers"
 )
 
 // shouldRun returns Mode if repository is due for periodic maintenance.
@@ -327,6 +328,22 @@ func runTaskCleanupLogs(ctx context.Context, runParams RunParameters, s *Schedul
 	})
 }
 
+func runTaskEpochCleanupMarkers(ctx context.Context, runParams RunParameters, s *Schedule) error {
+	em, ok, emerr := runParams.rep.ContentManager().EpochManager()
+	if emerr != nil {
+		return errors.Wrap(emerr, "epoch manager for markers cleanup")
+	}
+
+	if !ok {
+		return nil
+	}
+
+	return ReportRun(ctx, runParams.rep, TaskEpochCleanupMarkers, s, func() error {
+		log(ctx).Infof("Cleaning up no-longer-needed epoch markers...")
+		return errors.Wrap(em.CleanupMarkers(ctx), "error removing epoch markers")
+	})
+}
+
 func runTaskEpochDeleteSupersededIndexes(ctx context.Context, runParams RunParameters, s *Schedule) error {
 	em, ok, emerr := runParams.rep.ContentManager().EpochManager()
 	if emerr != nil {
@@ -447,6 +464,10 @@ func runFullMaintenance(ctx context.Context, runParams RunParameters, safety Saf
 		}
 	} else {
 		log(ctx).Debug("Extending object lock retention-period is disabled.")
+	}
+
+	if err := runTaskEpochCleanupMarkers(ctx, runParams, s); err != nil {
+		return errors.Wrap(err, "error cleaning up epoch markers")
 	}
 
 	if err := runTaskEpochDeleteSupersededIndexes(ctx, runParams, s); err != nil {
