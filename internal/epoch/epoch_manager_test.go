@@ -408,6 +408,97 @@ func TestIndexEpochManager_NoCompactionInReadOnly(t *testing.T) {
 	assert.Nil(t, loadedErr.Load(), "refreshing read-only index")
 }
 
+func TestNoEpochAdvanceOnIndexRead(t *testing.T) {
+	const epochs = 3
+
+	t.Parallel()
+
+	ctx := testlogging.Context(t)
+	te := newTestEnv(t)
+
+	p, err := te.mgr.getParameters()
+	require.NoError(t, err)
+
+	count := p.GetEpochAdvanceOnCountThreshold()
+	minDuration := p.MinEpochDuration
+
+	cs, err := te.mgr.Current(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, cs.WriteEpoch, "write epoch mismatch")
+
+	// Write enough index blobs such that the next time the manager loads
+	// indexes it should attempt to advance the epoch.
+	// Write exactly the number of index blobs that will cause it to advance so
+	// we can keep track of which one is the current epoch.
+	for j := 0; j < epochs; j++ {
+		for i := 0; i < count-1; i++ {
+			te.mustWriteIndexFiles(ctx, t, newFakeIndexWithEntries(i))
+		}
+
+		te.ft.Advance(3*minDuration + time.Second)
+		te.mustWriteIndexFiles(ctx, t, newFakeIndexWithEntries(count-1))
+		// this could advance the epoch on write
+		te.mustWriteIndexFiles(ctx, t, newFakeIndexWithEntries(count-1))
+	}
+
+	te.mgr.Invalidate()
+	cs, err = te.mgr.Current(ctx)
+	require.NoError(t, err)
+
+	te.mgr.Flush() // wait for background work
+
+	// Delete the final epoch marker so that te2 attempts to make a new one on
+	// the refresh below. This simulates the previous epoch manager exiting (e.x.
+	// crashing) before writing the new marker.
+
+	// get written lastWriteEpoch markers
+	var (
+		lastWriteEpoch int
+		epochMarkers   []blob.ID
+		deletedMarker  blob.ID
+	)
+
+	te.st.ListBlobs(ctx, EpochMarkerIndexBlobPrefix, func(bm blob.Metadata) error {
+		epochMarkers = append(epochMarkers, bm.BlobID)
+
+		return nil
+	})
+
+	t.Log("epoch marker blobs:", epochMarkers)
+
+	// attempt to delete the last epoch marker if any
+	if emLen := len(epochMarkers); emLen > 0 {
+		var ok bool // to prevent shadowing 'epoch' below
+
+		deletedMarker = epochMarkers[emLen-1]
+		lastWriteEpoch, ok = epochNumberFromBlobID(deletedMarker)
+
+		require.True(t, ok, "could not parse epoch from marker blob")
+
+		if delErr := te.st.DeleteBlob(ctx, deletedMarker); delErr != nil {
+			require.ErrorIs(t, delErr, blob.ErrBlobNotFound)
+		}
+	}
+
+	// reload indexes
+	te.mgr.Invalidate()
+	te.mgr.Current(ctx)
+
+	cs, err = te.mgr.Current(ctx)
+	require.NoError(t, err)
+
+	// wait for any background work, there shouldn't be any
+	te.mgr.backgroundWork.Wait()
+
+	require.Equal(t, lastWriteEpoch-1, cs.WriteEpoch, "epoch should NOT have advanced")
+
+	te.st.ListBlobs(ctx, deletedMarker, func(bm blob.Metadata) error {
+		t.Fatal("deleted epoch marker should NOT be found in the store:", deletedMarker)
+
+		return nil
+	})
+}
+
 func TestRefreshRetriesIfTakingTooLong(t *testing.T) {
 	te := newTestEnv(t)
 
