@@ -18,6 +18,7 @@ import (
 	"github.com/kopia/kopia/internal/apiclient"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/passwordpersist"
+	"github.com/kopia/kopia/internal/profilelog"
 	"github.com/kopia/kopia/internal/releasable"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
@@ -489,6 +490,9 @@ func (c *App) runAppWithContext(command *kingpin.CmdClause, cb func(ctx context.
 	if err := c.observability.startMetrics(ctx); err != nil {
 		return errors.Wrap(err, "unable to start metrics")
 	}
+
+	s := profilelog.MaybeStart(ctx)
+	defer s.Stop(ctx)
 
 	err := func() error {
 		tctx, span := tracer.Start(ctx, command.FullCommand(), trace.WithSpanKind(trace.SpanKindClient))
