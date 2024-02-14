@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/maps"
@@ -185,6 +187,204 @@ func TestDebug_DumpPem(t *testing.T) {
 	err := DumpPem(ctx, []byte("this is a sample PEM"), "test", &wrt)
 	require.NoError(t, err)
 	require.Equal(t, "-----BEGIN test-----\ndGhpcyBpcyBhIHNhbXBsZSBQRU0=\n-----END test-----\n\n", wrt.String())
+}
+
+func TestDebug_parseDebugNumber(t *testing.T) {
+	saveLockEnv(t)
+	defer restoreUnlockEnv(t)
+
+	ctx := context.Background()
+
+	tcs := []struct {
+		inArgs            string
+		inKey             ProfileName
+		expectErr         error
+		expectDebugNumber int
+	}{
+		{
+			inArgs:            "",
+			inKey:             "cpu",
+			expectErr:         nil,
+			expectDebugNumber: 0,
+		},
+		{
+			inArgs:            "block=rate=10:cpu=debug=10:mutex=debug=2",
+			inKey:             "block",
+			expectErr:         nil,
+			expectDebugNumber: 0,
+		},
+		{
+			inArgs:            "block=rate=10:cpu=debug=10:mutex=debug=2",
+			inKey:             "cpu",
+			expectErr:         nil,
+			expectDebugNumber: 10,
+		},
+		{
+			inArgs:            "block=rate=10:cpu=debug=10:mutex=debug=2",
+			inKey:             "mutex",
+			expectErr:         nil,
+			expectDebugNumber: 2,
+		},
+	}
+
+	for i, tc := range tcs {
+		t.Run(fmt.Sprintf("%d: %q", i, tc.inArgs), func(t *testing.T) {
+			t.Setenv(EnvVarKopiaDebugPprof, tc.inArgs)
+
+			MaybeStartProfileBuffers(ctx)
+			defer MaybeStopProfileBuffers(ctx)
+
+			num, err := parseDebugNumber(pprofConfigs.GetProfileConfig(tc.inKey))
+			require.ErrorIs(t, tc.expectErr, err)
+			require.Equal(t, tc.expectDebugNumber, num)
+		})
+	}
+}
+
+func TestDebug_StartProfileBuffers(t *testing.T) {
+	// save environment and restore after testing
+	saveLockEnv(t)
+	defer restoreUnlockEnv(t)
+
+	// regexp for PEMs
+	rx := regexp.MustCompile(`(?s:-{5}BEGIN ([A-Z]+)-{5}.(([A-Za-z0-9/+=]{2,80}.)+)-{5}END ([A-Z]+)-{5})`)
+
+	ctx := context.Background()
+
+	tcs := []struct {
+		inArgs               string
+		expectedProfileCount int
+		expectKeys           []ProfileName
+		expectOptions        [][2]string
+	}{
+		{
+			inArgs:               "",
+			expectedProfileCount: 0,
+		},
+		{
+			inArgs:               "block=debug=foo",
+			expectedProfileCount: 0,
+			expectKeys:           []ProfileName{"block"},
+			expectOptions:        [][2]string{{"block", "debug=foo"}},
+		},
+		{
+			inArgs:               "block=rate=10:cpu:mutex=10",
+			expectedProfileCount: 3,
+			expectKeys:           []ProfileName{"block", "cpu", "mutex"},
+			expectOptions:        [][2]string{{"block", "rate=10"}, {"cpu", ""}, {"mutex", "10"}},
+		},
+		{
+			inArgs:               "block=rate=10:nonelikethis=foo",
+			expectedProfileCount: 1,
+			expectKeys:           []ProfileName{"block", "nonelikethis"},
+			expectOptions:        [][2]string{{"block", "rate=10"}, {"nonelikethis", "foo"}},
+		},
+		{
+			inArgs:               "block=rate=10:cpu:mutex=10,debug=1",
+			expectedProfileCount: 3,
+			expectKeys:           []ProfileName{"block", "cpu", "mutex"},
+			expectOptions:        [][2]string{{"block", "rate=10"}, {"cpu", ""}, {"mutex", "10"}, {"mutex", "debug=1"}},
+		},
+		{
+			inArgs:               "block=rate=10,debug=1:cpu:mutex=10",
+			expectedProfileCount: 3,
+			expectKeys:           []ProfileName{"block", "cpu", "mutex"},
+			expectOptions:        [][2]string{{"block", "debug=1"}, {"block", "rate=10"}, {"cpu", ""}, {"mutex", "10"}},
+		},
+	}
+
+	for i, tc := range tcs {
+		t.Run(fmt.Sprintf("%d: %q", i, tc.inArgs), func(t *testing.T) {
+			t.Setenv(EnvVarKopiaDebugPprof, tc.inArgs)
+
+			buf := bytes.Buffer{}
+
+			func() {
+				pprofConfigs = newProfileConfigs(&buf)
+				require.Empty(t, pprofConfigs.pcm)
+
+				MaybeStartProfileBuffers(ctx)
+
+				require.Equal(t, len(tc.expectKeys), len(pprofConfigs.pcm))
+
+				for _, nm := range tc.expectKeys {
+					_, ok := pprofConfigs.pcm[nm]
+					require.True(t, ok)
+				}
+
+				for _, pth := range tc.expectOptions {
+					v0, ok := pprofConfigs.pcm[ProfileName(pth[0])]
+					require.True(t, ok)
+					if pth[1] == "" && len(v0.flags) == 0 {
+						continue
+					}
+					require.Contains(t, v0.flags, pth[1])
+				}
+
+				defer MaybeStopProfileBuffers(ctx)
+
+				time.Sleep(1 * time.Second)
+			}()
+
+			require.Empty(t, pprofConfigs.pcm)
+
+			s := buf.String()
+			mchsss := rx.FindAllString(s, -1)
+			require.Len(t, mchsss, tc.expectedProfileCount)
+		})
+	}
+}
+
+func TestDebug_badConsoleOutput(t *testing.T) {
+	// save environment and restore after testing
+	saveLockEnv(t)
+	defer restoreUnlockEnv(t)
+
+	// regexp for PEMs
+	rx := regexp.MustCompile(`(?s:-{5}BEGIN ([A-Z]+)-{5}.(([A-Za-z0-9/+=]{2,80}.)+)-{5}END ([A-Z]+)-{5})`)
+
+	ctx := context.Background()
+
+	tcs := []struct {
+		inArgs string
+	}{
+		{
+			inArgs: "block",
+		},
+		{
+			inArgs: "cpu",
+		},
+	}
+
+	for i, tc := range tcs {
+		t.Run(fmt.Sprintf("%d: %q", i, tc.inArgs), func(t *testing.T) {
+			t.Setenv(EnvVarKopiaDebugPprof, tc.inArgs)
+
+			buf := bytes.Buffer{}
+
+			func() {
+				pprofConfigs = newProfileConfigs(&buf)
+
+				pprofConfigs.SetWriter(&ErrorWriter{
+					mx:  5,
+					err: io.EOF,
+				})
+
+				require.Empty(t, pprofConfigs.pcm)
+
+				MaybeStartProfileBuffers(ctx)
+				defer MaybeStopProfileBuffers(ctx)
+
+				time.Sleep(1 * time.Second)
+			}()
+
+			require.Empty(t, pprofConfigs.pcm)
+
+			s := buf.String()
+			mchsss := rx.FindAllString(s, -1)
+			require.Empty(t, mchsss)
+		})
+	}
 }
 
 func TestDebug_LoadProfileConfigs(t *testing.T) {
