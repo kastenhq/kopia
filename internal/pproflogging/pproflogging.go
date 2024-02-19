@@ -111,19 +111,23 @@ func HasProfileBuffersEnabled() bool {
 	return len(pprofConfigs.pcm) != 0
 }
 
-// MaybeStartProfileBuffers start profile buffers for this process.
-func MaybeStartProfileBuffers(ctx context.Context) {
-	config := os.Getenv(EnvVarKopiaDebugPprof)
+// MaybeStartProfileBuffers start profile buffers for this process with a configuration from the environment.
+func MaybeStartProfileBuffers(ctx context.Context) bool {
+	return MaybeStartProfileBuffersWithConfig(ctx, os.Getenv(EnvVarKopiaDebugPprof))
+}
 
+// MaybeStartProfileBuffersWithConfig start profile buffers for this process with a custom configuration.
+func MaybeStartProfileBuffersWithConfig(ctx context.Context, config string) bool {
 	pprofConfigs.mu.Lock()
 	defer pprofConfigs.mu.Unlock()
 
 	if !loadAndSetProfileBuffersLocked(ctx, config) {
 		log(ctx).Debug("no profile buffer configuration to start")
-		return
+		return false
 	}
 
 	pprofConfigs.StartProfileBuffersLocked(ctx)
+	return true
 }
 
 // MaybeStopProfileBuffers stop and dump the contents of the buffers to the log as PEMs.  Buffers
@@ -209,8 +213,8 @@ func (p *ProfileConfigs) StartProfileBuffersLocked(ctx context.Context) {
 
 	err := pprof.StartCPUProfile(v.buf)
 	if err != nil {
-		delete(p.pcm, ProfileNameCPU)
 		log(ctx).With("cause", err).Warn("cannot start cpu PPROF")
+		delete(p.pcm, ProfileNameCPU)
 	}
 }
 
@@ -276,9 +280,6 @@ func (p *ProfileConfigs) StopProfileBuffersLocked(ctx context.Context) {
 			break
 		}
 	}
-
-	ctx, canfn := context.WithTimeout(ctx, PPROFDumpTimeout)
-	defer canfn()
 
 	// dump the profiles out into their respective PEMs
 	for k, v := range p.pcm {
@@ -431,7 +432,6 @@ func clearProfileFractions(profileBuffers map[ProfileName]*ProfileConfig) {
 	}
 }
 
-// DumpPem dump a PEM version of the byte slice, bs, into writer, wrt.
 // DumpPem performs the PEM dump in two goroutines: the first (the main
 // execution thread) performs the output to the console (see notes below).
 // The second gorouting encodes []byte into PEM format.

@@ -18,6 +18,7 @@ import (
 	"github.com/kopia/kopia/internal/apiclient"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/passwordpersist"
+	"github.com/kopia/kopia/internal/pproflogging"
 	"github.com/kopia/kopia/internal/releasable"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
@@ -484,6 +485,19 @@ func (c *App) runAppWithContext(command *kingpin.CmdClause, cb func(ctx context.
 
 	for _, r := range c.trackReleasable {
 		releasable.EnableTracking(releasable.ItemKind(r))
+	}
+
+	pproflogging.MaybeStartProfileBuffers(ctx)
+
+	// MaybeStartProfileBuffers will have configured the global pprof structs. At this point we can choose
+	// to enabled globally
+	if pproflogging.HasProfileBuffersEnabled() {
+		defer func() {
+			ctx0, canfn := context.WithTimeout(ctx, pproflogging.PPROFDumpTimeout)
+			defer canfn()
+
+			pproflogging.MaybeStopProfileBuffers(ctx0)
+		}()
 	}
 
 	if err := c.observability.startMetrics(ctx); err != nil {
