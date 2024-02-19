@@ -189,6 +189,7 @@ func TestDebug_DumpPem(t *testing.T) {
 	require.Equal(t, "-----BEGIN test-----\ndGhpcyBpcyBhIHNhbXBsZSBQRU0=\n-----END test-----\n\n", wrt.String())
 }
 
+// TestDebug_parseDebugNumber test setup of profile buffers with configuration set from the environment.
 func TestDebug_parseDebugNumber(t *testing.T) {
 	saveLockEnv(t)
 	defer restoreUnlockEnv(t)
@@ -241,6 +242,7 @@ func TestDebug_parseDebugNumber(t *testing.T) {
 	}
 }
 
+// TestDebug_StartProfileBuffers test setup of profile buffers with configuration set from the environment.
 func TestDebug_StartProfileBuffers(t *testing.T) {
 	// save environment and restore after testing
 	saveLockEnv(t)
@@ -358,8 +360,6 @@ func TestDebug_badConsoleOutput(t *testing.T) {
 
 	for i, tc := range tcs {
 		t.Run(fmt.Sprintf("%d: %q", i, tc.inArgs), func(t *testing.T) {
-			t.Setenv(EnvVarKopiaDebugPprof, tc.inArgs)
-
 			buf := bytes.Buffer{}
 
 			func() {
@@ -372,7 +372,7 @@ func TestDebug_badConsoleOutput(t *testing.T) {
 
 				require.Empty(t, pprofConfigs.pcm)
 
-				MaybeStartProfileBuffers(ctx)
+				MaybeStartProfileBuffersWithConfig(ctx, tc.inArgs)
 				defer MaybeStopProfileBuffers(ctx)
 
 				time.Sleep(1 * time.Second)
@@ -383,6 +383,78 @@ func TestDebug_badConsoleOutput(t *testing.T) {
 			s := buf.String()
 			mchsss := rx.FindAllString(s, -1)
 			require.Empty(t, mchsss)
+		})
+	}
+}
+
+// TestDebug_RestartProfileBuffers test profile buffers without configuration being stored in the environment.
+func TestDebug_RestartProfileBuffers(t *testing.T) {
+	// save environment and restore after testing
+	saveLockEnv(t)
+	defer restoreUnlockEnv(t)
+
+	// regexp for PEMs
+	rx := regexp.MustCompile(`(?s:-{5}BEGIN ([A-Z]+)-{5}.(([A-Za-z0-9/+=]{2,80}.?)+).?-{5}END ([A-Z]+)-{5})`)
+
+	ctx := context.Background()
+
+	tcs := []struct {
+		inArgs               string
+		expectedProfileCount int
+	}{
+		{
+			inArgs:               "",
+			expectedProfileCount: 0,
+		},
+		{
+			inArgs:               "block=rate=10:cpu:mutex=10",
+			expectedProfileCount: 6,
+		},
+		{
+			inArgs:               "cpu",
+			expectedProfileCount: 2,
+		},
+	}
+
+	for i, tc := range tcs {
+		t.Run(fmt.Sprintf("%d: %q", i, tc.inArgs), func(t *testing.T) {
+			buf := bytes.Buffer{}
+
+			func() {
+				// profile buffers should _not_ be enabled at start
+				ok0 := HasProfileBuffersEnabled()
+				require.False(t, ok0)
+
+				ok := MaybeStartProfileBuffersWithConfig(ctx, tc.inArgs)
+				// set output to our own buffer
+				pprofConfigs.SetWriter(&buf)
+				// check that HasProfileBuffersEnabled matches the output of MaybeStartProfileBuffers
+				ok0 = HasProfileBuffersEnabled()
+				require.Equal(t, ok, tc.expectedProfileCount != 0)
+				require.Equal(t, ok, ok0)
+
+				ok = MaybeRestartProfileBuffersWithConfig(ctx, tc.inArgs)
+				// set output to our own buffer
+				pprofConfigs.SetWriter(&buf)
+
+				// check that HasProfileBuffersEnabled matches the output of MaybeRestartProfileBuffersWithConfig
+				ok0 = HasProfileBuffersEnabled()
+				require.Equal(t, ok, tc.expectedProfileCount != 0)
+				require.Equal(t, ok, ok0)
+
+				pprofConfigs.wrt = &buf
+
+				defer MaybeStopProfileBuffers(ctx)
+
+				time.Sleep(1 * time.Second)
+			}()
+
+			ok := HasProfileBuffersEnabled()
+			require.False(t, ok)
+
+			s := buf.String()
+			mchsss := rx.FindAllString(s, -1)
+			require.Len(t, mchsss, tc.expectedProfileCount)
 		})
 	}
 }
@@ -483,8 +555,10 @@ func TestDebug_ProfileBuffersEnabled(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(fmt.Sprintf("%q", tc.options), func(t *testing.T) {
 			t.Setenv(EnvVarKopiaDebugPprof, tc.options)
-			pcm, err := LoadProfileConfig(ctx, os.Getenv(EnvVarKopiaDebugPprof))
+			src := os.Getenv(EnvVarKopiaDebugPprof)
+			pcm, err := LoadProfileConfig(ctx, src)
 			require.NoError(t, err)
+			pprofConfigs.src = src
 			pprofConfigs.pcm = pcm
 			ok := HasProfileBuffersEnabled()
 			require.Equal(t, tc.expect, ok)

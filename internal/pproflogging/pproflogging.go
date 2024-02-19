@@ -83,6 +83,7 @@ type Writer interface {
 type ProfileConfigs struct {
 	mu  sync.Mutex
 	wrt Writer
+	src string
 	pcm map[ProfileName]*ProfileConfig
 }
 
@@ -127,6 +128,29 @@ func MaybeStartProfileBuffersWithConfig(ctx context.Context, config string) bool
 	}
 
 	pprofConfigs.StartProfileBuffersLocked(ctx)
+
+	return true
+}
+
+// MaybeRestartProfileBuffersWithConfig used by SIGQUIT signal handlers to output PPROF data without exiting.
+func MaybeRestartProfileBuffersWithConfig(ctx context.Context, config string) bool {
+	pprofConfigs.mu.Lock()
+	defer pprofConfigs.mu.Unlock()
+
+	if len(pprofConfigs.pcm) == 0 {
+		log(ctx).Debug("no profile buffer configuration to restart")
+		return false
+	}
+
+	pprofConfigs.StopProfileBuffersLocked(ctx)
+
+	if !loadAndSetProfileBuffersLocked(ctx, config) {
+		log(ctx).Debug("no profile buffer configuration to start")
+		return false
+	}
+
+	pprofConfigs.StartProfileBuffersLocked(ctx)
+
 	return true
 }
 
@@ -146,7 +170,8 @@ func loadAndSetProfileBuffersLocked(ctx context.Context, config string) bool {
 		return false
 	}
 
-	// allow profile dumps to be cleared
+	// allow profile dumps to be cleared by setting without prior check
+	pprofConfigs.src = config
 	pprofConfigs.pcm = pcm
 
 	return len(pprofConfigs.pcm) != 0

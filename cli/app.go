@@ -487,11 +487,9 @@ func (c *App) runAppWithContext(command *kingpin.CmdClause, cb func(ctx context.
 		releasable.EnableTracking(releasable.ItemKind(r))
 	}
 
-	pproflogging.MaybeStartProfileBuffers(ctx)
-
 	// MaybeStartProfileBuffers will have configured the global pprof structs. At this point we can choose
-	// to enabled globally
-	if pproflogging.HasProfileBuffersEnabled() {
+	// to add the call to dump the pprof dumps once done
+	if pproflogging.MaybeStartProfileBuffers(ctx) {
 		defer func() {
 			ctx0, canfn := context.WithTimeout(ctx, pproflogging.PPROFDumpTimeout)
 			defer canfn()
