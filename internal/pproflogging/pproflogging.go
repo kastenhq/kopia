@@ -144,7 +144,8 @@ type ProfileConfig struct {
 func (p ProfileConfig) GetValue(s string) (string, bool) {
 	for _, f := range p.flags {
 		kvs := strings.SplitN(f, "=", pair)
-		if kvs[0] != s {
+		key := kvs[0]
+		if strings.TrimSpace(key) != s {
 			continue
 		}
 
@@ -152,7 +153,7 @@ func (p ProfileConfig) GetValue(s string) (string, bool) {
 			return "", true
 		}
 
-		return kvs[1], true
+		return strings.TrimSpace(kvs[1]), true
 	}
 
 	return "", false
@@ -169,10 +170,11 @@ func parseProfileConfigs(bufSizeB int, ppconfigs string) (map[ProfileName]*Profi
 
 		if len(profileFlagNameValuePairs) > 1 {
 			// only <key>=<value> allowed
-			flagValue = profileFlagNameValuePairs[1]
+			flagValue = strings.TrimSpace(profileFlagNameValuePairs[1])
 		}
 
-		flagKey := ProfileName(profileFlagNameValuePairs[0])
+		profileName := strings.TrimSpace(profileFlagNameValuePairs[0])
+		flagKey := ProfileName(profileName)
 		if flagKey == "" {
 			return nil, ErrEmptyProfileName
 		}

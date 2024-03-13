@@ -232,6 +232,32 @@ func TestDebug_parseProfileConfigs(t *testing.T) {
 			n:      4,
 		},
 		{
+			in:     "foo=bar:first=one=1,two=2:second :third",
+			key:    "second",
+			expect: nil,
+			n:      4,
+		},
+		{
+			in:     "foo=bar:first=one=1,two=2: second:third",
+			key:    "second",
+			expect: nil,
+			n:      4,
+		},
+		{
+			in:  "foo=bar:first=one= 1,two=2:second:third",
+			key: "first",
+			// spaces are valid in unsplit key/value pairs
+			expect: []string{"one= 1", "two=2"},
+			n:      4,
+		},
+		{
+			in:  "foo=bar:first=one=1, two=2:second:third",
+			key: "first",
+			// spaces are valid in unsplit key/value pairs
+			expect: []string{"one=1", " two=2"},
+			n:      4,
+		},
+		{
 			in:            "=",
 			key:           "",
 			expectMissing: true,
@@ -296,6 +322,30 @@ func TestDebug_newProfileConfigs(t *testing.T) {
 	}{
 		{
 			in:     "foo=bar",
+			key:    "foo",
+			ok:     true,
+			expect: "bar",
+		},
+		{
+			in:     " foo=bar",
+			key:    "foo",
+			ok:     true,
+			expect: "bar",
+		},
+		{
+			in:     "foo =bar",
+			key:    "foo",
+			ok:     true,
+			expect: "bar",
+		},
+		{
+			in:     "foo= bar",
+			key:    "foo",
+			ok:     true,
+			expect: "bar",
+		},
+		{
+			in:     "foo=bar ",
 			key:    "foo",
 			ok:     true,
 			expect: "bar",
