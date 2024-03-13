@@ -605,6 +605,10 @@ type ErrorWriter struct {
 func (p *ErrorWriter) Write(bs []byte) (int, error) {
 	n := len(bs)
 
+	if n == 0 {
+		return 0, nil
+	}
+
 	if len(bs)+len(p.bs) > p.mx {
 		// error will be produced at p.mx
 		// so don't return any more than
