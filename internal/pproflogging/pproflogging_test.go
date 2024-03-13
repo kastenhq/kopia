@@ -153,8 +153,6 @@ func TestDebug_StartProfileBuffersWithError(t *testing.T) {
 }
 
 func TestDebug_parseProfileConfigs(t *testing.T) {
-	saveLockEnv(t)
-
 	tcs := []struct {
 		in            string
 		key           ProfileName
@@ -312,8 +310,6 @@ func TestDebug_parseProfileConfigs(t *testing.T) {
 }
 
 func TestDebug_newProfileConfigs(t *testing.T) {
-	saveLockEnv(t)
-
 	tcs := []struct {
 		in     string
 		key    string
@@ -382,8 +378,6 @@ func TestDebug_newProfileConfigs(t *testing.T) {
 }
 
 func TestDebug_DumpPem(t *testing.T) {
-	saveLockEnv(t)
-
 	tcs := []struct {
 		inBody  string
 		inType  string
@@ -495,9 +489,6 @@ func TestDebug_DumpPem(t *testing.T) {
 }
 
 func TestDebug_LoadProfileConfigs(t *testing.T) {
-	// save environment and restore after testing
-	saveLockEnv(t)
-
 	ctx := context.Background()
 
 	tcs := []struct {
