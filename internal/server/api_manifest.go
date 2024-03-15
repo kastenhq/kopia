@@ -1,172 +1,156 @@
 package server
 
-import (
-	"context"
-	"encoding/json"
-	"strings"
+// func handleManifestGet(ctx context.Context, rc requestContext) (interface{}, *apiError) {
+// 	mid := manifest.ID(rc.muxVar("manifestID"))
 
-	"github.com/pkg/errors"
+// 	var data json.RawMessage
 
-	"github.com/kopia/kopia/internal/auth"
-	"github.com/kopia/kopia/internal/remoterepoapi"
-	"github.com/kopia/kopia/internal/serverapi"
-	"github.com/kopia/kopia/repo"
-	"github.com/kopia/kopia/repo/manifest"
-	"github.com/kopia/kopia/snapshot"
-	"github.com/kopia/kopia/snapshot/policy"
-)
+// 	md, err := rc.rep.GetManifest(ctx, mid, &data)
+// 	if errors.Is(err, manifest.ErrNotFound) {
+// 		return nil, notFoundError("manifest not found")
+// 	}
 
-func handleManifestGet(ctx context.Context, rc requestContext) (interface{}, *apiError) {
-	mid := manifest.ID(rc.muxVar("manifestID"))
+// 	if err != nil {
+// 		return nil, internalServerError(err)
+// 	}
 
-	var data json.RawMessage
+// 	if !hasManifestAccess(ctx, rc, md.Labels, auth.AccessLevelRead) {
+// 		return nil, accessDeniedError()
+// 	}
 
-	md, err := rc.rep.GetManifest(ctx, mid, &data)
-	if errors.Is(err, manifest.ErrNotFound) {
-		return nil, notFoundError("manifest not found")
-	}
+// 	return &remoterepoapi.ManifestWithMetadata{
+// 		Payload:  data,
+// 		Metadata: md,
+// 	}, nil
+// }
 
-	if err != nil {
-		return nil, internalServerError(err)
-	}
+// func handleManifestDelete(ctx context.Context, rc requestContext) (interface{}, *apiError) {
+// 	rw, ok := rc.rep.(repo.RepositoryWriter)
+// 	if !ok {
+// 		return nil, repositoryNotWritableError()
+// 	}
 
-	if !hasManifestAccess(ctx, rc, md.Labels, auth.AccessLevelRead) {
-		return nil, accessDeniedError()
-	}
+// 	mid := manifest.ID(rc.muxVar("manifestID"))
 
-	return &remoterepoapi.ManifestWithMetadata{
-		Payload:  data,
-		Metadata: md,
-	}, nil
-}
+// 	var data json.RawMessage
 
-func handleManifestDelete(ctx context.Context, rc requestContext) (interface{}, *apiError) {
-	rw, ok := rc.rep.(repo.RepositoryWriter)
-	if !ok {
-		return nil, repositoryNotWritableError()
-	}
+// 	em, err := rc.rep.GetManifest(ctx, mid, &data)
+// 	if errors.Is(err, manifest.ErrNotFound) {
+// 		return nil, notFoundError("manifest not found")
+// 	}
 
-	mid := manifest.ID(rc.muxVar("manifestID"))
+// 	if err != nil {
+// 		return nil, internalServerError(err)
+// 	}
 
-	var data json.RawMessage
+// 	if !hasManifestAccess(ctx, rc, em.Labels, auth.AccessLevelFull) {
+// 		return nil, accessDeniedError()
+// 	}
 
-	em, err := rc.rep.GetManifest(ctx, mid, &data)
-	if errors.Is(err, manifest.ErrNotFound) {
-		return nil, notFoundError("manifest not found")
-	}
+// 	err = rw.DeleteManifest(ctx, mid)
+// 	if errors.Is(err, manifest.ErrNotFound) {
+// 		return nil, notFoundError("manifest not found")
+// 	}
 
-	if err != nil {
-		return nil, internalServerError(err)
-	}
+// 	if err != nil {
+// 		return nil, internalServerError(err)
+// 	}
 
-	if !hasManifestAccess(ctx, rc, em.Labels, auth.AccessLevelFull) {
-		return nil, accessDeniedError()
-	}
+// 	return &serverapi.Empty{}, nil
+// }
 
-	err = rw.DeleteManifest(ctx, mid)
-	if errors.Is(err, manifest.ErrNotFound) {
-		return nil, notFoundError("manifest not found")
-	}
+// func handleManifestList(ctx context.Context, rc requestContext) (interface{}, *apiError) {
+// 	// password already validated by a wrapper, no need to check here.
+// 	labels := map[string]string{}
 
-	if err != nil {
-		return nil, internalServerError(err)
-	}
+// 	for k, v := range rc.req.URL.Query() {
+// 		labels[k] = v[0]
+// 	}
 
-	return &serverapi.Empty{}, nil
-}
+// 	m, err := rc.rep.FindManifests(ctx, labels)
+// 	if err != nil {
+// 		return nil, internalServerError(err)
+// 	}
 
-func handleManifestList(ctx context.Context, rc requestContext) (interface{}, *apiError) {
-	// password already validated by a wrapper, no need to check here.
-	labels := map[string]string{}
+// 	return filterManifests(m, httpAuthorizationInfo(ctx, rc)), nil
+// }
 
-	for k, v := range rc.req.URL.Query() {
-		labels[k] = v[0]
-	}
+// func filterManifests(manifests []*manifest.EntryMetadata, authz auth.AuthorizationInfo) []*manifest.EntryMetadata {
+// 	result := []*manifest.EntryMetadata{}
 
-	m, err := rc.rep.FindManifests(ctx, labels)
-	if err != nil {
-		return nil, internalServerError(err)
-	}
+// 	for _, m := range manifests {
+// 		if authz.ManifestAccessLevel(m.Labels) >= auth.AccessLevelRead {
+// 			result = append(result, m)
+// 		}
+// 	}
 
-	return filterManifests(m, httpAuthorizationInfo(ctx, rc)), nil
-}
+// 	return result
+// }
 
-func filterManifests(manifests []*manifest.EntryMetadata, authz auth.AuthorizationInfo) []*manifest.EntryMetadata {
-	result := []*manifest.EntryMetadata{}
+// func handleManifestCreate(ctx context.Context, rc requestContext) (interface{}, *apiError) {
+// 	rw, ok := rc.rep.(repo.RepositoryWriter)
+// 	if !ok {
+// 		return nil, repositoryNotWritableError()
+// 	}
 
-	for _, m := range manifests {
-		if authz.ManifestAccessLevel(m.Labels) >= auth.AccessLevelRead {
-			result = append(result, m)
-		}
-	}
+// 	var req remoterepoapi.ManifestWithMetadata
 
-	return result
-}
+// 	if err := json.Unmarshal(rc.body, &req); err != nil {
+// 		return nil, requestError(serverapi.ErrorMalformedRequest, "malformed request")
+// 	}
 
-func handleManifestCreate(ctx context.Context, rc requestContext) (interface{}, *apiError) {
-	rw, ok := rc.rep.(repo.RepositoryWriter)
-	if !ok {
-		return nil, repositoryNotWritableError()
-	}
+// 	if !hasManifestAccess(ctx, rc, req.Metadata.Labels, auth.AccessLevelAppend) {
+// 		return nil, accessDeniedError()
+// 	}
 
-	var req remoterepoapi.ManifestWithMetadata
+// 	id, err := rw.PutManifest(ctx, req.Metadata.Labels, req.Payload)
+// 	if err != nil {
+// 		return nil, internalServerError(err)
+// 	}
 
-	if err := json.Unmarshal(rc.body, &req); err != nil {
-		return nil, requestError(serverapi.ErrorMalformedRequest, "malformed request")
-	}
+// 	return &manifest.EntryMetadata{ID: id}, nil
+// }
 
-	if !hasManifestAccess(ctx, rc, req.Metadata.Labels, auth.AccessLevelAppend) {
-		return nil, accessDeniedError()
-	}
+// func handleApplyRetentionPolicy(ctx context.Context, rc requestContext) (interface{}, *apiError) {
+// 	rw, ok := rc.rep.(repo.RepositoryWriter)
+// 	if !ok {
+// 		return nil, repositoryNotWritableError()
+// 	}
 
-	id, err := rw.PutManifest(ctx, req.Metadata.Labels, req.Payload)
-	if err != nil {
-		return nil, internalServerError(err)
-	}
+// 	var req remoterepoapi.ApplyRetentionPolicyRequest
 
-	return &manifest.EntryMetadata{ID: id}, nil
-}
+// 	if err := json.Unmarshal(rc.body, &req); err != nil {
+// 		return nil, requestError(serverapi.ErrorMalformedRequest, "malformed request")
+// 	}
 
-func handleApplyRetentionPolicy(ctx context.Context, rc requestContext) (interface{}, *apiError) {
-	rw, ok := rc.rep.(repo.RepositoryWriter)
-	if !ok {
-		return nil, repositoryNotWritableError()
-	}
+// 	usernameAtHostname, _, _ := rc.req.BasicAuth()
 
-	var req remoterepoapi.ApplyRetentionPolicyRequest
+// 	parts := strings.Split(usernameAtHostname, "@")
+// 	if len(parts) != 2 { //nolint:gomnd
+// 		return nil, requestError(serverapi.ErrorMalformedRequest, "malformed username")
+// 	}
 
-	if err := json.Unmarshal(rc.body, &req); err != nil {
-		return nil, requestError(serverapi.ErrorMalformedRequest, "malformed request")
-	}
+// 	// only allow users to apply retention policy if they have permission to add snapshots
+// 	// for a particular path.
+// 	if !hasManifestAccess(ctx, rc, map[string]string{
+// 		manifest.TypeLabelKey:  snapshot.ManifestType,
+// 		snapshot.UsernameLabel: parts[0],
+// 		snapshot.HostnameLabel: parts[1],
+// 		snapshot.PathLabel:     req.SourcePath,
+// 	}, auth.AccessLevelAppend) {
+// 		return nil, accessDeniedError()
+// 	}
 
-	usernameAtHostname, _, _ := rc.req.BasicAuth()
+// 	ids, err := policy.ApplyRetentionPolicy(ctx, rw, snapshot.SourceInfo{
+// 		UserName: parts[0],
+// 		Host:     parts[1],
+// 		Path:     req.SourcePath,
+// 	}, req.ReallyDelete)
+// 	if err != nil {
+// 		return nil, internalServerError(err)
+// 	}
 
-	parts := strings.Split(usernameAtHostname, "@")
-	if len(parts) != 2 { //nolint:gomnd
-		return nil, requestError(serverapi.ErrorMalformedRequest, "malformed username")
-	}
-
-	// only allow users to apply retention policy if they have permission to add snapshots
-	// for a particular path.
-	if !hasManifestAccess(ctx, rc, map[string]string{
-		manifest.TypeLabelKey:  snapshot.ManifestType,
-		snapshot.UsernameLabel: parts[0],
-		snapshot.HostnameLabel: parts[1],
-		snapshot.PathLabel:     req.SourcePath,
-	}, auth.AccessLevelAppend) {
-		return nil, accessDeniedError()
-	}
-
-	ids, err := policy.ApplyRetentionPolicy(ctx, rw, snapshot.SourceInfo{
-		UserName: parts[0],
-		Host:     parts[1],
-		Path:     req.SourcePath,
-	}, req.ReallyDelete)
-	if err != nil {
-		return nil, internalServerError(err)
-	}
-
-	return &remoterepoapi.ApplyRetentionPolicyResponse{
-		ManifestIDs: ids,
-	}, nil
-}
+// 	return &remoterepoapi.ApplyRetentionPolicyResponse{
+// 		ManifestIDs: ids,
+// 	}, nil
+// }

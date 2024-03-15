@@ -31,10 +31,8 @@ type commandServerStart struct {
 
 	serverStartHTMLPath string
 
-	serverStartUI                  bool
-	serverStartLegacyRepositoryAPI bool
-	serverStartGRPC                bool
-	serverStartControlAPI          bool
+	serverStartUI         bool
+	serverStartControlAPI bool
 
 	serverStartRefreshInterval time.Duration
 	serverStartInsecure        bool
@@ -82,8 +80,6 @@ func (c *commandServerStart) setup(svc advancedAppServices, parent commandParent
 	cmd.Flag("html", "Server the provided HTML at the root URL").ExistingDirVar(&c.serverStartHTMLPath)
 	cmd.Flag("ui", "Start the server with HTML UI").Default("true").BoolVar(&c.serverStartUI)
 
-	cmd.Flag("legacy-api", "Start the legacy server API").Default("false").BoolVar(&c.serverStartLegacyRepositoryAPI)
-	cmd.Flag("grpc", "Start the GRPC server").Default("true").BoolVar(&c.serverStartGRPC)
 	cmd.Flag("control-api", "Start the control API").Default("true").BoolVar(&c.serverStartControlAPI)
 
 	cmd.Flag("refresh-interval", "Frequency for refreshing repository status").Default("4h").DurationVar(&c.serverStartRefreshInterval)
@@ -240,13 +236,7 @@ func (c *commandServerStart) run(ctx context.Context) error {
 	// handler can be called without auth
 	initPrometheus(m)
 
-	var handler http.Handler = m
-
-	if c.serverStartGRPC {
-		handler = srv.GRPCRouterHandler(handler)
-	}
-
-	httpServer.Handler = handler
+	httpServer.Handler = srv.GRPCRouterHandler(m)
 
 	if c.serverStartShutdownWhenStdinClosed {
 		log(ctx).Info("Server will close when stdin is closed...")
@@ -277,10 +267,6 @@ func shutdownHTTPServer(ctx context.Context, httpServer *http.Server) {
 }
 
 func (c *commandServerStart) setupHandlers(srv *server.Server, m *mux.Router) {
-	if c.serverStartLegacyRepositoryAPI {
-		srv.SetupRepositoryAPIHandlers(m)
-	}
-
 	if c.serverStartControlAPI {
 		srv.SetupControlAPIHandlers(m)
 	}
