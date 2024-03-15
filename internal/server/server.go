@@ -161,23 +161,6 @@ func (s *Server) SetupHTMLUIAPIHandlers(m *mux.Router) {
 	m.HandleFunc("/api/v1/tasks/{taskID}/cancel", s.handleUIPossiblyNotConnected(handleTaskCancel)).Methods(http.MethodPost)
 }
 
-// // SetupRepositoryAPIHandlers registers HTTP repository API handlers.
-// func (s *Server) SetupRepositoryAPIHandlers(m *mux.Router) {
-// 	m.HandleFunc("/api/v1/flush", s.handleRepositoryAPI(anyAuthenticatedUser, handleFlush)).Methods(http.MethodPost)
-// 	m.HandleFunc("/api/v1/repo/parameters", s.handleRepositoryAPI(anyAuthenticatedUser, handleRepoParameters)).Methods(http.MethodGet)
-
-// 	m.HandleFunc("/api/v1/contents/{contentID}", s.handleRepositoryAPI(requireContentAccess(auth.AccessLevelRead), handleContentInfo)).Methods(http.MethodGet).Queries("info", "1")
-// 	m.HandleFunc("/api/v1/contents/{contentID}", s.handleRepositoryAPI(requireContentAccess(auth.AccessLevelRead), handleContentGet)).Methods(http.MethodGet)
-// 	m.HandleFunc("/api/v1/contents/{contentID}", s.handleRepositoryAPI(requireContentAccess(auth.AccessLevelAppend), handleContentPut)).Methods(http.MethodPut)
-// 	m.HandleFunc("/api/v1/contents/prefetch", s.handleRepositoryAPI(requireContentAccess(auth.AccessLevelRead), handleContentPrefetch)).Methods(http.MethodPost)
-
-// 	m.HandleFunc("/api/v1/manifests/{manifestID}", s.handleRepositoryAPI(handlerWillCheckAuthorization, handleManifestGet)).Methods(http.MethodGet)
-// 	m.HandleFunc("/api/v1/manifests/{manifestID}", s.handleRepositoryAPI(handlerWillCheckAuthorization, handleManifestDelete)).Methods(http.MethodDelete)
-// 	m.HandleFunc("/api/v1/manifests", s.handleRepositoryAPI(handlerWillCheckAuthorization, handleManifestCreate)).Methods(http.MethodPost)
-// 	m.HandleFunc("/api/v1/manifests", s.handleRepositoryAPI(handlerWillCheckAuthorization, handleManifestList)).Methods(http.MethodGet)
-// 	m.HandleFunc("/api/v1/policies/apply-retention", s.handleRepositoryAPI(handlerWillCheckAuthorization, handleApplyRetentionPolicy)).Methods(http.MethodPost)
-// }
-
 // SetupControlAPIHandlers registers control API handlers.
 func (s *Server) SetupControlAPIHandlers(m *mux.Router) {
 	// server control API, requires authentication as `server-control` and no CSRF token.

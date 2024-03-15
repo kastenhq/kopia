@@ -301,53 +301,6 @@ func (r *apiServerRepository) OnSuccessfulFlush(callback RepositoryWriterCallbac
 
 var _ Repository = (*apiServerRepository)(nil)
 
-// // openRestAPIRepository connects remote repository over Kopia API.
-// func openRestAPIRepository(ctx context.Context, si *APIServerInfo, password string, par *immutableServerRepositoryParameters) (Repository, error) {
-// 	cli, err := apiclient.NewKopiaAPIClient(apiclient.Options{
-// 		BaseURL:                             si.BaseURL,
-// 		TrustedServerCertificateFingerprint: si.TrustedServerCertificateFingerprint,
-// 		Username:                            par.cliOpts.UsernameAtHost(),
-// 		Password:                            password,
-// 		LogRequests:                         true,
-// 	})
-// 	if err != nil {
-// 		return nil, errors.Wrap(err, "unable to create API client")
-// 	}
-
-// 	rr := &apiServerRepository{
-// 		immutableServerRepositoryParameters: par,
-// 		cli:                                 cli,
-// 		wso: WriteSessionOptions{
-// 			OnUpload: func(_ int64) {},
-// 		},
-// 	}
-
-// 	var p remoterepoapi.Parameters
-
-// 	if err = cli.Get(ctx, "repo/parameters", nil, &p); err != nil {
-// 		return nil, errors.Wrap(err, "unable to get repository parameters")
-// 	}
-
-// 	hf, err := hashing.CreateHashFunc(&p)
-// 	if err != nil {
-// 		return nil, errors.Wrap(err, "unable to create hash function")
-// 	}
-
-// 	rr.h = hf
-// 	rr.objectFormat = p.ObjectFormat
-// 	rr.serverSupportsContentCompression = p.SupportsContentCompression
-
-// 	// create object manager using rr as contentManager implementation.
-// 	omgr, err := object.NewObjectManager(ctx, rr, rr.objectFormat, par.metricsRegistry)
-// 	if err != nil {
-// 		return nil, errors.Wrap(err, "error initializing object manager")
-// 	}
-
-// 	rr.omgr = omgr
-
-// 	return rr, nil
-// }
-
 // ConnectAPIServer sets up repository connection to a particular API server.
 func ConnectAPIServer(ctx context.Context, configFile string, si *APIServerInfo, password string, opt *ConnectOptions) error {
 	lc := LocalConfig{
