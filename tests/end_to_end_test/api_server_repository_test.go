@@ -50,12 +50,6 @@ func TestAPIServerRepository_RepositoryUsers(t *testing.T) {
 	testAPIServerRepository(t, true)
 }
 
-// func TestAPIServerRepository_DisableGRPC_htpasswd(t *testing.T) {
-// 	t.Parallel()
-
-// 	testAPIServerRepository(t, []string{"--no-grpc", "--legacy-api"}, false, false)
-// }
-
 //nolint:thelper
 func testAPIServerRepository(t *testing.T, allowRepositoryUsers bool) {
 	ctx := testlogging.Context(t)
@@ -308,8 +302,6 @@ func TestFindManifestsPaginationOverGRPC(t *testing.T) {
 	wait, kill := e.RunAndProcessStderr(t, sp.ProcessOutput,
 		"server", "start",
 		"--address=localhost:0",
-		"--grpc",
-		"--no-legacy-api",
 		"--tls-key-file", tlsKey,
 		"--tls-cert-file", tlsCert,
 		"--tls-generate-cert",
