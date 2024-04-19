@@ -23,7 +23,7 @@ const (
 	pbkdf2Sha256Iterations = 1<<20 - 1<<18 // 786,432
 
 	// Pbkdf2Algorithm is the key for the pbkdf algorithm.
-	Pbkdf2Algorithm = "pbkdf2"
+	Pbkdf2Algorithm = "pbkdf2-sha256-786432"
 )
 
 func init() {
