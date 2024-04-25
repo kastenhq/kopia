@@ -38,8 +38,7 @@ func TestBadPasswordHashVersion(t *testing.T) {
 		PasswordHashVersion: user.ScryptHashVersion,
 	}
 	p.SetPassword("foo")
-	// Assume the key derivation algorithm is bad. This will cause
-	// a panic when validating
+	// Assume the key derivation algorithm is bad. This will return false.
 	p.PasswordHashVersion = 0
 	if p.IsValidPassword("foo") {
 		t.Fatalf("password unexpectedly valid!")
