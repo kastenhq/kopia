@@ -14,6 +14,7 @@ import (
 	"github.com/kopia/kopia/internal/impossible"
 	"github.com/kopia/kopia/internal/workshare"
 	"github.com/kopia/kopia/repo"
+	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/repo/logging"
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot"
@@ -46,6 +47,8 @@ type DirRewriterOptions struct {
 	// when != nil will be invoked to replace directory that can't be read,
 	// by default RewriteAsStub()
 	OnDirectoryReadFailure RewriteFailedEntryCallback
+
+	Compression compression.Name
 }
 
 // DirRewriter rewrites contents of directories by walking the snapshot tree recursively.
@@ -194,7 +197,7 @@ func (rw *DirRewriter) processDirectoryEntries(ctx context.Context, parentPath s
 
 	dm := builder.Build(entry.ModTime, entry.DirSummary.IncompleteReason)
 
-	oid, err := writeDirManifest(ctx, rw.rep, entry.ObjectID.String(), dm)
+	oid, err := writeDirManifest(ctx, rw.rep, entry.ObjectID.String(), dm, "")
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to write directory manifest")
 	}

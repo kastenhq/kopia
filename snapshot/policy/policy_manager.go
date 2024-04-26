@@ -54,7 +54,6 @@ func GetEffectivePolicyWithOverride(ctx context.Context, rep repo.Repository, si
 	if err != nil {
 		return nil, nil, nil, errors.Wrap(err, "unable to get parent policies")
 	}
-
 	merged, def := MergePolicies(policies, si)
 
 	return merged, def, policies, nil

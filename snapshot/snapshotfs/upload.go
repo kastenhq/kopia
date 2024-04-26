@@ -1121,9 +1121,11 @@ func uploadDirInternal(
 
 	var definedActions policy.ActionsPolicy
 
-	if p := policyTree.DefinedPolicy(); p != nil {
+	p := policyTree.DefinedPolicy()
+	if p != nil {
 		definedActions = p.Actions
 	}
+	comp := compression.Name("")
 
 	var hc actionContext
 	defer cleanupActionContext(ctx, &hc)
@@ -1157,7 +1159,7 @@ func uploadDirInternal(
 
 		checkpointManifest := thisCheckpointBuilder.Build(fs.UTCTimestampFromTime(directory.ModTime()), IncompleteReasonCheckpoint)
 
-		oid, err := writeDirManifest(ctx, u.repo, dirRelativePath, checkpointManifest)
+		oid, err := writeDirManifest(ctx, u.repo, dirRelativePath, checkpointManifest, comp)
 		if err != nil {
 			return nil, errors.Wrap(err, "error writing dir manifest")
 		}
@@ -1172,7 +1174,7 @@ func uploadDirInternal(
 
 	dirManifest := thisDirBuilder.Build(fs.UTCTimestampFromTime(directory.ModTime()), u.incompleteReason())
 
-	oid, err := writeDirManifest(ctx, u.repo, dirRelativePath, dirManifest)
+	oid, err := writeDirManifest(ctx, u.repo, dirRelativePath, dirManifest, comp)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error writing dir manifest: %v", directory.Name())
 	}

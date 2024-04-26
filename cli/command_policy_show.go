@@ -39,7 +39,6 @@ func (c *commandPolicyShow) run(ctx context.Context, rep repo.Repository) error 
 		if err != nil {
 			return errors.Wrapf(err, "can't get effective policy for %q", target)
 		}
-
 		if c.jo.jsonOutput {
 			c.out.printStdout("%s\n", c.jo.jsonBytes(effective))
 		} else {
@@ -125,6 +124,8 @@ func printPolicy(out *textOutput, p *policy.Policy, def *policy.Definition) {
 	rows = appendUploadPolicyRows(rows, p, def)
 	rows = append(rows, policyTableRow{})
 	rows = appendCompressionPolicyRows(rows, p, def)
+	rows = append(rows, policyTableRow{})
+	rows = appendMetadataCompressionPolicyRows(rows, p, def)
 	rows = append(rows, policyTableRow{})
 	rows = appendSplitterPolicyRows(rows, p, def)
 	rows = append(rows, policyTableRow{})
@@ -385,6 +386,18 @@ func appendCompressionPolicyRows(rows []policyTableRow, p *policy.Policy, def *p
 		rows = append(rows, policyTableRow{"  Compress files of all sizes.", "", ""})
 	}
 
+	return rows
+}
+
+func appendMetadataCompressionPolicyRows(rows []policyTableRow, p *policy.Policy, def *policy.Definition) []policyTableRow {
+	if p.MetadataCompressionPolicy.CompressorName == "" || p.MetadataCompressionPolicy.CompressorName == "none" {
+		rows = append(rows, policyTableRow{"Compression disabled.", "", ""})
+		return rows
+	}
+
+	rows = append(rows,
+		policyTableRow{"Compression:", "", ""},
+		policyTableRow{"  Compressor:", string(p.MetadataCompressionPolicy.CompressorName), definitionPointToString(p.Target(), def.MetadataCompressionPolicy.CompressorName)})
 	return rows
 }
 

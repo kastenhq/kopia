@@ -98,3 +98,11 @@ func verifyCompressionHeader(reader io.Reader, want []byte) error {
 
 	return nil
 }
+
+func MetadataCompressionName(disableComp bool) Name {
+	if disableComp {
+		return ""
+	}
+	// 'zstd-fastest' has a good mix of being fast, low memory usage and high compression for JSON.
+	return HeaderIDToName[HeaderZstdFastest]
+}

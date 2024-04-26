@@ -34,7 +34,10 @@ func (sm *SharedManager) maybeCompressAndEncryptDataForPacking(data gather.Bytes
 	if contentID.HasPrefix() && comp == NoCompression && mp.IndexVersion >= index.Version2 {
 		// 'zstd-fastest' has a good mix of being fast, low memory usage and high compression for JSON.
 		comp = compression.HeaderZstdFastest
+		// TODO:: Add logic to skip compression here
+		fmt.Printf("------------ Setting Compression algorithm -----------: %s -> %s\n", contentID, compression.HeaderIDToName[comp])
 	}
+	fmt.Printf("++++++++++++ Compression Content algorithm +++++++++++: %s -> %s\n", contentID, compression.HeaderIDToName[comp])
 
 	//nolint:nestif
 	if comp != NoCompression {

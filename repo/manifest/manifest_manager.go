@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -82,6 +83,7 @@ func (m *Manager) Put(ctx context.Context, labels map[string]string, payload int
 	if err != nil {
 		return "", errors.Wrap(err, "marshal error")
 	}
+	fmt.Println("---- put manifest", string(b))
 
 	e := &manifestEntry{
 		ID:      ID(hex.EncodeToString(random)),
@@ -115,6 +117,7 @@ func (m *Manager) Get(ctx context.Context, id ID, data interface{}) (*EntryMetad
 		return nil, err
 	}
 
+	fmt.Println("--- Get manifest", string(e.Content))
 	if data != nil {
 		if err := json.Unmarshal([]byte(e.Content), data); err != nil {
 			return nil, errors.Wrapf(err, "unable to unmashal %q", id)

@@ -202,6 +202,7 @@ func (w *objectWriter) prepareAndWriteContentChunk(chunkID int, data gather.Byte
 	if err != nil {
 		return errors.Wrap(err, "unable to prepare content bytes")
 	}
+	//fmt.Printf("********** Compressed content ************: %s -> %s\n", w.prefix, compression.HeaderIDToName[objectComp.HeaderID()])
 
 	contentID, err := w.om.contentMgr.WriteContent(w.ctx, contentBytes, w.prefix, comp)
 	if err != nil {
