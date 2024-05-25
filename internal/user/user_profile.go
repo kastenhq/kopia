@@ -60,15 +60,3 @@ func getPasswordHashAlgorithm(passwordHashVersion int) (string, error) {
 		return "", errors.Errorf("unsupported hash version (%d)", passwordHashVersion)
 	}
 }
-
-// GetPasswordHashVersion returns the password hash version given an algorithm.
-func GetPasswordHashVersion(passwordHashAlgorithm string) (int, error) {
-	switch passwordHashAlgorithm {
-	case scryptHashAlgorithm:
-		return ScryptHashVersion, nil
-	case pbkdf2HashAlgorithm:
-		return Pbkdf2HashVersion, nil
-	default:
-		return 0, errors.Errorf("unsupported hash algorithm (%s)", passwordHashAlgorithm)
-	}
-}
