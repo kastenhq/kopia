@@ -26,7 +26,7 @@ type policyCompressionFlags struct {
 
 func (c *policyCompressionFlags) setup(cmd *kingpin.CmdClause) {
 	// Name of compression algorithm.
-	cmd.Flag("compression", "Compression algorithm").EnumVar(&c.policySetCompressionAlgorithm, supportedCompressionAlgorithms()...)
+	cmd.Flag("compression", "Compression algorithm").EnumVar(&c.policySetCompressionAlgorithm, withInherit(supportedCompressionAlgorithms())...)
 	cmd.Flag("compression-min-size", "Min size of file to attempt compression for").StringVar(&c.policySetCompressionMinSize)
 	cmd.Flag("compression-max-size", "Max size of file to attempt compression for").StringVar(&c.policySetCompressionMaxSize)
 

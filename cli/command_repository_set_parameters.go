@@ -59,9 +59,7 @@ func (c *commandRepositorySetParameters) setup(svc appServices, parent commandPa
 	cmd.Flag("epoch-delete-parallelism", "Epoch delete parallelism").IntVar(&c.epochDeleteParallelism)
 	cmd.Flag("epoch-checkpoint-frequency", "Checkpoint frequency").IntVar(&c.epochCheckpointFrequency)
 
-	cmd.Flag("metadata-compression", "Metadata compression algorithm").EnumVar(
-		&c.metadataCompression,
-		supportedCompressionAlgorithms()[1:]...) // Do not show `inherit` as a valid flag
+	cmd.Flag("metadata-compression", "Metadata Compression algorithm").EnumVar(&c.metadataCompression, supportedCompressionAlgorithms()...)
 
 	if svc.enableTestOnlyFlags() {
 		cmd.Flag("add-required-feature", "Add required feature which must be present to open the repository").Hidden().StringVar(&c.addRequiredFeature)

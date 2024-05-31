@@ -309,5 +309,9 @@ func supportedCompressionAlgorithms() []string {
 
 	sort.Strings(res)
 
-	return append([]string{inheritPolicyString, "none"}, res...)
+	return append([]string{"none"}, res...)
+}
+
+func withInherit(algos []string) []string {
+	return append([]string{inheritPolicyString}, algos...)
 }
