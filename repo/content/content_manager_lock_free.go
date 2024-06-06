@@ -31,6 +31,7 @@ func (sm *SharedManager) maybeCompressAndEncryptDataForPacking(data gather.Bytes
 
 	// If the content is prefixed (which represents Kopia's own metadata as opposed to user data),
 	// and we're on V2 format or greater, enable internal compression even when not requested.
+	// comp will be overridden by the configured metadata compression value in repository params.
 	if contentID.HasPrefix() && mp.IndexVersion >= index.Version2 {
 		mp := sm.format.GetCachedMutableParameters()
 		switch {
