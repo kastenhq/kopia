@@ -1,6 +1,7 @@
 package user
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
 	"io"
@@ -30,8 +31,17 @@ func (p *Profile) setPassword(password string) error {
 	}
 
 	salt := make([]byte, passwordHashSaltLength)
-	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
-		return errors.Wrap(err, "error generating salt")
+
+	for {
+		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+			return errors.Wrap(err, "error generating salt")
+		}
+
+		// Retry when the salt matches the salt portion in dummyHashThatNever...
+		// The probability of this happening is 2^(-8*passwordHashSaltLength)
+		if !bytes.Equal(salt, dummyHashThatNeverMatchesAnyPassword[:passwordHashSaltLength]) {
+			break
+		}
 	}
 
 	p.PasswordHash, err = computePasswordHash(password, salt, passwordHashAlgorithm)
