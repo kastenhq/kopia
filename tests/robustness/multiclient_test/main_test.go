@@ -4,8 +4,11 @@
 package multiclienttest
 
 import (
+	"bufio"
 	"context"
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -56,6 +59,10 @@ func TestMain(m *testing.M) {
 
 	engineDataDirSize, err := getDirSize(checkerRestoreDir + "/../")
 	log.Printf("engineData dir %s, engineData dir size %d\n", checkerRestoreDir+"/../", engineDataDirSize)
+
+	// config dir
+	cfgDir := checkerRestoreDir + "/../kopia-config"
+	err = catFilesInDir(cfgDir)
 
 	kopiaCacheDir := "/root/.cache/kopia"
 	kopiaCacheDirSize, err := getDirSize(kopiaCacheDir)
@@ -114,4 +121,37 @@ func findDirs(rootPath string) ([]string, error) {
 		return nil
 	})
 	return dirs, err
+}
+
+func catFilesInDir(dirPath string) error {
+	err := filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		fmt.Printf("Contents of %s:\n", path)
+
+		reader := bufio.NewReader(file)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil && err != io.EOF {
+				return err
+			}
+			fmt.Print(line)
+			if err == io.EOF {
+				break
+			}
+		}
+		fmt.Println()
+		return nil
+	})
+
+	return err
 }
