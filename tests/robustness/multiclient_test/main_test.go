@@ -61,6 +61,14 @@ func TestMain(m *testing.M) {
 	kopiaCacheDirSize, err := getDirSize(kopiaCacheDir)
 	log.Printf("kopia cache dir %s, kopia cache dir size %d\n", kopiaCacheDir, kopiaCacheDirSize)
 
+	dirsUnderKopiaCacheDir, err := findDirs(kopiaCacheDir)
+	log.Printf("dirs under cache dir")
+	for _, d := range dirsUnderKopiaCacheDir {
+		log.Print(d)
+		dSize, _ := getDirSize(d)
+		log.Printf("size %d\n", dSize)
+	}
+
 	logsDir := "/root/.cache/kopia/cli-logs"
 	logsDirSize, err := getDirSize(logsDir)
 	log.Printf("logs dir %s, logs dir size %d\n", logsDir, logsDirSize)
@@ -91,4 +99,19 @@ func getDirSize(path string) (int64, error) {
 		return nil
 	})
 	return size, err
+}
+
+func findDirs(rootPath string) ([]string, error) {
+	var dirs []string
+
+	err := filepath.WalkDir(rootPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
+	return dirs, err
 }
