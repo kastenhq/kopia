@@ -23,20 +23,24 @@ import (
 )
 
 const (
-	contentCacheSizeMBFlag  = "--content-cache-size-mb"
-	metadataCacheSizeMBFlag = "--metadata-cache-size-mb"
-	noCheckForUpdatesFlag   = "--no-check-for-updates"
-	noProgressFlag          = "--no-progress"
-	parallelFlag            = "--parallel"
-	retryCount              = 900
-	retryInterval           = 1 * time.Second
-	waitingForServerString  = "waiting for server to start"
-	serverControlPassword   = "abcdef"
+	contentCacheSizeMBFlag       = "--content-cache-size-mb"
+	contentCacheSizeLimitMBFlag  = "--content-cache-size-mb"
+	metadataCacheSizeMBFlag      = "--metadata-cache-size-mb"
+	metadataCacheSizeLimitMBFlag = "--metadata-cache-size-limit-mb"
+	noCheckForUpdatesFlag        = "--no-check-for-updates"
+	noProgressFlag               = "--no-progress"
+	parallelFlag                 = "--parallel"
+	retryCount                   = 900
+	retryInterval                = 1 * time.Second
+	waitingForServerString       = "waiting for server to start"
+	serverControlPassword        = "abcdef"
 
 	// Flag value settings.
-	contentCacheSizeSettingMB  = 500
-	metadataCacheSizeSettingMB = 500
-	parallelSetting            = 8
+	contentCacheSizeSettingMB          = 500
+	contentCacheSizeLimitSettingMB     = 500
+	metadataCacheSizeSettingMB         = 500
+	metadataCacheMaxSizeLimitSettingMB = 500
+	parallelSetting                    = 8
 
 	aclEnabledMatchStr = "ACLs already enabled"
 )
@@ -70,7 +74,9 @@ func (ks *KopiaSnapshotter) repoConnectCreate(op string, args ...string) error {
 
 	args = append(args,
 		contentCacheSizeMBFlag, strconv.Itoa(contentCacheSizeSettingMB),
+		contentCacheSizeLimitMBFlag, strconv.Itoa(contentCacheSizeLimitSettingMB),
 		metadataCacheSizeMBFlag, strconv.Itoa(metadataCacheSizeSettingMB),
+		metadataCacheSizeLimitMBFlag, strconv.Itoa(metadataCacheMaxSizeLimitSettingMB),
 		noCheckForUpdatesFlag,
 	)
 

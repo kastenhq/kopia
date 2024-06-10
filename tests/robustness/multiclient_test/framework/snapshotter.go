@@ -16,6 +16,15 @@ import (
 	"github.com/kopia/kopia/tests/robustness/snapmeta"
 )
 
+const (
+	contentCacheSizeLimitMBFlag  = "--content-cache-size-limit-mb=500"
+	metadataCacheSizeLimitMBFlag = "--metadata-cache-size-limit-mb=500"
+
+	// Flag value settings.
+	// contentCacheSizeLimitSettingMB     = 500
+	// metadataCacheMaxSizeLimitSettingMB = 500
+)
+
 // MultiClientSnapshotter manages a set of client Snapshotter instances and
 // implements the Snapshotter interface itself. Snapshotter methods must be
 // provided with a client-wrapped context so the MultiClientSnapshotter can
@@ -116,6 +125,14 @@ func (mcs *MultiClientSnapshotter) DeleteSnapshot(ctx context.Context, snapID st
 // are not authorized to do this.
 func (mcs *MultiClientSnapshotter) RunGC(ctx context.Context, opts map[string]string) error {
 	return mcs.server.RunGC(ctx, opts)
+}
+
+// SetCacheSizeLimits runs limits the cache size
+func (mcs *MultiClientSnapshotter) SetCacheSizeLimits() error {
+
+	_, _, err := mcs.server.Run("cache", "set", contentCacheSizeLimitMBFlag, metadataCacheSizeLimitMBFlag)
+
+	return err
 }
 
 // ListSnapshots delegates to a specific client's Snapshotter.
