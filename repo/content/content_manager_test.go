@@ -2405,13 +2405,6 @@ func (s *contentManagerSuite) newTestContentManager(t *testing.T, st blob.Storag
 	return s.newTestContentManagerWithTweaks(t, st, nil)
 }
 
-func (s *contentManagerSuite) newTestContentManagerWithMetadataCompression(t *testing.T, st blob.Storage, comp compression.Name) *WriteManager {
-	t.Helper()
-
-	cm := s.newTestContentManagerWithTweaks(t, st, nil)
-	return cm
-}
-
 func (s *contentManagerSuite) newTestContentManagerWithCustomTime(t *testing.T, st blob.Storage, timeFunc func() time.Time) *WriteManager {
 	t.Helper()
 
