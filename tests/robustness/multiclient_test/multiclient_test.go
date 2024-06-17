@@ -127,11 +127,11 @@ func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
 	th.RunN(ctx, t, numClients, f)
 
 	runGCFcn := func(ctx context.Context, t *testing.T) {
+		t.Log("run maintenance")
 		_, err := eng.ExecAction(ctx, engine.GCActionKey, nil)
 		require.NoError(t, err)
 	}
-	var gcCtx []context.Context
-	th.Run(gcCtx, t, true, runGCFcn)
+	th.RunN(ctx, t, 1, runGCFcn)
 }
 
 func TestRandomizedSmall(t *testing.T) {
