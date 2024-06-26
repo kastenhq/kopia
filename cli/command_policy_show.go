@@ -392,12 +392,12 @@ func appendCompressionPolicyRows(rows []policyTableRow, p *policy.Policy, def *p
 
 func appendMetadataCompressionPolicyRows(rows []policyTableRow, p *policy.Policy, def *policy.Definition) []policyTableRow {
 	if p.MetadataCompressionPolicy.CompressorName == "" || p.MetadataCompressionPolicy.CompressorName == "none" {
-		rows = append(rows, policyTableRow{"Compression disabled.", "", ""})
+		rows = append(rows, policyTableRow{"Metadata compression disabled.", "", ""})
 		return rows
 	}
 
 	rows = append(rows,
-		policyTableRow{"Compression:", "", ""},
+		policyTableRow{"Metadata compression:", "", ""},
 		policyTableRow{"  Compressor:", string(p.MetadataCompressionPolicy.CompressorName), definitionPointToString(p.Target(), def.MetadataCompressionPolicy.CompressorName)})
 	return rows
 }
