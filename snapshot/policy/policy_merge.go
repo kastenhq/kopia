@@ -25,6 +25,8 @@ func MergePolicies(policies []*Policy, si snapshot.SourceInfo) (*Policy, *Defini
 		merged.UploadPolicy.Merge(p.UploadPolicy, &def.UploadPolicy, p.Target())
 		merged.CompressionPolicy.Merge(p.CompressionPolicy, &def.CompressionPolicy, p.Target())
 		merged.SplitterPolicy.Merge(p.SplitterPolicy, &def.SplitterPolicy, p.Target())
+		merged.CompressionPolicy.Merge(p.CompressionPolicy, &def.CompressionPolicy, p.Target())
+		merged.MetadataCompressionPolicy.Merge(p.MetadataCompressionPolicy, &def.MetadataCompressionPolicy, p.Target())
 		merged.Actions.Merge(p.Actions, &def.Actions, p.Target())
 		merged.OSSnapshotPolicy.Merge(p.OSSnapshotPolicy, &def.OSSnapshotPolicy, p.Target())
 		merged.LoggingPolicy.Merge(p.LoggingPolicy, &def.LoggingPolicy, p.Target())
