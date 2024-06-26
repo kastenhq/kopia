@@ -281,3 +281,21 @@ func (s *formatSpecificTestSuite) TestRepositorySetParametersRequiredFeatures_Se
 	// the server will soon notice the new required feature and shut down.
 	require.ErrorContains(t, wait(), "no-such-feature")
 }
+
+func (s *formatSpecificTestSuite) TestRepositorySetMetadataCompressionParameter(t *testing.T) {
+	env := s.setupInMemoryRepo(t)
+
+	// default metadata compression
+	out := env.RunAndExpectSuccess(t, "repository", "status")
+	require.Contains(t, out, "Metadata compression: zstd-fastest")
+
+	// disable metadata compression
+	env.RunAndExpectSuccess(t, "repository", "set-parameters", "--metadata-compression", "none")
+	out = env.RunAndExpectSuccess(t, "repository", "status")
+	require.Contains(t, out, "Metadata compression: disabled")
+
+	// set metadata compression
+	env.RunAndExpectSuccess(t, "repository", "set-parameters", "--metadata-compression", "zstd-best-compression")
+	out = env.RunAndExpectSuccess(t, "repository", "status")
+	require.Contains(t, out, "Metadata compression: zstd-best-compression")
+}

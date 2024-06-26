@@ -193,6 +193,17 @@ func (c *commandRepositoryStatus) run(ctx context.Context, rep repo.Repository) 
 	c.out.printStdout("Max pack length:     %v\n", units.BytesString(int64(mp.MaxPackSize)))
 	c.out.printStdout("Index Format:        v%v\n", mp.IndexVersion)
 
+	c.out.printStdout("\n")
+	switch {
+	case mp.MetadataCompression == "none":
+		c.out.printStdout("Metadata compression: disabled\n")
+	case mp.MetadataCompression != "":
+		c.out.printStdout("Metadata compression: %v\n", mp.MetadataCompression)
+	default:
+		// For older repo where MetadataCompression is not set, use ZstdFastest algorithm by default
+		c.out.printStdout("Metadata compression: %s\n", format.DefaultMetadataCompressionAlgorithmName)
+	}
+
 	emgr, epochMgrEnabled, emerr := dr.ContentReader().EpochManager(ctx)
 	if emerr != nil {
 		return errors.Wrap(emerr, "epoch manager")
