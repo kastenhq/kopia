@@ -82,6 +82,14 @@ func (p *MetadataCompressionPolicy) Merge(src MetadataCompressionPolicy, def *Me
 	mergeCompressionName(&p.CompressorName, src.CompressorName, &def.CompressorName, si)
 }
 
+// MetadataCompressor returns compression name to be used for according to policy.
+func (p *MetadataCompressionPolicy) MetadataCompressor() compression.Name {
+	if p.CompressorName == "none" {
+		return ""
+	}
+	return p.CompressorName
+}
+
 func isInSortedSlice(s string, slice []string) bool {
 	x := sort.SearchStrings(slice, s)
 	return x < len(slice) && slice[x] == s
