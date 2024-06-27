@@ -1145,6 +1145,7 @@ func uploadDirInternal(
 
 	childCheckpointRegistry := &checkpointRegistry{}
 
+	metadataComp := policyTree.EffectivePolicy().MetadataCompressionPolicy.MetadataCompressor()
 	thisCheckpointRegistry.addCheckpointCallback(directory.Name(), func() (*snapshot.DirEntry, error) {
 		// when snapshotting the parent, snapshot all our children and tell them to populate
 		// childCheckpointBuilder
@@ -1157,7 +1158,7 @@ func uploadDirInternal(
 
 		checkpointManifest := thisCheckpointBuilder.Build(fs.UTCTimestampFromTime(directory.ModTime()), IncompleteReasonCheckpoint)
 
-		oid, err := writeDirManifest(ctx, u.repo, dirRelativePath, checkpointManifest)
+		oid, err := writeDirManifest(ctx, u.repo, dirRelativePath, checkpointManifest, metadataComp)
 		if err != nil {
 			return nil, errors.Wrap(err, "error writing dir manifest")
 		}
@@ -1172,7 +1173,7 @@ func uploadDirInternal(
 
 	dirManifest := thisDirBuilder.Build(fs.UTCTimestampFromTime(directory.ModTime()), u.incompleteReason())
 
-	oid, err := writeDirManifest(ctx, u.repo, dirRelativePath, dirManifest)
+	oid, err := writeDirManifest(ctx, u.repo, dirRelativePath, dirManifest, metadataComp)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error writing dir manifest: %v", directory.Name())
 	}
