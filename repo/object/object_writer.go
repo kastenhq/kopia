@@ -27,10 +27,10 @@ type Writer interface {
 	// Checkpoint returns ID of an object consisting of all contents written to storage so far.
 	// This may not include some data buffered in the writer.
 	// In case nothing has been written yet, returns empty object ID.
-	Checkpoint() (ID, error)
+	Checkpoint(comp compression.Name) (ID, error)
 
 	// Result returns object ID representing all bytes written to the writer.
-	Result() (ID, error)
+	Result(comp compression.Name) (ID, error)
 }
 
 type contentIDTracker struct {
@@ -251,7 +251,7 @@ func maybeCompressedContentBytes(comp compression.Compressor, input gather.Bytes
 	return input, false, nil
 }
 
-func (w *objectWriter) Result() (ID, error) {
+func (w *objectWriter) Result(comp compression.Name) (ID, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -263,19 +263,19 @@ func (w *objectWriter) Result() (ID, error) {
 		}
 	}
 
-	return w.checkpointLocked()
+	return w.checkpointLocked(comp)
 }
 
 // Checkpoint returns object ID which represents portion of the object that has already been written.
 // The result may be an empty object ID if nothing has been flushed yet.
-func (w *objectWriter) Checkpoint() (ID, error) {
+func (w *objectWriter) Checkpoint(comp compression.Name) (ID, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	return w.checkpointLocked()
+	return w.checkpointLocked(comp)
 }
 
-func (w *objectWriter) checkpointLocked() (ID, error) {
+func (w *objectWriter) checkpointLocked(comp compression.Name) (ID, error) {
 	// wait for any in-flight asynchronous writes to finish
 	w.asyncWritesWG.Wait()
 
@@ -294,7 +294,7 @@ func (w *objectWriter) checkpointLocked() (ID, error) {
 	iw := &objectWriter{
 		ctx:         w.ctx,
 		om:          w.om,
-		compressor:  nil,
+		compressor:  compression.ByName[comp],
 		description: "LIST(" + w.description + ")",
 		splitter:    w.om.newDefaultSplitter(),
 		prefix:      w.prefix,
@@ -311,7 +311,7 @@ func (w *objectWriter) checkpointLocked() (ID, error) {
 		return EmptyID, err
 	}
 
-	oid, err := iw.Result()
+	oid, err := iw.Result(comp)
 	if err != nil {
 		return EmptyID, err
 	}

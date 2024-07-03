@@ -25,7 +25,7 @@ func writeDirManifest(ctx context.Context, rep repo.RepositoryWriter, dirRelativ
 		return object.EmptyID, errors.Wrap(err, "unable to encode directory JSON")
 	}
 
-	oid, err := writer.Result()
+	oid, err := writer.Result(comp)
 	if err != nil {
 		return object.EmptyID, errors.Wrap(err, "unable to write directory")
 	}
