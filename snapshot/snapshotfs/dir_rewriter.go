@@ -18,6 +18,7 @@ import (
 	"github.com/kopia/kopia/repo/logging"
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot"
+	"github.com/kopia/kopia/snapshot/policy"
 )
 
 var dirRewriterLog = logging.Module("dirRewriter")
@@ -283,7 +284,13 @@ func RewriteAsStub(rep repo.RepositoryWriter) RewriteFailedEntryCallback {
 			return nil, errors.Wrap(err, "error writing stub")
 		}
 
-		oid, err := w.Result()
+		// TODO: Check if source info can be made available here
+		pol, _, _, err := policy.GetEffectivePolicy(ctx, rep, policy.GlobalPolicySourceInfo)
+		if err != nil {
+			return nil, errors.Wrap(err, "error getting policy")
+
+		}
+		oid, err := w.Result(pol.MetadataCompressionPolicy.MetadataCompressor())
 		if err != nil {
 			return nil, errors.Wrap(err, "error writing stub")
 		}
