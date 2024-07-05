@@ -216,7 +216,7 @@ func remoteRepositoryTest(ctx context.Context, t *testing.T, rep repo.Repository
 		_, err := ow.Write([]byte{2, 3, 4})
 		require.NoError(t, err)
 
-		_, err = ow.Result()
+		_, err = ow.Result("zstd-fastest")
 		if err == nil {
 			return errors.Errorf("unexpected success writing object with 'm' prefix")
 		}
@@ -263,7 +263,7 @@ func mustWriteObject(ctx context.Context, t *testing.T, w repo.RepositoryWriter,
 	_, err := ow.Write(data)
 	require.NoError(t, err)
 
-	result, err := ow.Result()
+	result, err := ow.Result("zstd-fastest")
 	require.NoError(t, err)
 
 	return result

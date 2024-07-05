@@ -37,7 +37,7 @@ func (s *formatSpecificTestSuite) TestMaintenanceSafety(t *testing.T) {
 		ow := w.NewObjectWriter(ctx, object.WriterOptions{Prefix: "y"})
 		fmt.Fprintf(ow, "hello world")
 		var err error
-		objectID, err = ow.Result()
+		objectID, err = ow.Result("zstd-fastest")
 		return err
 	}))
 
@@ -45,7 +45,7 @@ func (s *formatSpecificTestSuite) TestMaintenanceSafety(t *testing.T) {
 	require.NoError(t, repo.WriteSession(ctx, env.Repository, repo.WriteSessionOptions{}, func(ctx context.Context, w repo.RepositoryWriter) error {
 		ow := w.NewObjectWriter(ctx, object.WriterOptions{Prefix: "y"})
 		fmt.Fprintf(ow, "hello universe")
-		_, err := ow.Result()
+		_, err := ow.Result("zstd-fastest")
 		return err
 	}))
 

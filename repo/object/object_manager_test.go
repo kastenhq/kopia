@@ -141,7 +141,7 @@ func TestWriters(t *testing.T) {
 			t.Errorf("write error: %v", err)
 		}
 
-		result, err := writer.Result()
+		result, err := writer.Result("zstd-fastest")
 		if err != nil {
 			t.Errorf("error getting writer results for %v, expected: %v", c.data, c.objectID.String())
 			continue
@@ -178,7 +178,7 @@ func TestCompression_ContentCompressionEnabled(t *testing.T) {
 		Compressor: "gzip",
 	})
 	w.Write(bytes.Repeat([]byte{1, 2, 3, 4}, 1000))
-	oid, err := w.Result()
+	oid, err := w.Result("zstd-fastest")
 	require.NoError(t, err)
 
 	cid, isCompressed, ok := oid.ContentID()
@@ -219,7 +219,7 @@ func TestCompression_CustomSplitters(t *testing.T) {
 		w := om.NewWriter(ctx, tc.wo)
 
 		w.Write(bytes.Repeat([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, 128<<10))
-		oid, err := w.Result()
+		oid, err := w.Result("zstd-fastest")
 		require.NoError(t, err)
 
 		ndx, ok := oid.IndexObjectID()
@@ -247,7 +247,7 @@ func TestCompression_ContentCompressionDisabled(t *testing.T) {
 		Compressor: "gzip",
 	})
 	w.Write(bytes.Repeat([]byte{1, 2, 3, 4}, 1000))
-	oid, err := w.Result()
+	oid, err := w.Result("zstd-fastest")
 	require.NoError(t, err)
 
 	_, isCompressed, ok := oid.ContentID()
@@ -263,7 +263,7 @@ func TestWriterCompleteChunkInTwoWrites(t *testing.T) {
 	writer := om.NewWriter(ctx, WriterOptions{})
 	writer.Write(b[0:50])
 	writer.Write(b[0:50])
-	result, err := writer.Result()
+	result, err := writer.Result("zstd-fastest")
 
 	if !objectIDsEqual(result, mustParseID(t, "cd00e292c5970d3c5e2f0ffa5171e555bc46bfc4faddfb4a418b6840b86e79a3")) {
 		t.Errorf("unexpected result: %v err: %v", result, err)
@@ -280,25 +280,25 @@ func TestCheckpointing(t *testing.T) {
 	allZeroes := make([]byte, 1<<20)
 
 	// empty file, nothing flushed
-	checkpoint1, err := writer.Checkpoint()
+	checkpoint1, err := writer.Checkpoint("zstd-fastest")
 	verifyNoError(t, err)
 
 	// write some bytes, but not enough to flush.
 	writer.Write(allZeroes[0:50])
-	checkpoint2, err := writer.Checkpoint()
+	checkpoint2, err := writer.Checkpoint("zstd-fastest")
 	verifyNoError(t, err)
 
 	// write enough to flush first content.
 	writer.Write(allZeroes)
-	checkpoint3, err := writer.Checkpoint()
+	checkpoint3, err := writer.Checkpoint("zstd-fastest")
 	verifyNoError(t, err)
 
 	// write enough to flush second content.
 	writer.Write(allZeroes)
-	checkpoint4, err := writer.Checkpoint()
+	checkpoint4, err := writer.Checkpoint("zstd-fastest")
 	verifyNoError(t, err)
 
-	result, err := writer.Result()
+	result, err := writer.Result("zstd-fastest")
 	verifyNoError(t, err)
 
 	if !objectIDsEqual(checkpoint1, EmptyID) {
@@ -309,7 +309,7 @@ func TestCheckpointing(t *testing.T) {
 		t.Errorf("unexpected checkpoint2: %v err: %v", checkpoint2, err)
 	}
 
-	result2, err := writer.Checkpoint()
+	result2, err := writer.Checkpoint("zstd-fastest")
 	verifyNoError(t, err)
 
 	if result2 != result {
@@ -354,13 +354,13 @@ func TestObjectWriterRaceBetweenCheckpointAndResult(t *testing.T) {
 		var eg errgroup.Group
 
 		eg.Go(func() error {
-			_, rerr := w.Result()
+			_, rerr := w.Result("zstd-fastest")
 
 			return rerr
 		})
 
 		eg.Go(func() error {
-			cpID, cperr := w.Checkpoint()
+			cpID, cperr := w.Checkpoint("zstd-fastest")
 			if cperr == nil && cpID != EmptyID {
 				ids, verr := VerifyObject(ctx, om.contentMgr, cpID)
 				if verr != nil {
@@ -467,7 +467,7 @@ func TestIndirection(t *testing.T) {
 			t.Errorf("write error: %v", err)
 		}
 
-		result, err := writer.Result()
+		result, err := writer.Result("zstd-fastest")
 		if err != nil {
 			t.Errorf("error getting writer results: %v", err)
 		}
@@ -512,7 +512,7 @@ func TestHMAC(t *testing.T) {
 
 	w := om.NewWriter(ctx, WriterOptions{})
 	w.Write(c)
-	result, err := w.Result()
+	result, err := w.Result("zstd-fastest")
 
 	if result.String() != "cad29ff89951a3c085c86cb7ed22b82b51f7bdfda24f932c7f9601f51d5975ba" {
 		t.Errorf("unexpected result: %v err: %v", result.String(), err)
@@ -578,7 +578,7 @@ func TestConcatenate(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		concatenatedOID, err := om.Concatenate(ctx, tc.inputs)
+		concatenatedOID, err := om.Concatenate(ctx, tc.inputs, "zstd-fastest")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -617,7 +617,7 @@ func TestConcatenate(t *testing.T) {
 		}
 
 		// make sure results of concatenation can be further concatenated.
-		concatenated3OID, err := om.Concatenate(ctx, []ID{concatenatedOID, concatenatedOID, concatenatedOID})
+		concatenated3OID, err := om.Concatenate(ctx, []ID{concatenatedOID, concatenatedOID, concatenatedOID}, "zstd-fastest")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -645,7 +645,7 @@ func mustWriteObject(t *testing.T, om *Manager, data []byte, compressor compress
 	_, err := w.Write(data)
 	require.NoError(t, err)
 
-	oid, err := w.Result()
+	oid, err := w.Result("zstd-fastest")
 	require.NoError(t, err)
 
 	return oid
@@ -728,7 +728,7 @@ func TestEndToEndReadAndSeek(t *testing.T) {
 					t.Errorf("write error: %v", err)
 				}
 
-				objectID, err := writer.Result()
+				objectID, err := writer.Result("zstd-fastest")
 				t.Logf("oid: %v", objectID)
 
 				writer.Close()
@@ -784,7 +784,7 @@ func TestEndToEndReadAndSeekWithCompression(t *testing.T) {
 
 					totalBytesWritten += size
 
-					objectID, err := writer.Result()
+					objectID, err := writer.Result("zstd-fastest")
 
 					writer.Close()
 
@@ -876,7 +876,7 @@ func TestSeek(t *testing.T) {
 			t.Errorf("write error: %v", err)
 		}
 
-		objectID, err := writer.Result()
+		objectID, err := writer.Result("zstd-fastest")
 		if err != nil {
 			t.Fatalf("unable to write: %v", err)
 		}
@@ -938,7 +938,7 @@ func TestWriterFlushFailure_OnFlush(t *testing.T) {
 
 	fcm.writeContentError = errSomeError
 
-	_, err = w.Result()
+	_, err = w.Result("zstd-fastest")
 	require.ErrorIs(t, err, errSomeError)
 }
 
@@ -951,7 +951,7 @@ func TestWriterFlushFailure_OnCheckpoint(t *testing.T) {
 	w.Write(bytes.Repeat([]byte{1, 2, 3, 4}, 1e6))
 
 	fcm.writeContentError = errSomeError
-	_, err := w.Checkpoint()
+	_, err := w.Checkpoint("zstd-fastest")
 
 	require.ErrorIs(t, err, errSomeError)
 }
@@ -970,7 +970,7 @@ func TestWriterFlushFailure_OnAsyncWrite(t *testing.T) {
 	require.NotErrorIs(t, err, errSomeError)
 	require.Equal(t, 4000000, n)
 
-	_, err = w.Result()
+	_, err = w.Result("zstd-fastest")
 	require.ErrorIs(t, err, errSomeError)
 }
 

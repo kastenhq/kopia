@@ -406,6 +406,6 @@ func writeObject(ctx context.Context, t *testing.T, rep repo.RepositoryWriter, d
 	_, err := w.Write(data)
 	require.NoError(t, err, testCaseID)
 
-	_, err = w.Result()
+	_, err = w.Result("zstd-fastest")
 	require.NoError(t, err, testCaseID)
 }

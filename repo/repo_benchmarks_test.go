@@ -17,7 +17,7 @@ func BenchmarkWriterDedup1M(b *testing.B) {
 
 	writer := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{})
 	writer.Write(dataBuf)
-	_, err := writer.Result()
+	_, err := writer.Result("zstd-fastest")
 	require.NoError(b, err)
 	writer.Close()
 
@@ -27,7 +27,7 @@ func BenchmarkWriterDedup1M(b *testing.B) {
 		// write exactly the same data
 		writer := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{})
 		writer.Write(dataBuf)
-		writer.Result()
+		writer.Result("zstd-fastest")
 		writer.Close()
 	}
 }
@@ -54,7 +54,7 @@ func BenchmarkWriterNoDedup1M(b *testing.B) {
 		}
 
 		writer.Write(dataBuf[offset : offset+chunkSize])
-		writer.Result()
+		writer.Result("zstd-fastest")
 		writer.Close()
 
 		offset++
