@@ -388,7 +388,7 @@ func create4ByteObjects(t *testing.T, r repo.Repository, base, count int) []obje
 		_, err := w.Write(b[:])
 		require.NoError(t, err)
 
-		oid, err := w.Result()
+		oid, err := w.Result("zstd-fastest")
 		require.NoError(t, err)
 
 		require.NoError(t, w.Close())

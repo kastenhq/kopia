@@ -81,7 +81,7 @@ func (s *formatSpecificTestSuite) TestContentRewrite(t *testing.T) {
 				require.NoError(t, repo.WriteSession(ctx, env.Repository, repo.WriteSessionOptions{}, func(ctx context.Context, w repo.RepositoryWriter) error {
 					ow := w.NewObjectWriter(ctx, object.WriterOptions{})
 					fmt.Fprintf(ow, "%v", uuid.NewString())
-					_, err := ow.Result()
+					_, err := ow.Result("zstd-fastest")
 					return err
 				}))
 			}
@@ -90,7 +90,7 @@ func (s *formatSpecificTestSuite) TestContentRewrite(t *testing.T) {
 				require.NoError(t, repo.WriteSession(ctx, env.Repository, repo.WriteSessionOptions{}, func(ctx context.Context, w repo.RepositoryWriter) error {
 					ow := w.NewObjectWriter(ctx, object.WriterOptions{Prefix: "k"})
 					fmt.Fprintf(ow, "%v", uuid.NewString())
-					_, err := ow.Result()
+					_, err := ow.Result("zstd-fastest")
 					return err
 				}))
 			}

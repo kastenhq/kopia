@@ -45,7 +45,7 @@ func (s *formatSpecificTestSuite) TestExtendBlobRetentionTime(t *testing.T) {
 	})
 	w := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{})
 	io.WriteString(w, "hello world!")
-	w.Result()
+	w.Result("zstd-fastest")
 	w.Close()
 
 	env.RepositoryWriter.Flush(ctx)
@@ -100,7 +100,7 @@ func (s *formatSpecificTestSuite) TestExtendBlobRetentionTimeDisabled(t *testing
 	})
 	w := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{})
 	io.WriteString(w, "hello world!")
-	w.Result()
+	w.Result("zstd-fastest")
 	w.Close()
 
 	env.RepositoryWriter.Flush(ctx)
