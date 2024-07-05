@@ -331,7 +331,8 @@ func (c *commandSnapshotCreate) snapshotSingleSource(ctx context.Context, fsEntr
 	}
 
 	if c.flushPerSource {
-		if ferr := rep.Flush(ctx); ferr != nil {
+		mtComp := policyTree.EffectivePolicy().MetadataCompressionPolicy.MetadataCompressor()
+		if ferr := rep.Flush(ctx, mtComp); ferr != nil {
 			return errors.Wrap(ferr, "flush error")
 		}
 	}

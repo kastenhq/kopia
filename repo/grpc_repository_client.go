@@ -255,7 +255,7 @@ func (r *grpcInnerSession) initializeSession(ctx context.Context, purpose string
 	return nil, errNoSessionResponse()
 }
 
-func (r *grpcRepositoryClient) GetManifest(ctx context.Context, id manifest.ID, data interface{}) (*manifest.EntryMetadata, error) {
+func (r *grpcRepositoryClient) GetManifest(ctx context.Context, id manifest.ID, data interface{}, comp compression.Name) (*manifest.EntryMetadata, error) {
 	return maybeRetry(ctx, r, func(ctx context.Context, sess *grpcInnerSession) (*manifest.EntryMetadata, error) {
 		return sess.GetManifest(ctx, id, data)
 	})
@@ -305,8 +305,8 @@ func (r *grpcRepositoryClient) PutManifest(ctx context.Context, labels map[strin
 }
 
 // ReplaceManifests saves the given manifest payload with a set of labels and replaces any previous manifests with the same labels.
-func (r *grpcRepositoryClient) ReplaceManifests(ctx context.Context, labels map[string]string, payload interface{}) (manifest.ID, error) {
-	return replaceManifestsHelper(ctx, r, labels, payload)
+func (r *grpcRepositoryClient) ReplaceManifests(ctx context.Context, labels map[string]string, payload interface{}, comp compression.Name) (manifest.ID, error) {
+	return replaceManifestsHelper(ctx, r, labels, payload, comp)
 }
 
 func (r *grpcInnerSession) PutManifest(ctx context.Context, labels map[string]string, payload interface{}) (manifest.ID, error) {
@@ -339,7 +339,7 @@ func (r *grpcRepositoryClient) SetFindManifestPageSizeForTesting(v int32) {
 	r.findManifestsPageSize = v
 }
 
-func (r *grpcRepositoryClient) FindManifests(ctx context.Context, labels map[string]string) ([]*manifest.EntryMetadata, error) {
+func (r *grpcRepositoryClient) FindManifests(ctx context.Context, labels map[string]string, comp compression.Name) ([]*manifest.EntryMetadata, error) {
 	return maybeRetry(ctx, r, func(ctx context.Context, sess *grpcInnerSession) ([]*manifest.EntryMetadata, error) {
 		return sess.FindManifests(ctx, labels, r.findManifestsPageSize)
 	})
@@ -372,7 +372,7 @@ func (r *grpcInnerSession) FindManifests(ctx context.Context, labels map[string]
 	return nil, errNoSessionResponse()
 }
 
-func (r *grpcRepositoryClient) DeleteManifest(ctx context.Context, id manifest.ID) error {
+func (r *grpcRepositoryClient) DeleteManifest(ctx context.Context, id manifest.ID, comp compression.Name) error {
 	_, err := inSessionWithoutRetry(ctx, r, func(ctx context.Context, sess *grpcInnerSession) (bool, error) {
 		return false, sess.DeleteManifest(ctx, id)
 	})
@@ -477,7 +477,7 @@ func (r *grpcRepositoryClient) Refresh(ctx context.Context) error {
 	return nil
 }
 
-func (r *grpcRepositoryClient) Flush(ctx context.Context) error {
+func (r *grpcRepositoryClient) Flush(ctx context.Context, comp compression.Name) error {
 	if err := r.asyncWritesWG.Wait(); err != nil {
 		return errors.Wrap(err, "error waiting for async writes")
 	}

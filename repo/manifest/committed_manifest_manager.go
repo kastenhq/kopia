@@ -14,6 +14,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/gather"
+	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/content/index"
 )
@@ -40,11 +41,11 @@ type committedManifestManager struct {
 	autoCompactionThreshold int
 }
 
-func (m *committedManifestManager) getCommittedEntryOrNil(ctx context.Context, id ID) (*manifestEntry, error) {
+func (m *committedManifestManager) getCommittedEntryOrNil(ctx context.Context, id ID, comp compression.Name) (*manifestEntry, error) {
 	m.lock()
 	defer m.unlock()
 
-	if err := m.ensureInitializedLocked(ctx); err != nil {
+	if err := m.ensureInitializedLocked(ctx, comp); err != nil {
 		return nil, err
 	}
 
@@ -68,18 +69,18 @@ func (m *committedManifestManager) dump(ctx context.Context, prefix string) {
 	log(ctx).Debugf(prefix+"["+m.debugID+"] committed keys %v: %v rev=%v", len(keys), keys, m.lastRevision)
 }
 
-func (m *committedManifestManager) findCommittedEntries(ctx context.Context, labels map[string]string) (map[ID]*manifestEntry, error) {
+func (m *committedManifestManager) findCommittedEntries(ctx context.Context, labels map[string]string, comp compression.Name) (map[ID]*manifestEntry, error) {
 	m.lock()
 	defer m.unlock()
 
-	if err := m.ensureInitializedLocked(ctx); err != nil {
+	if err := m.ensureInitializedLocked(ctx, comp); err != nil {
 		return nil, err
 	}
 
 	return findEntriesMatchingLabels(m.committedEntries, labels), nil
 }
 
-func (m *committedManifestManager) commitEntries(ctx context.Context, entries map[ID]*manifestEntry) (map[content.ID]bool, error) {
+func (m *committedManifestManager) commitEntries(ctx context.Context, entries map[ID]*manifestEntry, comp compression.Name) (map[content.ID]bool, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
@@ -87,7 +88,7 @@ func (m *committedManifestManager) commitEntries(ctx context.Context, entries ma
 	m.lock()
 	defer m.unlock()
 
-	return m.writeEntriesLocked(ctx, entries)
+	return m.writeEntriesLocked(ctx, entries, comp)
 }
 
 // writeEntriesLocked writes entries in the provided map as manifest contents
@@ -98,7 +99,7 @@ func (m *committedManifestManager) commitEntries(ctx context.Context, entries ma
 // the lock via commitEntries()) and to compact existing committed entries during compaction
 // where the lock is already being held.
 // +checklocks:m.cmmu
-func (m *committedManifestManager) writeEntriesLocked(ctx context.Context, entries map[ID]*manifestEntry) (map[content.ID]bool, error) {
+func (m *committedManifestManager) writeEntriesLocked(ctx context.Context, entries map[ID]*manifestEntry, comp compression.Name) (map[content.ID]bool, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
@@ -117,7 +118,7 @@ func (m *committedManifestManager) writeEntriesLocked(ctx context.Context, entri
 	mustSucceed(gz.Flush())
 	mustSucceed(gz.Close())
 
-	contentID, err := m.b.WriteContent(ctx, buf.Bytes(), ContentPrefix, content.NoCompression)
+	contentID, err := m.b.WriteContent(ctx, buf.Bytes(), ContentPrefix, compression.ByName[comp].HeaderID())
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to write content")
 	}
@@ -133,7 +134,7 @@ func (m *committedManifestManager) writeEntriesLocked(ctx context.Context, entri
 }
 
 // +checklocks:m.cmmu
-func (m *committedManifestManager) loadCommittedContentsLocked(ctx context.Context) error {
+func (m *committedManifestManager) loadCommittedContentsLocked(ctx context.Context, comp compression.Name) error {
 	m.verifyLocked()
 
 	var (
@@ -182,7 +183,7 @@ func (m *committedManifestManager) loadCommittedContentsLocked(ctx context.Conte
 
 	m.loadManifestContentsLocked(manifests)
 
-	if err := m.maybeCompactLocked(ctx); err != nil {
+	if err := m.maybeCompactLocked(ctx, comp); err != nil {
 		return errors.Wrap(err, "error auto-compacting contents")
 	}
 
@@ -212,15 +213,15 @@ func (m *committedManifestManager) loadManifestContentsLocked(manifests map[cont
 	}
 }
 
-func (m *committedManifestManager) compact(ctx context.Context) error {
+func (m *committedManifestManager) compact(ctx context.Context, comp compression.Name) error {
 	m.lock()
 	defer m.unlock()
 
-	return m.compactLocked(ctx)
+	return m.compactLocked(ctx, comp)
 }
 
 // +checklocks:m.cmmu
-func (m *committedManifestManager) maybeCompactLocked(ctx context.Context) error {
+func (m *committedManifestManager) maybeCompactLocked(ctx context.Context, comp compression.Name) error {
 	m.verifyLocked()
 
 	// Don't attempt to compact manifests if the repo was opened in read only mode
@@ -231,7 +232,7 @@ func (m *committedManifestManager) maybeCompactLocked(ctx context.Context) error
 
 	log(ctx).Debugf("performing automatic compaction of %v contents", len(m.committedContentIDs))
 
-	if err := m.compactLocked(ctx); err != nil {
+	if err := m.compactLocked(ctx, comp); err != nil {
 		return errors.Wrap(err, "unable to compact manifest contents")
 	}
 
@@ -243,7 +244,7 @@ func (m *committedManifestManager) maybeCompactLocked(ctx context.Context) error
 }
 
 // +checklocks:m.cmmu
-func (m *committedManifestManager) compactLocked(ctx context.Context) error {
+func (m *committedManifestManager) compactLocked(ctx context.Context, comp compression.Name) error {
 	m.verifyLocked()
 
 	log(ctx).Debugf("compactLocked: contentIDs=%v", len(m.committedContentIDs))
@@ -262,7 +263,7 @@ func (m *committedManifestManager) compactLocked(ctx context.Context) error {
 		tmp[k] = v
 	}
 
-	written, err := m.writeEntriesLocked(ctx, tmp)
+	written, err := m.writeEntriesLocked(ctx, tmp, comp)
 	if err != nil {
 		return err
 	}
@@ -300,7 +301,7 @@ func (m *committedManifestManager) mergeEntryLocked(e *manifestEntry) {
 }
 
 // +checklocks:m.cmmu
-func (m *committedManifestManager) ensureInitializedLocked(ctx context.Context) error {
+func (m *committedManifestManager) ensureInitializedLocked(ctx context.Context, comp compression.Name) error {
 	rev := m.b.Revision()
 	if m.lastRevision == rev {
 		if m.debugID != "" {
@@ -310,7 +311,7 @@ func (m *committedManifestManager) ensureInitializedLocked(ctx context.Context) 
 		return nil
 	}
 
-	if err := m.loadCommittedContentsLocked(ctx); err != nil {
+	if err := m.loadCommittedContentsLocked(ctx, comp); err != nil {
 		return err
 	}
 

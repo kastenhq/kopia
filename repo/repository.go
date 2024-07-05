@@ -30,8 +30,8 @@ var tracer = otel.Tracer("kopia/repository")
 type Repository interface {
 	OpenObject(ctx context.Context, id object.ID) (object.Reader, error)
 	VerifyObject(ctx context.Context, id object.ID) ([]content.ID, error)
-	GetManifest(ctx context.Context, id manifest.ID, data interface{}) (*manifest.EntryMetadata, error)
-	FindManifests(ctx context.Context, labels map[string]string) ([]*manifest.EntryMetadata, error)
+	GetManifest(ctx context.Context, id manifest.ID, data interface{}, comp compression.Name) (*manifest.EntryMetadata, error)
+	FindManifests(ctx context.Context, labels map[string]string, comp compression.Name) ([]*manifest.EntryMetadata, error)
 	ContentInfo(ctx context.Context, contentID content.ID) (content.Info, error)
 	PrefetchContents(ctx context.Context, contentIDs []content.ID, hint string) []content.ID
 	PrefetchObjects(ctx context.Context, objectIDs []object.ID, hint string) ([]content.ID, error)
@@ -50,10 +50,10 @@ type RepositoryWriter interface {
 	NewObjectWriter(ctx context.Context, opt object.WriterOptions) object.Writer
 	ConcatenateObjects(ctx context.Context, objectIDs []object.ID, comp compression.Name) (object.ID, error)
 	PutManifest(ctx context.Context, labels map[string]string, payload interface{}) (manifest.ID, error)
-	ReplaceManifests(ctx context.Context, labels map[string]string, payload interface{}) (manifest.ID, error)
-	DeleteManifest(ctx context.Context, id manifest.ID) error
+	ReplaceManifests(ctx context.Context, labels map[string]string, payload interface{}, comp compression.Name) (manifest.ID, error)
+	DeleteManifest(ctx context.Context, id manifest.ID, comp compression.Name) error
 	OnSuccessfulFlush(callback RepositoryWriterCallback)
-	Flush(ctx context.Context) error
+	Flush(ctx context.Context, comp compression.Name) error
 }
 
 // RemoteRetentionPolicy is an interface implemented by repository clients that support remote retention policy.
@@ -204,9 +204,9 @@ func (r *directRepository) VerifyObject(ctx context.Context, id object.ID) ([]co
 }
 
 // GetManifest returns the given manifest data and metadata.
-func (r *directRepository) GetManifest(ctx context.Context, id manifest.ID, data interface{}) (*manifest.EntryMetadata, error) {
+func (r *directRepository) GetManifest(ctx context.Context, id manifest.ID, data interface{}, comp compression.Name) (*manifest.EntryMetadata, error) {
 	//nolint:wrapcheck
-	return r.mmgr.Get(ctx, id, data)
+	return r.mmgr.Get(ctx, id, data, comp)
 }
 
 // PutManifest saves the given manifest payload with a set of labels.
@@ -216,20 +216,20 @@ func (r *directRepository) PutManifest(ctx context.Context, labels map[string]st
 }
 
 // ReplaceManifests saves the given manifest payload with a set of labels and replaces any previous manifests with the same labels.
-func (r *directRepository) ReplaceManifests(ctx context.Context, labels map[string]string, payload interface{}) (manifest.ID, error) {
-	return replaceManifestsHelper(ctx, r, labels, payload)
+func (r *directRepository) ReplaceManifests(ctx context.Context, labels map[string]string, payload interface{}, comp compression.Name) (manifest.ID, error) {
+	return replaceManifestsHelper(ctx, r, labels, payload, comp)
 }
 
 // FindManifests returns metadata for manifests matching given set of labels.
-func (r *directRepository) FindManifests(ctx context.Context, labels map[string]string) ([]*manifest.EntryMetadata, error) {
+func (r *directRepository) FindManifests(ctx context.Context, labels map[string]string, comp compression.Name) ([]*manifest.EntryMetadata, error) {
 	//nolint:wrapcheck
-	return r.mmgr.Find(ctx, labels)
+	return r.mmgr.Find(ctx, labels, comp)
 }
 
 // DeleteManifest deletes the manifest with a given ID.
-func (r *directRepository) DeleteManifest(ctx context.Context, id manifest.ID) error {
+func (r *directRepository) DeleteManifest(ctx context.Context, id manifest.ID, comp compression.Name) error {
 	//nolint:wrapcheck
-	return r.mmgr.Delete(ctx, id)
+	return r.mmgr.Delete(ctx, id, comp)
 }
 
 // PrefetchContents brings the requested objects into the cache.
@@ -307,12 +307,12 @@ func (r *directRepository) NewDirectWriter(ctx context.Context, opt WriteSession
 }
 
 // Flush waits for all in-flight writes to complete.
-func (r *directRepository) Flush(ctx context.Context) error {
+func (r *directRepository) Flush(ctx context.Context, comp compression.Name) error {
 	if err := invokeCallbacks(ctx, r, r.beforeFlush); err != nil {
 		return errors.Wrap(err, "before flush")
 	}
 
-	if err := r.mmgr.Flush(ctx); err != nil {
+	if err := r.mmgr.Flush(ctx, comp); err != nil {
 		return errors.Wrap(err, "error flushing manifests")
 	}
 
@@ -417,10 +417,10 @@ func DirectWriteSession(ctx context.Context, r DirectRepository, opt WriteSessio
 }
 
 // replaceManifestsHelper is a helper that deletes all manifests matching provided labels and replaces them with the provided one.
-func replaceManifestsHelper(ctx context.Context, rep RepositoryWriter, labels map[string]string, payload interface{}) (manifest.ID, error) {
+func replaceManifestsHelper(ctx context.Context, rep RepositoryWriter, labels map[string]string, payload interface{}, comp compression.Name) (manifest.ID, error) {
 	const minReplaceManifestTimeDelta = 100 * time.Millisecond
 
-	md, err := rep.FindManifests(ctx, labels)
+	md, err := rep.FindManifests(ctx, labels, comp)
 	if err != nil {
 		return "", errors.Wrap(err, "unable to load manifests")
 	}
@@ -433,7 +433,7 @@ func replaceManifestsHelper(ctx context.Context, rep RepositoryWriter, labels ma
 			time.Sleep(minReplaceManifestTimeDelta)
 		}
 
-		if err := rep.DeleteManifest(ctx, em.ID); err != nil {
+		if err := rep.DeleteManifest(ctx, em.ID, comp); err != nil {
 			return "", errors.Wrap(err, "unable to delete previous manifest")
 		}
 	}
@@ -450,7 +450,7 @@ func handleWriteSessionResult(ctx context.Context, w RepositoryWriter, opt Write
 	}()
 
 	if resultErr == nil || opt.FlushOnFailure {
-		if err := w.Flush(ctx); err != nil {
+		if err := w.Flush(ctx, opt.Compression); err != nil {
 			return errors.Wrap(err, "error flushing writer")
 		}
 	}

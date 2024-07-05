@@ -98,8 +98,8 @@ func (m *Manager) Put(ctx context.Context, labels map[string]string, payload int
 }
 
 // GetMetadata returns metadata about provided manifest item or ErrNotFound if the item can't be found.
-func (m *Manager) GetMetadata(ctx context.Context, id ID) (*EntryMetadata, error) {
-	e, err := m.getPendingOrCommitted(ctx, id)
+func (m *Manager) GetMetadata(ctx context.Context, id ID, comp compression.Name) (*EntryMetadata, error) {
+	e, err := m.getPendingOrCommitted(ctx, id, comp)
 	if err != nil {
 		return nil, err
 	}
@@ -109,8 +109,8 @@ func (m *Manager) GetMetadata(ctx context.Context, id ID) (*EntryMetadata, error
 
 // Get retrieves the contents of the provided manifest item by deserializing it as JSON to provided object.
 // If the manifest is not found, returns ErrNotFound.
-func (m *Manager) Get(ctx context.Context, id ID, data interface{}) (*EntryMetadata, error) {
-	e, err := m.getPendingOrCommitted(ctx, id)
+func (m *Manager) Get(ctx context.Context, id ID, data interface{}, comp compression.Name) (*EntryMetadata, error) {
+	e, err := m.getPendingOrCommitted(ctx, id, comp)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +124,7 @@ func (m *Manager) Get(ctx context.Context, id ID, data interface{}) (*EntryMetad
 	return cloneEntryMetadata(e), nil
 }
 
-func (m *Manager) getPendingOrCommitted(ctx context.Context, id ID) (*manifestEntry, error) {
+func (m *Manager) getPendingOrCommitted(ctx context.Context, id ID, comp compression.Name) (*manifestEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -132,7 +132,7 @@ func (m *Manager) getPendingOrCommitted(ctx context.Context, id ID) (*manifestEn
 	if e == nil {
 		var err error
 
-		e, err = m.committed.getCommittedEntryOrNil(ctx, id)
+		e, err = m.committed.getCommittedEntryOrNil(ctx, id, comp)
 		if err != nil {
 			return nil, err
 		}
@@ -158,8 +158,8 @@ func findEntriesMatchingLabels(m map[ID]*manifestEntry, labels map[string]string
 }
 
 // Find returns the list of EntryMetadata for manifest entries matching all provided labels.
-func (m *Manager) Find(ctx context.Context, labels map[string]string) ([]*EntryMetadata, error) {
-	committedMatches, err := m.committed.findCommittedEntries(ctx, labels)
+func (m *Manager) Find(ctx context.Context, labels map[string]string, comp compression.Name) ([]*EntryMetadata, error) {
+	committedMatches, err := m.committed.findCommittedEntries(ctx, labels, comp)
 	if err != nil {
 		return nil, err
 	}
@@ -210,11 +210,11 @@ func matchesLabels(a, b map[string]string) bool {
 }
 
 // Flush persists changes to manifest manager.
-func (m *Manager) Flush(ctx context.Context) error {
+func (m *Manager) Flush(ctx context.Context, comp compression.Name) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	_, err := m.committed.commitEntries(ctx, m.pendingEntries)
+	_, err := m.committed.commitEntries(ctx, m.pendingEntries, comp)
 
 	return err
 }
@@ -226,8 +226,8 @@ func mustSucceed(e error) {
 }
 
 // Delete marks the specified manifest ID for deletion.
-func (m *Manager) Delete(ctx context.Context, id ID) error {
-	com, err := m.committed.getCommittedEntryOrNil(ctx, id)
+func (m *Manager) Delete(ctx context.Context, id ID, comp compression.Name) error {
+	com, err := m.committed.getCommittedEntryOrNil(ctx, id, comp)
 	if err != nil {
 		return err
 	}
@@ -249,8 +249,8 @@ func (m *Manager) Delete(ctx context.Context, id ID) error {
 }
 
 // Compact performs compaction of manifest contents.
-func (m *Manager) Compact(ctx context.Context) error {
-	return m.committed.compact(ctx)
+func (m *Manager) Compact(ctx context.Context, comp compression.Name) error {
+	return m.committed.compact(ctx, comp)
 }
 
 // IDsToStrings converts the IDs to strings.
