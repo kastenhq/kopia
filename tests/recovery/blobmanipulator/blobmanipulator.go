@@ -89,6 +89,13 @@ func (bm *BlobManipulator) ConnectOrCreateRepo(dataRepoPath string) error {
 
 // DeleteBlob deletes the provided blob or a random blob, in kopia repo.
 func (bm *BlobManipulator) DeleteBlob(blobID string) error {
+	//
+	_, err := bm.getBlobIDForSnapshot()
+	if err != nil {
+		return err
+	}
+
+	//
 	if blobID == "" {
 		randomBlobID, err := bm.getBlobIDRand()
 		blobID = randomBlobID
@@ -100,13 +107,95 @@ func (bm *BlobManipulator) DeleteBlob(blobID string) error {
 
 	log.Printf("Deleting BLOB %s", blobID)
 
-	_, _, err := bm.KopiaCommandRunner.Run("blob", "delete", blobID, "--advanced-commands=enabled")
+	_, _, err = bm.KopiaCommandRunner.Run("blob", "delete", blobID, "--advanced-commands=enabled")
 	if err != nil {
 		return err
 	}
 
 	return nil
 }
+
+func (bm *BlobManipulator) getBlobIDForSnapshot() (string, error) {
+
+	// assumption: the repo under test is in filesystem
+	err := bm.ConnectOrCreateRepo(bm.DataRepoPath)
+	if err != nil {
+		return "", err
+	}
+
+	// pick a snapshot
+	snapshotList, err := bm.getSnapshotIDRand()
+	snapshotList = strings.Trim(snapshotList, "\n")
+	// var v []byte
+	log.Println("unmarshalling JSON")
+	var snapshotEntries []map[string]string
+	err = json.Unmarshal([]byte(snapshotList), &snapshotEntries)
+	if err != nil {
+		log.Println("JSON unmarshalling failed")
+		return "", err
+	}
+
+	for key, entry := range snapshotEntries {
+		log.Println("snapshot key", key)
+		log.Println("snapshot entry", entry)
+	}
+	// get rootEntry.obj
+	// get content list
+	// look for the rootEntry.obj
+	// get corresponding packFile
+	// get blob list
+	// look for the blob same as packFile
+	// delete the blob
+	// try to restore the snapshot
+
+	return "", nil
+}
+
+func (bm *BlobManipulator) getSnapshotListJSON() (string, error) {
+	snapshotList, _, err := bm.KopiaCommandRunner.Run("snapshot", "list", "--json")
+
+	return snapshotList, err
+}
+
+func (bm *BlobManipulator) getSnapshotIDRand() (string, error) {
+	//
+	snapshotList, err := bm.getSnapshotListJSON()
+	if err != nil {
+		return "", err
+	}
+	if snapshotList == "" {
+		return "", robustness.ErrNoOp
+	}
+
+	log.Println("snapshot list", snapshotList)
+	// unmarshall JSON output
+	// pick a snapshot
+	// return the entire entry
+
+	return "", nil
+}
+
+// getContentsList(){
+// 	log.Println("content list")
+// 	contentList, _, err := bm.KopiaCommandRunner.Run("content", "list", "--json")
+// 	if contentList == "" {
+// 		return "", robustness.ErrNoOp
+// 	}
+
+// 	if err != nil {
+// 		return "", err
+// 	}
+// }
+
+// getBlobList(){
+// 	blobIDList, _, err := bm.KopiaCommandRunner.Run("blob", "list", "--json")
+// 	if blobIDList == "" {
+// 		return "", robustness.ErrNoOp
+// 	}
+// 	if err != nil {
+// 		return "", err
+// 	}
+// }
 
 func (bm *BlobManipulator) getBlobIDRand() (string, error) {
 	var b []blob.Metadata
@@ -121,10 +210,22 @@ func (bm *BlobManipulator) getBlobIDRand() (string, error) {
 	if blobIDList == "" {
 		return "", robustness.ErrNoOp
 	}
+	if err != nil {
+		return "", err
+	}
+
+	// debug
+	log.Println("content list")
+	contentList, _, err := bm.KopiaCommandRunner.Run("content", "list", "--json")
+	if contentList == "" {
+		return "", robustness.ErrNoOp
+	}
 
 	if err != nil {
 		return "", err
 	}
+
+	// debug end
 
 	err = json.Unmarshal([]byte(blobIDList), &b)
 	if err != nil {
