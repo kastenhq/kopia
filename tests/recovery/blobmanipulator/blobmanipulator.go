@@ -102,36 +102,14 @@ func (bm *BlobManipulator) DeleteBlob(blobID string) error {
 	return nil
 }
 
-// func (bm *BlobManipulator) getBlobIDForSnapshotRand() (string, error) {
-
-// 	// assumption: the repo under test is in filesystem
-// 	err := bm.ConnectOrCreateRepo(bm.DataRepoPath)
-// 	if err != nil {
-// 		return "", err
-// 	}
-
-// pick a snapshot
-// snapshotID, err := bm.getSnapshotIDRand()
-// if err != nil {
-// 	return "", fmt.Errorf("failed to get random snapshot ID %s", err)
-// }
-// log.Printf("snapshot ID %v", snapshotID)
-
-// contentID, err := bm.getPackfileForContentID(snapshotID)
-// if err != nil {
-// 	return "", fmt.Errorf("failed to get content ID for snapshot ID %v, %s", snapshotID, err)
-// }
-// log.Printf("content ID %v", contentID)
-
-// 	return fmt.Sprintf(contentID), nil
-// }
-
 func (bm *BlobManipulator) getSnapshotListJSON() (string, error) {
 	snapshotList, _, err := bm.KopiaCommandRunner.Run("snapshot", "list", "--json")
 
 	return snapshotList, err
 }
 
+// GetSnapshotIDBlobIDRand picks a random snapshot from the connected repository,
+// returns the snapshot ID and the associated blob ID.
 func (bm *BlobManipulator) GetSnapshotIDBlobIDRand() (snapshotID, blobID string, err error) {
 	snapshotList, err := bm.getSnapshotListJSON()
 	if err != nil {
