@@ -8,12 +8,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"strconv"
 	"strings"
 
+	"github.com/kopia/kopia/cli"
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/repo/content/index"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/tests/robustness"
 	"github.com/kopia/kopia/tests/robustness/fiofilewriter"
@@ -89,25 +92,9 @@ func (bm *BlobManipulator) ConnectOrCreateRepo(dataRepoPath string) error {
 
 // DeleteBlob deletes the provided blob or a random blob, in kopia repo.
 func (bm *BlobManipulator) DeleteBlob(blobID string) error {
-	//
-	_, err := bm.getBlobIDForSnapshot()
-	if err != nil {
-		return err
-	}
-
-	//
-	if blobID == "" {
-		randomBlobID, err := bm.getBlobIDRand()
-		blobID = randomBlobID
-
-		if err != nil {
-			return err
-		}
-	}
-
 	log.Printf("Deleting BLOB %s", blobID)
 
-	_, _, err = bm.KopiaCommandRunner.Run("blob", "delete", blobID, "--advanced-commands=enabled")
+	_, _, err := bm.KopiaCommandRunner.Run("blob", "delete", blobID, "--advanced-commands=enabled")
 	if err != nil {
 		return err
 	}
@@ -115,41 +102,29 @@ func (bm *BlobManipulator) DeleteBlob(blobID string) error {
 	return nil
 }
 
-func (bm *BlobManipulator) getBlobIDForSnapshot() (string, error) {
+// func (bm *BlobManipulator) getBlobIDForSnapshotRand() (string, error) {
 
-	// assumption: the repo under test is in filesystem
-	err := bm.ConnectOrCreateRepo(bm.DataRepoPath)
-	if err != nil {
-		return "", err
-	}
+// 	// assumption: the repo under test is in filesystem
+// 	err := bm.ConnectOrCreateRepo(bm.DataRepoPath)
+// 	if err != nil {
+// 		return "", err
+// 	}
 
-	// pick a snapshot
-	snapshotList, err := bm.getSnapshotIDRand()
-	snapshotList = strings.Trim(snapshotList, "\n")
-	// var v []byte
-	log.Println("unmarshalling JSON")
-	var snapshotEntries []map[string]string
-	err = json.Unmarshal([]byte(snapshotList), &snapshotEntries)
-	if err != nil {
-		log.Println("JSON unmarshalling failed")
-		return "", err
-	}
+// pick a snapshot
+// snapshotID, err := bm.getSnapshotIDRand()
+// if err != nil {
+// 	return "", fmt.Errorf("failed to get random snapshot ID %s", err)
+// }
+// log.Printf("snapshot ID %v", snapshotID)
 
-	for key, entry := range snapshotEntries {
-		log.Println("snapshot key", key)
-		log.Println("snapshot entry", entry)
-	}
-	// get rootEntry.obj
-	// get content list
-	// look for the rootEntry.obj
-	// get corresponding packFile
-	// get blob list
-	// look for the blob same as packFile
-	// delete the blob
-	// try to restore the snapshot
+// contentID, err := bm.getPackfileForContentID(snapshotID)
+// if err != nil {
+// 	return "", fmt.Errorf("failed to get content ID for snapshot ID %v, %s", snapshotID, err)
+// }
+// log.Printf("content ID %v", contentID)
 
-	return "", nil
-}
+// 	return fmt.Sprintf(contentID), nil
+// }
 
 func (bm *BlobManipulator) getSnapshotListJSON() (string, error) {
 	snapshotList, _, err := bm.KopiaCommandRunner.Run("snapshot", "list", "--json")
@@ -157,35 +132,83 @@ func (bm *BlobManipulator) getSnapshotListJSON() (string, error) {
 	return snapshotList, err
 }
 
-func (bm *BlobManipulator) getSnapshotIDRand() (string, error) {
-	//
+func (bm *BlobManipulator) GetSnapshotIDBlobIDRand() (snapshotID, blobID string, err error) {
 	snapshotList, err := bm.getSnapshotListJSON()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if snapshotList == "" {
-		return "", robustness.ErrNoOp
+		return "", "", err
 	}
 
-	log.Println("snapshot list", snapshotList)
-	// unmarshall JSON output
-	// pick a snapshot
-	// return the entire entry
+	log.Println("unmarshalling JSON")
+	var snapshotEntries []cli.SnapshotManifest
+	err = json.Unmarshal([]byte(snapshotList), &snapshotEntries)
+	if err != nil {
+		log.Println("JSON unmarshalling failed", err)
+		return "", "", err
+	}
+	// pick a random snapshot
+	randomIndex := rand.Intn(len(snapshotEntries))
+	snapshotEntry := snapshotEntries[randomIndex]
+	snapshotID = string(snapshotEntry.ID)
+
+	log.Printf("snapshot root entry object ID %v", snapshotEntry.RootEntry.ObjectID)
+	blobID, err = bm.getBlobForContentID(snapshotEntry.RootEntry.ObjectID.String())
+	if err != nil {
+		log.Println("JSON unmarshalling failed", err)
+		return "", "", err
+	}
+
+	return snapshotID, fmt.Sprint(blobID), nil
+}
+
+func (bm *BlobManipulator) parseSnapshotList(snapshotList string) (string, error) {
+
+	start := strings.Index(snapshotList, "{")
+	end := strings.Index(snapshotList, "}")
+
+	if start != -1 && end != -1 && start < end {
+		content := snapshotList[start : end+1]
+		content = strings.Trim(content, "\n")
+		log.Printf("content %s", content)
+		var snapshotEntry map[string]string
+		err := json.Unmarshal([]byte(content), &snapshotEntry)
+		if err != nil {
+			log.Println("JSON unmarshalling failed", err)
+			return "", err
+		}
+		log.Printf("snapshot %v", snapshotEntry)
+	}
 
 	return "", nil
 }
 
-// getContentsList(){
-// 	log.Println("content list")
-// 	contentList, _, err := bm.KopiaCommandRunner.Run("content", "list", "--json")
-// 	if contentList == "" {
-// 		return "", robustness.ErrNoOp
-// 	}
+func (bm *BlobManipulator) getBlobForContentID(contentID string) (string, error) {
+	content, _, err := bm.KopiaCommandRunner.Run("content", "list", "--json")
+	if err != nil {
+		return "", err
+	}
+	if content == "" {
+		return "", robustness.ErrNoOp
+	}
 
-// 	if err != nil {
-// 		return "", err
-// 	}
-// }
+	var contentEntries []index.Info
+	err = json.Unmarshal([]byte(content), &contentEntries)
+	if err != nil {
+		log.Println("JSON unmarshalling failed", err)
+		return "", err
+	}
+
+	for _, entry := range contentEntries {
+		if entry.ContentID.String() == contentID {
+			log.Printf("content entry %v", entry)
+			return string(entry.PackBlobID), nil
+		}
+	}
+
+	return "", nil
+}
 
 // getBlobList(){
 // 	blobIDList, _, err := bm.KopiaCommandRunner.Run("blob", "list", "--json")

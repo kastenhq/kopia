@@ -67,9 +67,13 @@ func TestSnapshotFix(t *testing.T) {
 		cmd.Process.Kill()
 	})
 
-	// delete random blob
-	// assumption: the repo contains "p" blobs to delete, else the test will fail
-	err = bm.DeleteBlob("")
+	// pick a blob corresponding to a random snapshot to delete.
+	snapshotID, blobID, err := bm.GetSnapshotIDBlobIDRand()
+	if err != nil {
+		log.Println("Error getting kopia blob for deletion: ", err)
+		t.FailNow()
+	}
+	err = bm.DeleteBlob(blobID)
 	if err != nil {
 		log.Println("Error deleting kopia blob: ", err)
 		t.FailNow()
@@ -85,13 +89,13 @@ func TestSnapshotFix(t *testing.T) {
 	require.NoError(t, err)
 
 	// try to restore a snapshot, this should error out
-	stdout, err := bm.RestoreGivenOrRandomSnapshot("", restoreDir)
+	stdout, err := bm.RestoreGivenOrRandomSnapshot(snapshotID, restoreDir)
 	require.Error(t, err)
 
 	// extract out object ID needed to be used in snapshot fix command
-	blobID := getBlobIDToBeDeleted(stdout)
+	blobIDFromErrMessage := getBlobIDToBeDeleted(stdout)
 
-	stdout, err = bm.SnapshotFixRemoveFilesByBlobID(blobID)
+	stdout, err = bm.SnapshotFixRemoveFilesByBlobID(blobIDFromErrMessage)
 	if err != nil {
 		log.Println("Error repairing the kopia repository:", stdout, err)
 		t.FailNow()
@@ -147,7 +151,13 @@ func TestSnapshotFixInvalidFiles(t *testing.T) {
 
 	// delete random blob
 	// assumption: the repo contains "p" blobs to delete, else the test will fail
-	err = bm.DeleteBlob("")
+	// pick a blob corresponding to a random snapshot to delete.
+	snapshotID, blobID, err := bm.GetSnapshotIDBlobIDRand()
+	if err != nil {
+		log.Println("Error getting kopia blob for deletion: ", err)
+		t.FailNow()
+	}
+	err = bm.DeleteBlob(blobID)
 	if err != nil {
 		log.Println("Error deleting kopia blob: ", err)
 		t.FailNow()
@@ -160,7 +170,7 @@ func TestSnapshotFixInvalidFiles(t *testing.T) {
 	}
 
 	// try to restore a snapshot, this should error out
-	_, err = bm.RestoreGivenOrRandomSnapshot("", restoreDir)
+	_, err = bm.RestoreGivenOrRandomSnapshot(snapshotID, restoreDir)
 	require.Error(t, err)
 
 	// fix all the invalid files
@@ -171,7 +181,7 @@ func TestSnapshotFixInvalidFiles(t *testing.T) {
 	}
 
 	// restore a random snapshot
-	_, err = bm.RestoreGivenOrRandomSnapshot("", restoreDir)
+	_, err = bm.RestoreGivenOrRandomSnapshot(snapshotID, restoreDir)
 	require.NoError(t, err)
 }
 
