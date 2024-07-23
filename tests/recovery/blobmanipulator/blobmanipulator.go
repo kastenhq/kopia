@@ -188,16 +188,6 @@ func (bm *BlobManipulator) getBlobForContentID(contentID string) (string, error)
 	return "", nil
 }
 
-// getBlobList(){
-// 	blobIDList, _, err := bm.KopiaCommandRunner.Run("blob", "list", "--json")
-// 	if blobIDList == "" {
-// 		return "", robustness.ErrNoOp
-// 	}
-// 	if err != nil {
-// 		return "", err
-// 	}
-// }
-
 func (bm *BlobManipulator) getBlobIDRand() (string, error) {
 	var b []blob.Metadata
 
@@ -215,7 +205,6 @@ func (bm *BlobManipulator) getBlobIDRand() (string, error) {
 		return "", err
 	}
 
-	// debug
 	log.Println("content list")
 	contentList, _, err := bm.KopiaCommandRunner.Run("content", "list", "--json")
 	if contentList == "" {
@@ -225,8 +214,6 @@ func (bm *BlobManipulator) getBlobIDRand() (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	// debug end
 
 	err = json.Unmarshal([]byte(blobIDList), &b)
 	if err != nil {
