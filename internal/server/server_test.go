@@ -210,7 +210,7 @@ func remoteRepositoryTest(ctx context.Context, t *testing.T, rep repo.Repository
 		mustReadObject(ctx, t, w, result, written)
 
 		ow := w.NewObjectWriter(ctx, object.WriterOptions{
-			Prefix: manifest.ContentPrefix,
+			Prefix: content.ManifestContentPrefix,
 		})
 
 		_, err := ow.Write([]byte{2, 3, 4})
