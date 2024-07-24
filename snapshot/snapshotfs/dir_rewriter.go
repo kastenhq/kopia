@@ -284,7 +284,6 @@ func RewriteAsStub(rep repo.RepositoryWriter) RewriteFailedEntryCallback {
 			return nil, errors.Wrap(err, "error writing stub")
 		}
 
-		// TODO: Check if source info can be made available here
 		pol, _, _, err := policy.GetEffectivePolicy(ctx, rep, policy.GlobalPolicySourceInfo)
 		if err != nil {
 			return nil, errors.Wrap(err, "error getting policy")
