@@ -34,18 +34,18 @@ func (s *formatSpecificTestSuite) TestMaintenanceSafety(t *testing.T) {
 
 	// create object that's immediately orphaned since nobody refers to it.
 	require.NoError(t, repo.WriteSession(ctx, env.Repository, repo.WriteSessionOptions{}, func(ctx context.Context, w repo.RepositoryWriter) error {
-		ow := w.NewObjectWriter(ctx, object.WriterOptions{Prefix: "y"})
+		ow := w.NewObjectWriter(ctx, object.WriterOptions{Prefix: "y", MetadataCompressor: "zstd-fastest"})
 		fmt.Fprintf(ow, "hello world")
 		var err error
-		objectID, err = ow.Result("zstd-fastest")
+		objectID, err = ow.Result()
 		return err
 	}))
 
 	// create another object in separate pack.
 	require.NoError(t, repo.WriteSession(ctx, env.Repository, repo.WriteSessionOptions{}, func(ctx context.Context, w repo.RepositoryWriter) error {
-		ow := w.NewObjectWriter(ctx, object.WriterOptions{Prefix: "y"})
+		ow := w.NewObjectWriter(ctx, object.WriterOptions{Prefix: "y", MetadataCompressor: "zstd-fastest"})
 		fmt.Fprintf(ow, "hello universe")
-		_, err := ow.Result("zstd-fastest")
+		_, err := ow.Result()
 		return err
 	}))
 

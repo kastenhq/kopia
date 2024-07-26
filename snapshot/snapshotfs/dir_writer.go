@@ -12,11 +12,12 @@ import (
 	"github.com/kopia/kopia/snapshot"
 )
 
-func writeDirManifest(ctx context.Context, rep repo.RepositoryWriter, dirRelativePath string, dirManifest *snapshot.DirManifest, comp compression.Name) (object.ID, error) {
+func writeDirManifest(ctx context.Context, rep repo.RepositoryWriter, dirRelativePath string, dirManifest *snapshot.DirManifest, metadataComp compression.Name) (object.ID, error) {
 	writer := rep.NewObjectWriter(ctx, object.WriterOptions{
-		Description: "DIR:" + dirRelativePath,
-		Prefix:      objectIDPrefixDirectory,
-		Compressor:  comp,
+		Description:        "DIR:" + dirRelativePath,
+		Prefix:             objectIDPrefixDirectory,
+		Compressor:         metadataComp,
+		MetadataCompressor: metadataComp,
 	})
 
 	defer writer.Close() //nolint:errcheck
@@ -25,7 +26,7 @@ func writeDirManifest(ctx context.Context, rep repo.RepositoryWriter, dirRelativ
 		return object.EmptyID, errors.Wrap(err, "unable to encode directory JSON")
 	}
 
-	oid, err := writer.Result(comp)
+	oid, err := writer.Result()
 	if err != nil {
 		return object.EmptyID, errors.Wrap(err, "unable to write directory")
 	}

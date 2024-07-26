@@ -27,10 +27,10 @@ type Writer interface {
 	// Checkpoint returns ID of an object consisting of all contents written to storage so far.
 	// This may not include some data buffered in the writer.
 	// In case nothing has been written yet, returns empty object ID.
-	Checkpoint(comp compression.Name) (ID, error)
+	Checkpoint() (ID, error)
 
 	// Result returns object ID representing all bytes written to the writer.
-	Result(comp compression.Name) (ID, error)
+	Result() (ID, error)
 }
 
 type contentIDTracker struct {
@@ -68,7 +68,8 @@ type objectWriter struct {
 
 	om *Manager
 
-	compressor compression.Compressor
+	compressor         compression.Compressor
+	metadataCompressor compression.Compressor
 
 	prefix      content.IDPrefix
 	buffer      gather.WriteBuffer
@@ -251,7 +252,7 @@ func maybeCompressedContentBytes(comp compression.Compressor, input gather.Bytes
 	return input, false, nil
 }
 
-func (w *objectWriter) Result(comp compression.Name) (ID, error) {
+func (w *objectWriter) Result() (ID, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -263,19 +264,19 @@ func (w *objectWriter) Result(comp compression.Name) (ID, error) {
 		}
 	}
 
-	return w.checkpointLocked(comp)
+	return w.checkpointLocked()
 }
 
 // Checkpoint returns object ID which represents portion of the object that has already been written.
 // The result may be an empty object ID if nothing has been flushed yet.
-func (w *objectWriter) Checkpoint(comp compression.Name) (ID, error) {
+func (w *objectWriter) Checkpoint() (ID, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	return w.checkpointLocked(comp)
+	return w.checkpointLocked()
 }
 
-func (w *objectWriter) checkpointLocked(comp compression.Name) (ID, error) {
+func (w *objectWriter) checkpointLocked() (ID, error) {
 	// wait for any in-flight asynchronous writes to finish
 	w.asyncWritesWG.Wait()
 
@@ -292,12 +293,13 @@ func (w *objectWriter) checkpointLocked(comp compression.Name) (ID, error) {
 	}
 
 	iw := &objectWriter{
-		ctx:         w.ctx,
-		om:          w.om,
-		compressor:  compression.ByName[comp],
-		description: "LIST(" + w.description + ")",
-		splitter:    w.om.newDefaultSplitter(),
-		prefix:      w.prefix,
+		ctx:                w.ctx,
+		om:                 w.om,
+		compressor:         w.metadataCompressor,
+		metadataCompressor: w.metadataCompressor,
+		description:        "LIST(" + w.description + ")",
+		splitter:           w.om.newDefaultSplitter(),
+		prefix:             w.prefix,
 	}
 
 	if iw.prefix == "" {
@@ -311,7 +313,7 @@ func (w *objectWriter) checkpointLocked(comp compression.Name) (ID, error) {
 		return EmptyID, err
 	}
 
-	oid, err := iw.Result(comp)
+	oid, err := iw.Result()
 	if err != nil {
 		return EmptyID, err
 	}
@@ -334,9 +336,10 @@ func writeIndirectObject(w io.Writer, entries []IndirectObjectEntry) error {
 
 // WriterOptions can be passed to Repository.NewWriter().
 type WriterOptions struct {
-	Description string
-	Prefix      content.IDPrefix // empty string or a single-character ('g'..'z')
-	Compressor  compression.Name
-	Splitter    string // use particular splitter instead of default
-	AsyncWrites int    // allow up to N content writes to be asynchronous
+	Description        string
+	Prefix             content.IDPrefix // empty string or a single-character ('g'..'z')
+	Compressor         compression.Name
+	MetadataCompressor compression.Name
+	Splitter           string // use particular splitter instead of default
+	AsyncWrites        int    // allow up to N content writes to be asynchronous
 }

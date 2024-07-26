@@ -210,7 +210,7 @@ func (u *Uploader) uploadFileInternal(ctx context.Context, parentCheckpointRegis
 	return concatenateParts(ctx, u.repo, f.Name(), parts, metadataComp)
 }
 
-func concatenateParts(ctx context.Context, rep repo.RepositoryWriter, name string, parts []*snapshot.DirEntry, comp compression.Name) (*snapshot.DirEntry, error) {
+func concatenateParts(ctx context.Context, rep repo.RepositoryWriter, name string, parts []*snapshot.DirEntry, metadataComp compression.Name) (*snapshot.DirEntry, error) {
 	var (
 		objectIDs []object.ID
 		totalSize int64
@@ -222,7 +222,7 @@ func concatenateParts(ctx context.Context, rep repo.RepositoryWriter, name strin
 		objectIDs = append(objectIDs, part.ObjectID)
 	}
 
-	resultObject, err := rep.ConcatenateObjects(ctx, objectIDs, comp)
+	resultObject, err := rep.ConcatenateObjects(ctx, objectIDs, metadataComp)
 	if err != nil {
 		return nil, errors.Wrap(err, "concatenate")
 	}
@@ -243,15 +243,16 @@ func (u *Uploader) uploadFileData(ctx context.Context, parentCheckpointRegistry 
 	defer file.Close() //nolint:errcheck
 
 	writer := u.repo.NewObjectWriter(ctx, object.WriterOptions{
-		Description: "FILE:" + fname,
-		Compressor:  compressor,
-		Splitter:    splitterName,
-		AsyncWrites: 1, // upload chunk in parallel to writing another chunk
+		Description:        "FILE:" + fname,
+		Compressor:         compressor,
+		MetadataCompressor: metadataComp,
+		Splitter:           splitterName,
+		AsyncWrites:        1, // upload chunk in parallel to writing another chunk
 	})
 	defer writer.Close() //nolint:errcheck
 
 	parentCheckpointRegistry.addCheckpointCallback(fname, func() (*snapshot.DirEntry, error) {
-		checkpointID, err := writer.Checkpoint(metadataComp)
+		checkpointID, err := writer.Checkpoint()
 		if err != nil {
 			return nil, errors.Wrap(err, "checkpoint error")
 		}
@@ -281,7 +282,7 @@ func (u *Uploader) uploadFileData(ctx context.Context, parentCheckpointRegistry 
 		return nil, err
 	}
 
-	r, err := writer.Result(metadataComp)
+	r, err := writer.Result()
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get result")
 	}
@@ -313,7 +314,8 @@ func (u *Uploader) uploadSymlinkInternal(ctx context.Context, relativePath strin
 	}
 
 	writer := u.repo.NewObjectWriter(ctx, object.WriterOptions{
-		Description: "SYMLINK:" + f.Name(),
+		Description:        "SYMLINK:" + f.Name(),
+		MetadataCompressor: metadataComp,
 	})
 	defer writer.Close() //nolint:errcheck
 
@@ -322,7 +324,7 @@ func (u *Uploader) uploadSymlinkInternal(ctx context.Context, relativePath strin
 		return nil, err
 	}
 
-	r, err := writer.Result(metadataComp)
+	r, err := writer.Result()
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get result")
 	}
@@ -357,9 +359,10 @@ func (u *Uploader) uploadStreamingFileInternal(ctx context.Context, relativePath
 	metadataComp := pol.MetadataCompressionPolicy.MetadataCompressor()
 
 	writer := u.repo.NewObjectWriter(ctx, object.WriterOptions{
-		Description: "STREAMFILE:" + f.Name(),
-		Compressor:  comp,
-		Splitter:    pol.SplitterPolicy.SplitterForFile(f),
+		Description:        "STREAMFILE:" + f.Name(),
+		Compressor:         comp,
+		MetadataCompressor: metadataComp,
+		Splitter:           pol.SplitterPolicy.SplitterForFile(f),
 	})
 
 	defer writer.Close() //nolint:errcheck
@@ -369,7 +372,7 @@ func (u *Uploader) uploadStreamingFileInternal(ctx context.Context, relativePath
 		return nil, err
 	}
 
-	r, err := writer.Result(metadataComp)
+	r, err := writer.Result()
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to get result")
 	}
