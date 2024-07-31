@@ -470,7 +470,6 @@ func TestIndirection(t *testing.T) {
 			t.Errorf("write error: %v", err)
 		}
 
-		// Disable metadata compression here
 		result, err := writer.Result()
 		if err != nil {
 			t.Errorf("error getting writer results: %v", err)
