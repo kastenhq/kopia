@@ -474,6 +474,7 @@ func TestIndirection(t *testing.T) {
 		dataLength          int
 		expectedBlobCount   int
 		expectedIndirection int
+		metadataCompressor  compression.Name
 	}{
 		{dataLength: 200, expectedBlobCount: 1, expectedIndirection: 0},
 		{dataLength: 1000, expectedBlobCount: 1, expectedIndirection: 0},
@@ -483,7 +484,9 @@ func TestIndirection(t *testing.T) {
 		// 1 blob of 1000 zeros + 1 index blob
 		{dataLength: 4000, expectedBlobCount: 2, expectedIndirection: 1},
 		// 1 blob of 1000 zeros + 1 index blob
-		{dataLength: 10000, expectedBlobCount: 2, expectedIndirection: 1},
+		{dataLength: 10000, expectedBlobCount: 2, expectedIndirection: 1, metadataCompressor: "none"},
+		// 1 blob of 1000 zeros + 1 index blob, enabled metadata compression
+		{dataLength: 10000, expectedBlobCount: 2, expectedIndirection: 1, metadataCompressor: "zstd-fastest"},
 	}
 
 	for _, c := range cases {
@@ -492,7 +495,7 @@ func TestIndirection(t *testing.T) {
 
 		contentBytes := make([]byte, c.dataLength)
 
-		writer := om.NewWriter(ctx, WriterOptions{MetadataCompressor: "zstd-fastest", Compressor: "gzip"})
+		writer := om.NewWriter(ctx, WriterOptions{MetadataCompressor: c.metadataCompressor})
 		writer.(*objectWriter).splitter = splitterFactory()
 
 		if _, err := writer.Write(contentBytes); err != nil {
@@ -523,7 +526,11 @@ func TestIndirection(t *testing.T) {
 			t.Errorf("invalid blob count for %v, got %v, wanted %v", result, got, want)
 		}
 
-		verifyIndirectBlock(ctx, t, om, result, content.NoCompression)
+		expectedCompressor := content.NoCompression
+		if len(c.metadataCompressor) > 0 && c.metadataCompressor != "none" {
+			expectedCompressor = compression.ByName[c.metadataCompressor].HeaderID()
+		}
+		verifyIndirectBlock(ctx, t, om, result, expectedCompressor)
 	}
 }
 
