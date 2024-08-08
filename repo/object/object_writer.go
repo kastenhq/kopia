@@ -68,7 +68,8 @@ type objectWriter struct {
 
 	om *Manager
 
-	compressor compression.Compressor
+	compressor         compression.Compressor
+	metadataCompressor compression.Compressor
 
 	prefix      content.IDPrefix
 	buffer      gather.WriteBuffer
@@ -292,12 +293,13 @@ func (w *objectWriter) checkpointLocked() (ID, error) {
 	}
 
 	iw := &objectWriter{
-		ctx:         w.ctx,
-		om:          w.om,
-		compressor:  nil,
-		description: "LIST(" + w.description + ")",
-		splitter:    w.om.newDefaultSplitter(),
-		prefix:      w.prefix,
+		ctx:                w.ctx,
+		om:                 w.om,
+		compressor:         w.metadataCompressor,
+		metadataCompressor: w.metadataCompressor,
+		description:        "LIST(" + w.description + ")",
+		splitter:           w.om.newDefaultSplitter(),
+		prefix:             w.prefix,
 	}
 
 	if iw.prefix == "" {
@@ -334,9 +336,10 @@ func writeIndirectObject(w io.Writer, entries []IndirectObjectEntry) error {
 
 // WriterOptions can be passed to Repository.NewWriter().
 type WriterOptions struct {
-	Description string
-	Prefix      content.IDPrefix // empty string or a single-character ('g'..'z')
-	Compressor  compression.Name
-	Splitter    string // use particular splitter instead of default
-	AsyncWrites int    // allow up to N content writes to be asynchronous
+	Description        string
+	Prefix             content.IDPrefix // empty string or a single-character ('g'..'z')
+	Compressor         compression.Name
+	MetadataCompressor compression.Name
+	Splitter           string // use particular splitter instead of default
+	AsyncWrites        int    // allow up to N content writes to be asynchronous
 }
