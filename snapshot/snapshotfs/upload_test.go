@@ -38,6 +38,8 @@ import (
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob/filesystem"
 	bloblogging "github.com/kopia/kopia/repo/blob/logging"
+	"github.com/kopia/kopia/repo/compression"
+	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/logging"
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot"
@@ -226,6 +228,106 @@ func TestUpload(t *testing.T) {
 		// no files are changed, but one file disappeared which caused "./d2/d1/", "./d2/" and "./" to be changed.
 		t.Errorf("unexpected s5 stats: %+v", s5.Stats)
 	}
+}
+
+type entry struct {
+	name     string
+	objectID object.ID
+}
+
+// findAllEntries recursively iterates over all the dirs and returns list of file entries
+func findAllEntries(t *testing.T, ctx context.Context, dir fs.Directory) []entry {
+	entries := []entry{}
+	fs.IterateEntries(ctx, dir, func(ctx context.Context, e fs.Entry) error {
+		oid, err := object.ParseID(e.(object.HasObjectID).ObjectID().String())
+		require.NoError(t, err)
+		entries = append(entries, entry{
+			name:     e.Name(),
+			objectID: oid,
+		})
+		if e.IsDir() {
+			entries = append(entries, findAllEntries(t, ctx, e.(fs.Directory))...)
+		}
+		return nil
+	})
+	return entries
+}
+
+func verifyMetadataCompressor(t *testing.T, ctx context.Context, rep repo.Repository, entries []entry, comp compression.HeaderID) {
+	for _, e := range entries {
+		cid, _, ok := e.objectID.ContentID()
+		require.True(t, ok)
+		if !cid.HasPrefix() {
+			continue
+		}
+		info, err := rep.ContentInfo(ctx, cid)
+		if err != nil {
+			t.Errorf("failed to get content info: %v", err)
+		}
+		require.Equal(t, comp, info.CompressionHeaderID)
+	}
+}
+
+func TestUploadMetadataCompression(t *testing.T) {
+	ctx := testlogging.Context(t)
+	t.Run("default metadata compression", func(t *testing.T) {
+		th := newUploadTestHarness(ctx, t)
+		defer th.cleanup()
+		u := NewUploader(th.repo)
+		policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
+
+		s1, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
+		if err != nil {
+			t.Errorf("Upload error: %v", err)
+		}
+
+		dir := EntryFromDirEntry(th.repo, s1.RootEntry).(fs.Directory)
+		entries := findAllEntries(t, ctx, dir)
+		verifyMetadataCompressor(t, ctx, th.repo, entries, compression.HeaderZstdFastest)
+	})
+	t.Run("disable metadata compression", func(t *testing.T) {
+		th := newUploadTestHarness(ctx, t)
+		defer th.cleanup()
+		u := NewUploader(th.repo)
+		//	policyTree := policy.BuildTree(nil, policy.DefaultPolicy)
+		policyTree := policy.BuildTree(map[string]*policy.Policy{
+			".": {
+				MetadataCompressionPolicy: policy.MetadataCompressionPolicy{
+					CompressorName: "none",
+				},
+			},
+		}, policy.DefaultPolicy)
+
+		s1, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
+		if err != nil {
+			t.Errorf("Upload error: %v", err)
+		}
+
+		dir := EntryFromDirEntry(th.repo, s1.RootEntry).(fs.Directory)
+		entries := findAllEntries(t, ctx, dir)
+		verifyMetadataCompressor(t, ctx, th.repo, entries, content.NoCompression)
+	})
+	t.Run("set metadata compressor", func(t *testing.T) {
+		th := newUploadTestHarness(ctx, t)
+		defer th.cleanup()
+		u := NewUploader(th.repo)
+		policyTree := policy.BuildTree(map[string]*policy.Policy{
+			".": {
+				MetadataCompressionPolicy: policy.MetadataCompressionPolicy{
+					CompressorName: "gzip",
+				},
+			},
+		}, policy.DefaultPolicy)
+
+		s1, err := u.Upload(ctx, th.sourceDir, policyTree, snapshot.SourceInfo{})
+		if err != nil {
+			t.Errorf("Upload error: %v", err)
+		}
+
+		dir := EntryFromDirEntry(th.repo, s1.RootEntry).(fs.Directory)
+		entries := findAllEntries(t, ctx, dir)
+		verifyMetadataCompressor(t, ctx, th.repo, entries, compression.ByName["gzip"].HeaderID())
+	})
 }
 
 func TestUpload_TopLevelDirectoryReadFailure(t *testing.T) {
