@@ -1,0 +1,61 @@
+name: Local:Tests
+on:
+  pull_request:
+  push:
+    branches: [ kasten ]
+    tags:
+      - v*
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  # set (to any value other than false) to trigger random unicode filenames testing (logs may be difficult to read)
+  ENABLE_UNICODE_FILENAMES: ${{ secrets.ENABLE_UNICODE_FILENAMES }}
+  # set (to any value other than false) to trigger very long filenames testing
+  ENABLE_LONG_FILENAMES: ${{ secrets.ENABLE_LONG_FILENAMES }}
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm ]
+    name: Tests
+    runs-on: ${{ matrix.os }}
+    steps:
+    -
+      uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+      with:
+        egress-policy: audit
+    -
+      name: Check out repository
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      with:
+        fetch-depth: 0
+    -
+      name: Set up Go
+      uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+      with:
+        go-version-file: 'go.mod'
+    -
+      name: Setup
+      run: make -j4 go-modules install-gotestsum install-linter
+    -
+      name: Test Blob Index Manager V0
+      run: make test-index-blob-v0
+    -
+      name: Tests
+      run: make ci-tests
+    -
+      name: Integration Tests
+      run: make -j2 ci-integration-tests
+    -
+      name: Upload Logs
+      uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      with:
+        name: logs-${{ matrix.os }}
+        path: .logs/**/*.log
+        if-no-files-found: ignore
+      if: ${{ always() }}
