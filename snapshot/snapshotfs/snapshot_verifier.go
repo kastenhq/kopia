@@ -31,8 +31,10 @@ type verifyFileWorkItem struct {
 type Verifier struct {
 	throttle timetrack.Throttle
 
-	queued    atomic.Int32
-	processed atomic.Int32
+	queued      atomic.Int32
+	processed   atomic.Int32
+	readBytes   atomic.Int64
+	readObjects atomic.Int32
 
 	fileWorkQueue chan verifyFileWorkItem
 	rep           repo.Repository
@@ -119,7 +121,15 @@ func (v *Verifier) readEntireObject(ctx context.Context, oid object.ID, path str
 	}
 	defer r.Close() //nolint:errcheck
 
-	return errors.Wrap(iocopy.JustCopy(io.Discard, r), "unable to read data")
+	n, err := iocopy.Copy(io.Discard, r)
+	if err != nil {
+		return errors.Wrap(err, "unable to read data")
+	}
+
+	v.readBytes.Add(n)
+	v.readObjects.Add(1)
+
+	return nil
 }
 
 // VerifierOptions provides options for the verifier.
@@ -134,21 +144,27 @@ type VerifierOptions struct {
 // VerifierResult returns results from the verifier.
 type VerifierResult struct {
 	ProcessedObjectCount int      `json:"processedObjectCount"`
+	ReadObjectCount      int      `json:"readObjectCount"`
+	ReadBytes            int      `json:"readBytes"`
 	ErrorCount           int      `json:"errorCount"`
 	Errors               []error  `json:"-"`
 	ErrorStrings         []string `json:"errorStrings,omitempty"`
 }
 
-// InParallel starts parallel verification and invokes the provided function which can
-// call Process() on in the provided TreeWalker.
-func (v *Verifier) InParallel(ctx context.Context, enqueue func(tw *TreeWalker) error) (*VerifierResult, error) {
+// InParallel starts parallel verification and invokes the provided function
+// which can call Process() on in the provided TreeWalker. Errors and stats
+// are accumulated into a VerifierResult and returned, independent of whether
+// the error return is nil, that is, `VerifierResult` will contain useful,
+// partial stats when an error is returned, including a collection of errors
+// found in the verification process.
+func (v *Verifier) InParallel(ctx context.Context, enqueue func(tw *TreeWalker) error) (VerifierResult, error) {
 	tw, twerr := NewTreeWalker(ctx, TreeWalkerOptions{
 		Parallelism:   v.opts.Parallelism,
 		EntryCallback: v.verifyObject,
 		MaxErrors:     v.opts.MaxErrors,
 	})
 	if twerr != nil {
-		return nil, errors.Wrap(twerr, "tree walker")
+		return VerifierResult{}, errors.Wrap(twerr, "tree walker")
 	}
 	defer tw.Close(ctx)
 
@@ -173,6 +189,10 @@ func (v *Verifier) InParallel(ctx context.Context, enqueue func(tw *TreeWalker) 
 	}
 
 	err := enqueue(tw)
+	if err != nil {
+		// Pass the enqueue error to the tree walker for later accumulation.
+		tw.ReportError(ctx, "tree walker enqueue", err)
+	}
 
 	close(v.fileWorkQueue)
 	v.workersWG.Wait()
@@ -185,26 +205,15 @@ func (v *Verifier) InParallel(ctx context.Context, enqueue func(tw *TreeWalker) 
 		errStrs = append(errStrs, twErr.Error())
 	}
 
-	result := &VerifierResult{
+	// Return the tree walker error output along with result details.
+	return VerifierResult{
 		ProcessedObjectCount: int(v.processed.Load()),
+		ReadObjectCount:      int(v.readObjects.Load()),
+		ReadBytes:            int(v.readBytes.Load()),
 		ErrorCount:           numErrors,
 		Errors:               twErrs,
 		ErrorStrings:         errStrs,
-	}
-
-	if err != nil {
-		// In some circumstances, the enqueue function may return an error itself, for instance
-		// if it failed to resolve the snapshot manifest from the ID.
-		// Append that error to the result output and return.
-		result.Errors = append(result.Errors, err)
-		result.ErrorStrings = append(result.ErrorStrings, err.Error())
-		result.ErrorCount++
-
-		return result, err
-	}
-
-	// Otherwise return the tree walker error output along with result details.
-	return result, tw.Err()
+	}, nil
 }
 
 // NewVerifier creates a verifier.
