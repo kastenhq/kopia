@@ -10,7 +10,7 @@ import (
 // without additional concurrency coordination.
 // Added counters cannot be removed.
 type CountersMap[K comparable] struct {
-	// Stores map[K]*uint32
+	// Stores map[K]*atomic.Uint32
 	// The counter is stored as pointer so it can be updated with atomic operations.
 	data   sync.Map
 	length atomic.Uint32
@@ -29,13 +29,13 @@ func (m *CountersMap[K]) Add(key K, v uint32) bool {
 	// (value) allocations in workloads where the entry likely exists already.
 	actual, found := m.data.Load(key)
 	if !found {
-		actual, found = m.data.LoadOrStore(key, new(uint32))
+		actual, found = m.data.LoadOrStore(key, &atomic.Uint32{})
 		if !found {
 			m.length.Add(1)
 		}
 	}
 
-	atomic.AddUint32(actual.(*uint32), v) //nolint:forcetypeassert
+	actual.(*atomic.Uint32).Add(v) //nolint:forcetypeassert
 
 	return found
 }
@@ -53,14 +53,14 @@ func (m *CountersMap[K]) Get(key K) (uint32, bool) {
 		return 0, false // Key not found, return 0
 	}
 
-	return atomic.LoadUint32(actual.(*uint32)), true //nolint:forcetypeassert
+	return actual.(*atomic.Uint32).Load(), true //nolint:forcetypeassert
 }
 
 // Range iterates over all key/count pairs in the map, calling f for each item.
 // If f returns false, iteration stops.
 func (m *CountersMap[K]) Range(f func(key K, count uint32) bool) {
 	m.data.Range(func(k any, v any) bool {
-		return f(k.(K), atomic.LoadUint32(v.(*uint32))) //nolint:forcetypeassert
+		return f(k.(K), v.(*atomic.Uint32).Load()) //nolint:forcetypeassert
 	})
 }
 
