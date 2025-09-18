@@ -2,6 +2,7 @@ package maintenance
 
 import (
 	"context"
+	"math/rand/v2"
 	"os"
 	"strconv"
 
@@ -31,17 +32,35 @@ func checkContentIndexToPacks(ctx context.Context, rep repo.DirectRepositoryWrit
 	return nil
 }
 
-func maybeCheckContentIndexToPacks(ctx context.Context, rep repo.DirectRepositoryWriter) error {
-	if enabled, _ := strconv.ParseBool(os.Getenv("KOPIA_MAINTENANCE_CONTENT_CONSISTENCY_CHECK")); enabled {
-		return checkContentIndexToPacks(ctx, rep)
+func shouldRunContentIndexVerify(ctx context.Context) bool {
+	const envName = "KOPIA_MAINTENANCE_CONTENT_VERIFY_PERCENTAGE"
+
+	v := os.Getenv(envName)
+	if v == "" {
+		return false
 	}
 
-	return nil
+	percentage, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		log(ctx).Warnf("The '%s' environment variable appears to have a non numeric value: '%q', %s", envName, v, err)
+
+		return false
+	}
+
+	if rand.Float64() < percentage/100 { //nolint:gosec
+		return true
+	}
+
+	return false
 }
 
 func reportRunAndMaybeCheckContentIndex(ctx context.Context, rep repo.DirectRepositoryWriter, taskType TaskType, s *Schedule, run func() error) error {
+	if !shouldRunContentIndexVerify(ctx) {
+		return ReportRun(ctx, rep, taskType, s, run)
+	}
+
 	return ReportRun(ctx, rep, taskType, s, func() error {
-		if err := maybeCheckContentIndexToPacks(ctx, rep); err != nil {
+		if err := checkContentIndexToPacks(ctx, rep); err != nil {
 			return err
 		}
 
@@ -49,6 +68,6 @@ func reportRunAndMaybeCheckContentIndex(ctx context.Context, rep repo.DirectRepo
 			return err
 		}
 
-		return maybeCheckContentIndexToPacks(ctx, rep)
+		return checkContentIndexToPacks(ctx, rep)
 	})
 }
