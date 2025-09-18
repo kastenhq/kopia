@@ -19,12 +19,14 @@ type CountersMap[K comparable] struct {
 // Increment increases the counter for the specified key by 1.
 // Returns true if the key already existed, false if it was newly created.
 func (m *CountersMap[K]) Increment(key K) bool {
-	return m.Add(key, 1)
+	return m.add(key, 1)
 }
 
-// Add increases the counter for the specified key by the value of v.
+// add increases the counter for the specified key by the value of v.
 // Returns true if the key already existed, false if it was newly created.
-func (m *CountersMap[K]) Add(key K, v uint32) bool {
+// Note: if this function is directly exported at some point, then overflow
+// checks should be performed.
+func (m *CountersMap[K]) add(key K, v uint32) bool {
 	// Attempt looking for an already existing entry first to avoid spurious
 	// (value) allocations in workloads where the entry likely exists already.
 	actual, found := m.data.Load(key)

@@ -37,7 +37,7 @@ func TestConcurrentCountMap_IncrementAndGet_NewAndExistingKey(t *testing.T) {
 func TestConcurrentCountMap_Add(t *testing.T) {
 	var m CountersMap[int]
 
-	found := m.Add(42, 5)
+	found := m.add(42, 5)
 	require.False(t, found, "Add on new key should return false to indicate 'key not previously found'")
 
 	v, found := m.Get(42)
@@ -45,7 +45,7 @@ func TestConcurrentCountMap_Add(t *testing.T) {
 	require.EqualValues(t, 5, v, "expected 5 after add")
 	require.True(t, found)
 
-	found = m.Add(42, 3)
+	found = m.add(42, 3)
 	require.True(t, found, "Add on existing key should return true")
 
 	v, found = m.Get(42)
@@ -64,7 +64,7 @@ func TestConcurrentCountMap_Range(t *testing.T) {
 	}
 
 	for k, v := range expectedMap {
-		require.False(t, m.Add(k, v))
+		require.False(t, m.add(k, v))
 	}
 
 	m.Range(func(key string, gotCount uint32) bool {
@@ -80,23 +80,23 @@ func TestConcurrentCountMap_Range(t *testing.T) {
 func TestConcurrentCountMap_Length(t *testing.T) {
 	var m CountersMap[string]
 
-	require.False(t, m.Add("a", 1))
-	require.False(t, m.Add("b", 2))
+	require.False(t, m.add("a", 1))
+	require.False(t, m.add("b", 2))
 
 	require.EqualValues(t, 2, m.Length())
-	require.True(t, m.Add("b", 2))
+	require.True(t, m.add("b", 2))
 	require.EqualValues(t, 2, m.Length())
 
-	require.False(t, m.Add("c", 3))
+	require.False(t, m.add("c", 3))
 	require.EqualValues(t, 3, m.Length())
 }
 
 func TestConcurrentCountMap_Range_StopEarly(t *testing.T) {
 	var m CountersMap[string]
 
-	require.False(t, m.Add("a", 1))
-	require.False(t, m.Add("b", 2))
-	require.False(t, m.Add("c", 3))
+	require.False(t, m.add("a", 1))
+	require.False(t, m.add("b", 2))
+	require.False(t, m.add("c", 3))
 
 	count := 0
 
@@ -112,8 +112,8 @@ func TestConcurrentCountMap_Range_StopEarly(t *testing.T) {
 func TestConcurrentCountMap_CountMap_Snapshot(t *testing.T) {
 	var m CountersMap[string]
 
-	require.False(t, m.Add("x", 10))
-	require.False(t, m.Add("y", 20))
+	require.False(t, m.add("x", 10))
+	require.False(t, m.add("y", 20))
 
 	expected := map[string]uint32{
 		"x": 10,
