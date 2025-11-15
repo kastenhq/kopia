@@ -1,0 +1,89 @@
+name: Local:CodeQL
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  analyze-actions:
+    name: Analyze Actions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+    steps:
+    -
+      uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+      with:
+        egress-policy: audit
+    -
+      name: Checkout repository
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+    -
+      name: Initialize CodeQL
+      uses: github/codeql-action/init@17783bfb99b07f70fae080b654aed0c514057477 # v2.23.3
+      with:
+        languages: actions
+        queries: security-extended,security-and-quality
+    -
+      name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@17783bfb99b07f70fae080b654aed0c514057477 # v2.23.3
+      with:
+        category: "/language:actions"
+
+  analyze-go:
+    name: Analyze Go
+    # Runner size impacts CodeQL analysis time. To learn more, please see:
+    #   - https://gh.io/recommended-hardware-resources-for-running-codeql
+    #   - https://gh.io/supported-runners-and-hardware-resources
+    #   - https://gh.io/using-larger-runners
+    # Consider using larger runners for possible analysis time improvements.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+    steps:
+    -
+      uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+      with:
+        egress-policy: audit
+    -
+      name: Checkout repository
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+    -
+      name: Setup Go
+      uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+      with:
+        cache: true
+        check-latest: true
+        go-version-file: 'go.mod'
+    -
+      name: Initialize CodeQL
+      uses: github/codeql-action/init@17783bfb99b07f70fae080b654aed0c514057477 # v2.23.3
+      with:
+        build-mode: manual
+        languages: go
+        # Custom queries can be specified here or in a config file.
+        # By default, queries listed here will override any specified in a config file.
+        # Prefix the list here with "+" to use these queries and those in the config file.
+        # For more details on CodeQL's query packs, refer to: https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/configuring-code-scanning#using-queries-in-ql-packs
+        queries: security-extended,security-and-quality
+    -
+      name: Build
+      run: |
+        go build ./...
+        go test -list ./...
+
+    -
+      name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@17783bfb99b07f70fae080b654aed0c514057477 # v2.23.3
+      with:
+        category: "/language:go"
