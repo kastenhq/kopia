@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,6 +57,52 @@ func TestFileStorage(t *testing.T) {
 
 		require.NoError(t, r.Close(ctx))
 	}
+}
+
+func TestFileStorageLongPath(t *testing.T) {
+	t.Parallel()
+
+	ctx := testlogging.Context(t)
+
+	// Create a base temp directory and extend it to exceed Windows MAX_PATH (260 chars).
+	base := testutil.TempDirectoryShort(t)
+
+	// Append enough characters so the path exceeds 260 characters total.
+	const minLongPathLen = 270
+
+	suffix := strings.Repeat("x", minLongPathLen-len(base))
+	longBase := filepath.Join(base, suffix)
+
+	require.NoError(t, os.MkdirAll(longBase, 0o700))
+
+	r, err := New(ctx, &Options{
+		Path: longBase,
+		Options: sharded.Options{
+			DirectoryShards: []int{2, 2},
+		},
+	}, true)
+	require.NoError(t, err)
+	require.NotNil(t, r)
+
+	defer r.Close(ctx)
+
+	blobID := blob.ID("testbloblongpath12345678")
+	data := []byte{1, 2, 3, 4, 5}
+
+	require.NoError(t, r.PutBlob(ctx, blobID, gather.FromSlice(data), blob.PutOptions{}))
+
+	var buf gather.WriteBuffer
+	defer buf.Close()
+
+	require.NoError(t, r.GetBlob(ctx, blobID, 0, -1, &buf))
+	require.Equal(t, data, buf.ToByteSlice())
+
+	blobs, err := blob.ListAllBlobs(ctx, r, "")
+	require.NoError(t, err)
+	require.Len(t, blobs, 1)
+	require.Equal(t, blobID, blobs[0].BlobID)
+
+	require.NoError(t, r.DeleteBlob(ctx, blobID))
 }
 
 func TestFileStorageValidate(t *testing.T) {
