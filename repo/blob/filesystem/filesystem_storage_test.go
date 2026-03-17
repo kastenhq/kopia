@@ -2,7 +2,6 @@ package filesystem
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -67,13 +66,33 @@ func TestFileStorageLongPath(t *testing.T) {
 	// Create a base temp directory and extend it to exceed Windows MAX_PATH (260 chars).
 	base := testutil.TempDirectoryShort(t)
 
-	// Append enough characters so the path exceeds 260 characters total.
+	// Ensure the resulting path exceeds this length (slightly above 260).
 	const minLongPathLen = 270
 
-	suffix := strings.Repeat("x", minLongPathLen-len(base))
-	longBase := filepath.Join(base, suffix)
+	longBase := base
+	if len(longBase) < minLongPathLen {
+		const maxSegmentLen = 60
 
-	require.NoError(t, os.MkdirAll(longBase, 0o700))
+		// Append multiple reasonably sized subdirectories until the total path length
+		// exceeds minLongPathLen, avoiding a single over-long path component and
+		// guarding against negative repeat counts.
+		for len(longBase) < minLongPathLen {
+			remaining := minLongPathLen - len(longBase)
+
+			// Leave room for a path separator added by filepath.Join.
+			segLen := maxSegmentLen
+			if remaining <= maxSegmentLen+1 {
+				segLen = remaining - 1
+			}
+
+			if segLen <= 0 {
+				break
+			}
+
+			segment := strings.Repeat("x", segLen)
+			longBase = filepath.Join(longBase, segment)
+		}
+	}
 
 	r, err := New(ctx, &Options{
 		Path: longBase,
@@ -84,7 +103,9 @@ func TestFileStorageLongPath(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, r)
 
-	defer r.Close(ctx)
+	t.Cleanup(func() {
+		require.NoError(t, r.Close(testlogging.ContextForCleanup(t)))
+	})
 
 	blobID := blob.ID("testbloblongpath12345678")
 	data := []byte{1, 2, 3, 4, 5}
