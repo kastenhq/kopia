@@ -2,6 +2,7 @@ package filesystem
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
