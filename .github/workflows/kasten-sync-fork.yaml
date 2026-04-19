@@ -36,4 +36,5 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
+        gh auth refresh -s workflow
         gh repo sync ${{ github.repository }} -b ${{ inputs.target_branch || 'master' }}
