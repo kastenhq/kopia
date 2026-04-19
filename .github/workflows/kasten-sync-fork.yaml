@@ -1,0 +1,39 @@
+name: Sync Fork
+on:
+  push:
+    branches: [ main, kasten ]
+  schedule:
+    - cron: '30 5 * * 1-5'
+      timezone: "America/Los_Angeles"
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: 'target branch for repo sync'
+        default: 'master'
+        required: true
+        type: choice
+        options:
+        - master
+        - upstream
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    name: Sync Fork
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    -
+      uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+      with:
+        egress-policy: audit
+    -
+      name: Sync
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh repo sync ${{ github.repository }} -b ${{ inputs.target_branch || 'master' }}
