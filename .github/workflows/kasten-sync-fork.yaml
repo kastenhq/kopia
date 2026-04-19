@@ -1,7 +1,7 @@
 name: Sync Fork
 on:
   push:
-    branches: [ main, kasten ]
+    branches: [ main, kasten, poc/test-sync ]
   schedule:
     - cron: '30 5 * * 1-5'
       timezone: "America/Los_Angeles"
