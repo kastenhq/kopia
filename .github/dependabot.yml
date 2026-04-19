@@ -5,11 +5,8 @@ updates:
     open-pull-requests-limit: 5
     schedule:
       interval: weekly
-      day: sunday
-      # UTC
-      time: "12:17"
     cooldown:
-      default-days: 4
+      default-days: 6
     ignore:
       # htmluibuild is explicitly updated by us
       - dependency-name: "github.com/kopia/htmluibuild"
@@ -35,7 +32,7 @@ updates:
     schedule:
       interval: monthly
     cooldown:
-      default-days: 4
+      default-days: 7
     groups:
       github-actions:
         patterns:
