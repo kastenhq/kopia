@@ -1,5 +1,4 @@
 //go:build testing
-// +build testing
 
 package clock
 
@@ -29,7 +28,7 @@ func init() {
 }
 
 // getTimeFromServer returns a function that will return timestamp as returned by the server
-// increasing it client-side by certain inteval until maximum is reached, at which point
+// increasing it client-side by certain interval until maximum is reached, at which point
 // it will ask the server again for new timestamp.
 //
 // The server endpoint must be HTTP and be set using KOPIA_FAKE_CLOCK_ENDPOINT environment

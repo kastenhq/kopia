@@ -4,7 +4,7 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/units"
@@ -56,11 +56,7 @@ func (c *commonThrottleSet) apply(ctx context.Context, limits *throttling.Limits
 		return err
 	}
 
-	if err := c.setThrottleInt(ctx, "concurrent writes", &limits.ConcurrentWrites, c.setConcurrentWrites, changeCount); err != nil {
-		return err
-	}
-
-	return nil
+	return c.setThrottleInt(ctx, "concurrent writes", &limits.ConcurrentWrites, c.setConcurrentWrites, changeCount)
 }
 
 func (c *commonThrottleSet) setThrottleFloat64(ctx context.Context, desc string, bps bool, val *float64, str string, changeCount *int) error {
@@ -79,7 +75,6 @@ func (c *commonThrottleSet) setThrottleFloat64(ctx context.Context, desc string,
 		return nil
 	}
 
-	//nolint:gomnd
 	v, err := strconv.ParseFloat(str, 64)
 	if err != nil {
 		return errors.Wrapf(err, "can't parse the %v %q", desc, str)
@@ -114,8 +109,7 @@ func (c *commonThrottleSet) setThrottleInt(ctx context.Context, desc string, val
 		return nil
 	}
 
-	//nolint:gomnd
-	v, err := strconv.ParseInt(str, 10, 64)
+	v, err := strconv.Atoi(str)
 	if err != nil {
 		return errors.Wrapf(err, "can't parse the %v %q", desc, str)
 	}
@@ -124,7 +118,7 @@ func (c *commonThrottleSet) setThrottleInt(ctx context.Context, desc string, val
 
 	log(ctx).Infof("Setting %v to %v.", desc, v)
 
-	*val = int(v)
+	*val = v
 
 	return nil
 }

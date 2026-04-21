@@ -1,12 +1,30 @@
 ---
-title: "Command Line"
-linkTitle: "Command Line"
+title: "Command-Line Reference"
+linkTitle: "Command-Line Reference"
 weight: 10
 ---
 
 Kopia provides a command-line interface (CLI) for accessing all its functions. All commands are accessible through single binary called `kopia` (or `kopia.exe` on Windows).
 
 Kopia functionality is organized into [Common Commands](common/) for typical use or [Advanced Commands](advanced/) for low-level data manipulation or recovery. Click on the above links for more details.
+
+### Environment Variables
+
+The following environment variables can be used to configure how Kopia runs:
+
+| Variable Name               | Default | Description                                                                                              |
+| --------------------------- | ------- | -------------------------------------------------------------------------------------------------------- |
+| `KOPIA_BYTES_STRING_BASE_2` | `false` | If set to `true`, Kopia will output storage values in binary (base-2). The default is decimal (base-10). |
+
+### Global Flags
+
+The following flags apply to all Kopia commands:
+
+| Flag                | Description                                                                                  |
+| ------------------- | -------------------------------------------------------------------------------------------- |
+| `--[no-]progress`   | Enable or disable progress output (default: enabled).                                        |
+| `--log-level`       | Set console log level: `debug`, `info`, `warning`, or `error` (default: `info`).            |
+| `--config-file`     | Override the default configuration file location.                                            |
 
 ### Connecting to Repository
 

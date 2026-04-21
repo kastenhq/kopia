@@ -2,12 +2,13 @@ package cli
 
 import (
 	"context"
+	"slices"
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/blobcrypto"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/repo"
-	"github.com/kopia/kopia/repo/content"
 )
 
 type commandLogsShow struct {
@@ -38,18 +39,12 @@ func (c *commandLogsShow) run(ctx context.Context, rep repo.DirectRepository) er
 
 	if len(c.logSessionIDs) > 0 {
 		sessions = filterLogSessions(sessions, func(l *logSessionInfo) bool {
-			for _, sid := range c.logSessionIDs {
-				if l.id == sid {
-					return true
-				}
-			}
-
-			return false
+			return slices.Contains(c.logSessionIDs, l.id)
 		})
 	}
 
 	if len(sessions) == 0 {
-		return errors.Errorf("no logs found")
+		return errors.New("no logs found")
 	}
 
 	// by default show latest one
@@ -70,7 +65,7 @@ func (c *commandLogsShow) run(ctx context.Context, rep repo.DirectRepository) er
 				return errors.Wrap(err, "error getting log")
 			}
 
-			if err := content.DecryptBLOB(rep.ContentReader().ContentFormat(), data.Bytes(), bm.BlobID, &decrypted); err != nil {
+			if err := blobcrypto.Decrypt(rep.ContentReader().ContentFormat(), data.Bytes(), bm.BlobID, &decrypted); err != nil {
 				return errors.Wrap(err, "error decrypting log")
 			}
 

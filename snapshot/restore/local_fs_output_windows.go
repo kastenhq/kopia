@@ -7,13 +7,15 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
 
-	"github.com/kopia/kopia/internal/atomicfile"
+	"github.com/kopia/kopia/internal/ospath"
 )
 
+//nolint:revive
 func symlinkChown(path string, uid, gid int) error {
 	return nil
 }
 
+//nolint:revive
 func symlinkChmod(path string, mode os.FileMode) error {
 	return nil
 }
@@ -22,7 +24,7 @@ func symlinkChtimes(linkPath string, atime, mtime time.Time) error {
 	fta := windows.NsecToFiletime(atime.UnixNano())
 	ftw := windows.NsecToFiletime(mtime.UnixNano())
 
-	linkPath = atomicfile.MaybePrefixLongFilenameOnWindows(linkPath)
+	linkPath = ospath.SafeLongFilename(linkPath)
 
 	fn, err := windows.UTF16PtrFromString(linkPath)
 	if err != nil {

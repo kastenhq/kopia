@@ -51,7 +51,7 @@ func TestCleanupOldData(t *testing.T) {
 	}
 
 	ctx := testlogging.Context(t)
-	st, err := b2.New(ctx, opt)
+	st, err := b2.New(ctx, opt, false)
 	require.NoError(t, err)
 
 	blobtesting.CleanupOldData(ctx, t, st, blobtesting.MinCleanupAge)
@@ -76,13 +76,17 @@ func TestB2Storage(t *testing.T) {
 
 	// use context that gets canceled after opening storage to ensure it's not used beyond New().
 	newctx, cancel := context.WithCancel(ctx)
-	st, err := b2.New(newctx, opt)
+	st, err := b2.New(newctx, opt, false)
 
 	cancel()
 	require.NoError(t, err)
 
-	defer st.Close(ctx)
-	defer blobtesting.CleanupOldData(ctx, t, st, 0)
+	t.Cleanup(func() {
+		ctx := testlogging.ContextForCleanup(t)
+
+		blobtesting.CleanupOldData(ctx, t, st, 0)
+		st.Close(ctx)
+	})
 
 	blobtesting.VerifyStorage(ctx, t, st, blob.PutOptions{})
 	blobtesting.AssertConnectionInfoRoundTrips(ctx, t, st)
@@ -103,7 +107,7 @@ func TestB2StorageInvalidBlob(t *testing.T) {
 		BucketName: bucket,
 		KeyID:      keyID,
 		Key:        key,
-	})
+	}, false)
 	require.NoError(t, err)
 
 	defer st.Close(ctx)
@@ -130,7 +134,7 @@ func TestB2StorageInvalidBucket(t *testing.T) {
 		BucketName: bucket,
 		KeyID:      keyID,
 		Key:        key,
-	})
+	}, false)
 	require.Error(t, err)
 }
 
@@ -147,6 +151,6 @@ func TestB2StorageInvalidCreds(t *testing.T) {
 		BucketName: bucket,
 		KeyID:      keyID,
 		Key:        key,
-	})
+	}, false)
 	require.Error(t, err)
 }

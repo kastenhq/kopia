@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/pkg/errors"
@@ -11,6 +12,7 @@ import (
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/content"
+	"github.com/kopia/kopia/repo/content/indexblob"
 )
 
 type commandIndexInspect struct {
@@ -41,13 +43,9 @@ func (c *commandIndexInspect) run(ctx context.Context, rep repo.DirectRepository
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		c.dumpIndexBlobEntries(output)
-	}()
+	})
 
 	err := c.runWithOutput(ctx, rep, output)
 	close(output)
@@ -69,7 +67,7 @@ func (c *commandIndexInspect) runWithOutput(ctx context.Context, rep repo.Direct
 			}
 		}
 	default:
-		return errors.Errorf("must pass either --all, --active or provide a list of blob IDs to inspect")
+		return errors.New("must pass either --all, --active or provide a list of blob IDs to inspect")
 	}
 
 	return nil
@@ -81,7 +79,7 @@ func (c *commandIndexInspect) inspectAllBlobs(ctx context.Context, rep repo.Dire
 		return errors.Wrap(err, "error listing index blobs")
 	}
 
-	indexesCh := make(chan content.IndexBlobInfo, len(indexes))
+	indexesCh := make(chan indexblob.Metadata, len(indexes))
 	for _, bm := range indexes {
 		indexesCh <- bm
 	}
@@ -90,7 +88,7 @@ func (c *commandIndexInspect) inspectAllBlobs(ctx context.Context, rep repo.Dire
 
 	var eg errgroup.Group
 
-	for i := 0; i < c.parallel; i++ {
+	for range c.parallel {
 		eg.Go(func() error {
 			for bm := range indexesCh {
 				if err := c.inspectSingleIndexBlob(ctx, rep, bm.BlobID, output); err != nil {
@@ -108,21 +106,21 @@ func (c *commandIndexInspect) inspectAllBlobs(ctx context.Context, rep repo.Dire
 
 func (c *commandIndexInspect) dumpIndexBlobEntries(entries chan indexBlobPlusContentInfo) {
 	for ent := range entries {
+		if !c.shouldInclude(ent.contentInfo) {
+			continue
+		}
+
 		ci := ent.contentInfo
 		bm := ent.indexBlob
 
 		state := "created"
-		if ci.GetDeleted() {
+		if ci.Deleted {
 			state = "deleted"
-		}
-
-		if !c.shouldInclude(ci) {
-			continue
 		}
 
 		c.out.printStdout("%v %v %v %v %v %v %v %v\n",
 			formatTimestampPrecise(bm.Timestamp), bm.BlobID,
-			ci.GetContentID(), state, formatTimestampPrecise(ci.Timestamp()), ci.GetPackBlobID(), ci.GetPackOffset(), ci.GetPackedLength())
+			ci.ContentID, state, formatTimestampPrecise(ci.Timestamp()), ci.PackBlobID, ci.PackOffset, ci.PackedLength)
 	}
 }
 
@@ -131,15 +129,9 @@ func (c *commandIndexInspect) shouldInclude(ci content.Info) bool {
 		return true
 	}
 
-	contentID := ci.GetContentID().String()
+	contentID := ci.ContentID.String()
 
-	for _, cid := range c.contentIDs {
-		if cid == contentID {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(c.contentIDs, contentID)
 }
 
 type indexBlobPlusContentInfo struct {
@@ -162,13 +154,13 @@ func (c *commandIndexInspect) inspectSingleIndexBlob(ctx context.Context, rep re
 		return errors.Wrapf(err, "unable to get data for %v", blobID)
 	}
 
-	entries, err := content.ParseIndexBlob(ctx, blobID, data.Bytes(), rep.ContentReader().ContentFormat())
+	entries, err := content.ParseIndexBlob(blobID, data.Bytes(), rep.ContentReader().ContentFormat())
 	if err != nil {
 		return errors.Wrapf(err, "unable to recover index from %v", blobID)
 	}
 
 	for _, ent := range entries {
-		output <- indexBlobPlusContentInfo{bm, content.ToInfoStruct(ent)}
+		output <- indexBlobPlusContentInfo{bm, ent}
 	}
 
 	return nil

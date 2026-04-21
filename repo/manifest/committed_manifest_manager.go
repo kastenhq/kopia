@@ -14,6 +14,8 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/gather"
+	"github.com/kopia/kopia/internal/impossible"
+	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/content/index"
 )
@@ -32,7 +34,12 @@ type committedManifestManager struct {
 	// +checklocks:cmmu
 	committedEntries map[ID]*manifestEntry
 	// +checklocks:cmmu
-	committedContentIDs map[content.ID]bool
+	committedContentIDs map[content.ID]struct{}
+
+	// autoCompactionThreshold controls the threshold after which the manager auto-compacts
+	// manifest contents
+	// +checklocks:cmmu
+	autoCompactionThreshold int
 }
 
 func (m *committedManifestManager) getCommittedEntryOrNil(ctx context.Context, id ID) (*manifestEntry, error) {
@@ -74,7 +81,7 @@ func (m *committedManifestManager) findCommittedEntries(ctx context.Context, lab
 	return findEntriesMatchingLabels(m.committedEntries, labels), nil
 }
 
-func (m *committedManifestManager) commitEntries(ctx context.Context, entries map[ID]*manifestEntry) (map[content.ID]bool, error) {
+func (m *committedManifestManager) commitEntries(ctx context.Context, entries map[ID]*manifestEntry) (map[content.ID]struct{}, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
@@ -93,7 +100,7 @@ func (m *committedManifestManager) commitEntries(ctx context.Context, entries ma
 // the lock via commitEntries()) and to compact existing committed entries during compaction
 // where the lock is already being held.
 // +checklocks:m.cmmu
-func (m *committedManifestManager) writeEntriesLocked(ctx context.Context, entries map[ID]*manifestEntry) (map[content.ID]bool, error) {
+func (m *committedManifestManager) writeEntriesLocked(ctx context.Context, entries map[ID]*manifestEntry) (map[content.ID]struct{}, error) {
 	if len(entries) == 0 {
 		return nil, nil
 	}
@@ -108,23 +115,23 @@ func (m *committedManifestManager) writeEntriesLocked(ctx context.Context, entri
 	defer buf.Close()
 
 	gz := gzip.NewWriter(&buf)
-	mustSucceed(json.NewEncoder(gz).Encode(man))
-	mustSucceed(gz.Flush())
-	mustSucceed(gz.Close())
+	impossible.PanicOnError(json.NewEncoder(gz).Encode(man))
+	impossible.PanicOnError(gz.Flush())
+	impossible.PanicOnError(gz.Close())
 
-	contentID, err := m.b.WriteContent(ctx, buf.Bytes(), ContentPrefix, content.NoCompression)
+	// TODO: Configure manifest metadata compression with Policy setting
+	contentID, err := m.b.WriteContent(ctx, buf.Bytes(), ContentPrefix, compression.HeaderZstdFastest)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to write content")
 	}
 
 	for _, e := range entries {
 		m.committedEntries[e.ID] = e
-		delete(entries, e.ID)
 	}
 
-	m.committedContentIDs[contentID] = true
+	m.committedContentIDs[contentID] = struct{}{}
 
-	return map[content.ID]bool{contentID: true}, nil
+	return map[content.ID]struct{}{contentID: {}}, nil
 }
 
 // +checklocks:m.cmmu
@@ -143,21 +150,25 @@ func (m *committedManifestManager) loadCommittedContentsLocked(ctx context.Conte
 			Range:    index.PrefixRange(ContentPrefix),
 			Parallel: manifestLoadParallelism,
 		}, func(ci content.Info) error {
-			man, err := loadManifestContent(ctx, m.b, ci.GetContentID())
+			man, err := loadManifestContent(ctx, m.b, ci.ContentID)
 			if err != nil {
-				// this can be used to allow corrupterd repositories to still open and see the
+				// this can be used to allow corrupted repositories to still open and see the
 				// (incomplete) list of manifests.
 				if os.Getenv("KOPIA_IGNORE_MALFORMED_MANIFEST_CONTENTS") != "" {
-					log(ctx).Warnf("ignoring malformed manifest content %v: %v", ci.GetContentID(), err)
+					log(ctx).Warnf("ignoring malformed manifest content %v: %v", ci.ContentID, err)
 
 					return nil
 				}
 
 				return err
 			}
+
 			mu.Lock()
-			manifests[ci.GetContentID()] = man
+
+			manifests[ci.ContentID] = man
+
 			mu.Unlock()
+
 			return nil
 		})
 		if err == nil {
@@ -176,7 +187,7 @@ func (m *committedManifestManager) loadCommittedContentsLocked(ctx context.Conte
 	m.loadManifestContentsLocked(manifests)
 
 	if err := m.maybeCompactLocked(ctx); err != nil {
-		return errors.Errorf("error auto-compacting contents")
+		return errors.Wrap(err, "error auto-compacting contents")
 	}
 
 	return nil
@@ -185,10 +196,10 @@ func (m *committedManifestManager) loadCommittedContentsLocked(ctx context.Conte
 // +checklocks:m.cmmu
 func (m *committedManifestManager) loadManifestContentsLocked(manifests map[content.ID]manifest) {
 	m.committedEntries = map[ID]*manifestEntry{}
-	m.committedContentIDs = map[content.ID]bool{}
+	m.committedContentIDs = map[content.ID]struct{}{}
 
 	for contentID := range manifests {
-		m.committedContentIDs[contentID] = true
+		m.committedContentIDs[contentID] = struct{}{}
 	}
 
 	for _, man := range manifests {
@@ -216,7 +227,9 @@ func (m *committedManifestManager) compact(ctx context.Context) error {
 func (m *committedManifestManager) maybeCompactLocked(ctx context.Context) error {
 	m.verifyLocked()
 
-	if len(m.committedContentIDs) < autoCompactionContentCount {
+	// Don't attempt to compact manifests if the repo was opened in read only mode
+	// since we'll just end up failing.
+	if m.b.IsReadOnly() || len(m.committedContentIDs) < m.autoCompactionThreshold {
 		return nil
 	}
 
@@ -248,19 +261,14 @@ func (m *committedManifestManager) compactLocked(ctx context.Context) error {
 	m.b.DisableIndexFlush(ctx)
 	defer m.b.EnableIndexFlush(ctx)
 
-	tmp := map[ID]*manifestEntry{}
-	for k, v := range m.committedEntries {
-		tmp[k] = v
-	}
-
-	written, err := m.writeEntriesLocked(ctx, tmp)
+	written, err := m.writeEntriesLocked(ctx, m.committedEntries)
 	if err != nil {
 		return err
 	}
 
 	// add the newly-created content to the list, could be duplicate
 	for b := range m.committedContentIDs {
-		if written[b] {
+		if _, ok := written[b]; ok {
 			// do not delete content that was just written.
 			continue
 		}
@@ -346,23 +354,26 @@ func loadManifestContent(ctx context.Context, b contentManager, contentID conten
 		return man, errors.Wrapf(err, "unable to unpack manifest data %q", contentID)
 	}
 
-	if err := json.NewDecoder(gz).Decode(&man); err != nil {
-		return man, errors.Wrapf(err, "unable to parse manifest %q", contentID)
-	}
+	// Will be GC-ed even if we don't close it?
+	//nolint:errcheck
+	defer gz.Close()
 
-	return man, nil
+	man, err = decodeManifestArray(gz)
+
+	return man, errors.Wrapf(err, "unable to parse manifest %q", contentID)
 }
 
-func newCommittedManager(b contentManager) *committedManifestManager {
+func newCommittedManager(b contentManager, autoCompactionThreshold int) *committedManifestManager {
 	debugID := ""
 	if os.Getenv("KOPIA_DEBUG_MANIFEST_MANAGER") != "" {
 		debugID = fmt.Sprintf("%x", rand.Int63()) //nolint:gosec
 	}
 
 	return &committedManifestManager{
-		b:                   b,
-		debugID:             debugID,
-		committedEntries:    map[ID]*manifestEntry{},
-		committedContentIDs: map[content.ID]bool{},
+		b:                       b,
+		debugID:                 debugID,
+		committedEntries:        map[ID]*manifestEntry{},
+		committedContentIDs:     map[content.ID]struct{}{},
+		autoCompactionThreshold: autoCompactionThreshold,
 	}
 }

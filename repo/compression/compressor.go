@@ -8,6 +8,8 @@ import (
 	"io"
 
 	"github.com/pkg/errors"
+
+	"github.com/kopia/kopia/internal/impossible"
 )
 
 const compressionHeaderSize = 4
@@ -30,6 +32,7 @@ var (
 	ByName         = map[Name]Compressor{}
 	HeaderIDToName = map[HeaderID]Name{}
 	IsDeprecated   = map[Name]bool{}
+	isUnsupported  = map[HeaderID]bool{}
 )
 
 // RegisterCompressor registers the provided compressor implementation.
@@ -52,6 +55,13 @@ func RegisterDeprecatedCompressor(name Name, c Compressor) {
 	RegisterCompressor(name, c)
 
 	IsDeprecated[name] = true
+}
+
+func registerUnsupportedCompressor(name Name, c Compressor) {
+	RegisterCompressor(name, c)
+
+	IsDeprecated[name] = true
+	isUnsupported[c.HeaderID()] = true
 }
 
 func compressionHeader(id HeaderID) []byte {
@@ -79,10 +89,19 @@ func DecompressByHeader(output io.Writer, input io.Reader) error {
 	return errors.Wrap(compressor.Decompress(output, input, false), "error decompressing")
 }
 
-func mustSucceed(err error) {
-	if err != nil {
-		panic("unexpected error: " + err.Error())
+// IsSupported returns whether a named compression scheme is supported.
+func IsSupported(name Name) bool {
+	c := ByName[name]
+
+	if c == nil {
+		return false
 	}
+
+	return !isUnsupported[c.HeaderID()]
+}
+
+func mustSucceed(err error) {
+	impossible.PanicOnError(err)
 }
 
 func verifyCompressionHeader(reader io.Reader, want []byte) error {

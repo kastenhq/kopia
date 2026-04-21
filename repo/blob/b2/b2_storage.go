@@ -16,6 +16,7 @@ import (
 	"github.com/kopia/kopia/internal/timestampmeta"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/retrying"
+	"github.com/kopia/kopia/repo/logging"
 )
 
 const (
@@ -24,18 +25,17 @@ const (
 	timeMapKey = "kopia-mtime" // case is important, must be all-lowercase
 )
 
+var log = logging.Module("b2")
+
 type b2Storage struct {
 	Options
+	blob.DefaultProviderImplementation
 
 	cli    *backblaze.B2
 	bucket *backblaze.Bucket
 }
 
-func (s *b2Storage) GetCapacity(ctx context.Context) (blob.Capacity, error) {
-	return blob.Capacity{}, blob.ErrNotAVolume
-}
-
-func (s *b2Storage) GetBlob(ctx context.Context, id blob.ID, offset, length int64, output blob.OutputBuffer) error {
+func (s *b2Storage) GetBlob(_ context.Context, id blob.ID, offset, length int64, output blob.OutputBuffer) error {
 	fileName := s.getObjectNameString(id)
 
 	if offset < 0 {
@@ -64,7 +64,6 @@ func (s *b2Storage) GetBlob(ctx context.Context, id blob.ID, offset, length int6
 			return nil
 		}
 
-		//nolint:wrapcheck
 		return iocopy.JustCopy(output, r)
 	}
 
@@ -91,7 +90,7 @@ func (s *b2Storage) resolveFileID(fileName string) (string, error) {
 	return "", nil
 }
 
-func (s *b2Storage) GetMetadata(ctx context.Context, id blob.ID) (blob.Metadata, error) {
+func (s *b2Storage) GetMetadata(_ context.Context, id blob.ID) (blob.Metadata, error) {
 	fileName := s.getObjectNameString(id)
 
 	fileID, err := s.resolveFileID(fileName)
@@ -149,7 +148,7 @@ func translateError(err error) error {
 	return err
 }
 
-func (s *b2Storage) PutBlob(ctx context.Context, id blob.ID, data blob.Bytes, opts blob.PutOptions) error {
+func (s *b2Storage) PutBlob(_ context.Context, id blob.ID, data blob.Bytes, opts blob.PutOptions) error {
 	switch {
 	case opts.HasRetentionOptions():
 		return errors.Wrap(blob.ErrUnsupportedPutBlobOption, "blob-retention")
@@ -179,7 +178,7 @@ func (s *b2Storage) PutBlob(ctx context.Context, id blob.ID, data blob.Bytes, op
 	return nil
 }
 
-func (s *b2Storage) DeleteBlob(ctx context.Context, id blob.ID) error {
+func (s *b2Storage) DeleteBlob(_ context.Context, id blob.ID) error {
 	_, err := s.bucket.HideFile(s.getObjectNameString(id))
 	err = translateError(err)
 
@@ -195,7 +194,7 @@ func (s *b2Storage) getObjectNameString(id blob.ID) string {
 	return s.Prefix + string(id)
 }
 
-func (s *b2Storage) ListBlobs(ctx context.Context, prefix blob.ID, callback func(blob.Metadata) error) error {
+func (s *b2Storage) ListBlobs(_ context.Context, prefix blob.ID, callback func(blob.Metadata) error) error {
 	const maxFileQuery = 1000
 
 	fullPrefix := s.getObjectNameString(prefix)
@@ -246,20 +245,16 @@ func (s *b2Storage) DisplayName() string {
 	return fmt.Sprintf("B2: %v", s.BucketName)
 }
 
-func (s *b2Storage) Close(ctx context.Context) error {
-	return nil
-}
-
-func (s *b2Storage) FlushCaches(ctx context.Context) error {
-	return nil
-}
-
 func (s *b2Storage) String() string {
 	return fmt.Sprintf("b2://%s/%s", s.BucketName, s.Prefix)
 }
 
 // New creates new B2-backed storage with specified options.
-func New(ctx context.Context, opt *Options) (blob.Storage, error) {
+func New(ctx context.Context, opt *Options, isCreate bool) (blob.Storage, error) {
+	log(ctx).Warn("The B2 storage provider is deprecated and will be removed in the future, use the S3-compatible storage provider instead")
+
+	_ = isCreate
+
 	if opt.BucketName == "" {
 		return nil, errors.New("bucket name must be specified")
 	}
@@ -286,12 +281,5 @@ func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 }
 
 func init() {
-	blob.AddSupportedStorage(
-		b2storageType,
-		func() interface{} {
-			return &Options{}
-		},
-		func(ctx context.Context, o interface{}, isCreate bool) (blob.Storage, error) {
-			return New(ctx, o.(*Options)) //nolint:forcetypeassert
-		})
+	blob.AddSupportedStorage(b2storageType, Options{}, New)
 }

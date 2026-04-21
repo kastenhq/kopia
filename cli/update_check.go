@@ -73,7 +73,7 @@ func (c *App) getUpdateState() (*updateState, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to open update state file")
 	}
-	defer f.Close() //nolint:errcheck,gosec
+	defer f.Close() //nolint:errcheck
 
 	us := &updateState{}
 	if err := json.NewDecoder(f).Decode(us); err != nil {
@@ -92,7 +92,7 @@ func (c *App) maybeInitializeUpdateCheck(ctx context.Context, co *connectOptions
 			NextNotifyTime: clock.Now().Add(c.initialUpdateCheckDelay),
 		}
 		if err := c.writeUpdateState(us); err != nil {
-			log(ctx).Debugf("error initializing update state")
+			log(ctx).Debug("error initializing update state")
 			return
 		}
 
@@ -161,7 +161,7 @@ func (c *App) maybeCheckForUpdates(ctx context.Context) (string, error) {
 	if v := os.Getenv(c.EnvName(checkForUpdatesEnvar)); v != "" {
 		// see if environment variable is set to false.
 		if b, err := strconv.ParseBool(v); err == nil && !b {
-			return "", errors.Errorf("update check disabled")
+			return "", errors.New("update check disabled")
 		}
 	}
 
@@ -199,7 +199,7 @@ func (c *App) maybeCheckGithub(ctx context.Context, us *updateState) error {
 		return nil
 	}
 
-	log(ctx).Debugf("time for next update check has been reached")
+	log(ctx).Debug("time for next update check has been reached")
 
 	// before we check for update, write update state file again, so if this fails
 	// we won't bother GitHub for a while
@@ -245,7 +245,7 @@ func (c *App) maybePrintUpdateNotification(ctx context.Context) {
 	}
 
 	if updatedVersion == "" {
-		log(ctx).Debugf("no updated version available")
+		log(ctx).Debug("no updated version available")
 		return
 	}
 

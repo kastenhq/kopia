@@ -106,7 +106,7 @@ func (ac *aclCache) Authorize(ctx context.Context, rep repo.Repository, username
 	defer ac.mu.Unlock()
 
 	parts := strings.Split(usernameAtHostname, "@")
-	if len(parts) != 2 { //nolint:gomnd
+	if len(parts) != 2 { //nolint:mnd
 		return NoAccess()
 	}
 
@@ -141,7 +141,7 @@ func (ac *aclCache) Authorize(ctx context.Context, rep repo.Repository, username
 	return aclEntriesAuthorizer{acl.EntriesForUser(ac.aclEntries, u, h), u, h}
 }
 
-func (ac *aclCache) Refresh(ctx context.Context) error {
+func (ac *aclCache) Refresh(_ context.Context) error {
 	ac.mu.Lock()
 	defer ac.mu.Unlock()
 
@@ -166,7 +166,7 @@ func (a aclEntriesAuthorizer) ManifestAccessLevel(labels map[string]string) Acce
 }
 
 // DefaultAuthorizer returns Authorizer that will fetch ACLs from the repository
-// and evaluate them in the context of current user to determine their permision levels.
+// and evaluate them in the context of current user to determine their permission levels.
 // It will fall back to legacy authorizer if no ACL entries are defined in the repository.
 func DefaultAuthorizer() Authorizer {
 	return &aclCache{

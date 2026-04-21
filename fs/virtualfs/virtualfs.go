@@ -47,7 +47,7 @@ func (e *virtualEntry) Size() int64 {
 	return e.size
 }
 
-func (e *virtualEntry) Sys() interface{} {
+func (e *virtualEntry) Sys() any {
 	return nil
 }
 
@@ -78,14 +78,8 @@ func (sd *staticDirectory) Child(ctx context.Context, name string) (fs.Entry, er
 	return fs.IterateEntriesAndFindChild(ctx, sd, name)
 }
 
-func (sd *staticDirectory) IterateEntries(ctx context.Context, cb func(context.Context, fs.Entry) error) error {
-	for _, e := range append([]fs.Entry{}, sd.entries...) {
-		if err := cb(ctx, e); err != nil {
-			return err
-		}
-	}
-
-	return nil
+func (sd *staticDirectory) Iterate(_ context.Context) (fs.DirectoryIterator, error) {
+	return fs.StaticIterator(append([]fs.Entry{}, sd.entries...), nil), nil
 }
 
 func (sd *staticDirectory) SupportsMultipleIterations() bool {
@@ -105,69 +99,58 @@ func NewStaticDirectory(name string, entries []fs.Entry) fs.Directory {
 
 type streamingDirectory struct {
 	virtualEntry
-	// Used to generate the next entry and execute the callback on it.
+
+	mu sync.Mutex
+
 	// +checklocks:mu
-	callback func(context.Context, func(context.Context, fs.Entry) error) error
-	mu       sync.Mutex
+	iter fs.DirectoryIterator
 }
 
 var errChildNotSupported = errors.New("streamingDirectory.Child not supported")
 
-func (sd *streamingDirectory) Child(ctx context.Context, name string) (fs.Entry, error) {
+func (sd *streamingDirectory) Child(_ context.Context, _ string) (fs.Entry, error) {
 	return nil, errChildNotSupported
 }
 
 var errIteratorAlreadyUsed = errors.New("cannot use streaming directory iterator more than once") // +checklocksignore: mu
 
-func (sd *streamingDirectory) getIterator() (func(context.Context, func(context.Context, fs.Entry) error) error, error) {
+func (sd *streamingDirectory) Iterate(_ context.Context) (fs.DirectoryIterator, error) {
 	sd.mu.Lock()
 	defer sd.mu.Unlock()
 
-	if sd.callback == nil {
+	if sd.iter == nil {
 		return nil, errIteratorAlreadyUsed
 	}
 
-	cb := sd.callback
-	sd.callback = nil
+	it := sd.iter
+	sd.iter = nil
 
-	return cb, nil
-}
-
-func (sd *streamingDirectory) IterateEntries(
-	ctx context.Context,
-	callback func(context.Context, fs.Entry) error,
-) error {
-	cb, err := sd.getIterator()
-	if err != nil {
-		return err
-	}
-
-	return cb(ctx, callback)
+	return it, nil
 }
 
 func (sd *streamingDirectory) SupportsMultipleIterations() bool {
 	return false
 }
 
-// NewStreamingDirectory returns a directory that will call the given function
-// when IterateEntries is executed.
+// NewStreamingDirectory returns a directory that will invoke the provided iterator
+// on Iterate().
 func NewStreamingDirectory(
 	name string,
-	callback func(context.Context, func(context.Context, fs.Entry) error) error,
+	iter fs.DirectoryIterator,
 ) fs.Directory {
 	return &streamingDirectory{
 		virtualEntry: virtualEntry{
 			name: name,
 			mode: defaultPermissions | os.ModeDir,
 		},
-		callback: callback,
+		iter: iter,
 	}
 }
 
 // virtualFile is an implementation of fs.StreamingFile with an io.Reader.
 type virtualFile struct {
 	virtualEntry
-	reader io.Reader
+	reader io.ReadCloser
 }
 
 var errReaderAlreadyUsed = errors.New("cannot use streaming file reader more than once")
@@ -175,7 +158,7 @@ var errReaderAlreadyUsed = errors.New("cannot use streaming file reader more tha
 // GetReader returns the streaming file's reader.
 // Note: Caller of this function has to ensure concurrency safety.
 // The file's reader is set to nil after the first call.
-func (vf *virtualFile) GetReader(ctx context.Context) (io.Reader, error) {
+func (vf *virtualFile) GetReader(_ context.Context) (io.ReadCloser, error) {
 	if vf.reader == nil {
 		return nil, errReaderAlreadyUsed
 	}
@@ -188,12 +171,12 @@ func (vf *virtualFile) GetReader(ctx context.Context) (io.Reader, error) {
 }
 
 // StreamingFileFromReader returns a streaming file with given name and reader.
-func StreamingFileFromReader(name string, reader io.Reader) fs.StreamingFile {
+func StreamingFileFromReader(name string, reader io.ReadCloser) fs.StreamingFile {
 	return StreamingFileWithModTimeFromReader(name, clock.Now(), reader)
 }
 
 // StreamingFileWithModTimeFromReader returns a streaming file with given name, modified time, and reader.
-func StreamingFileWithModTimeFromReader(name string, t time.Time, reader io.Reader) fs.StreamingFile {
+func StreamingFileWithModTimeFromReader(name string, t time.Time, reader io.ReadCloser) fs.StreamingFile {
 	return &virtualFile{
 		virtualEntry: virtualEntry{
 			name:    name,

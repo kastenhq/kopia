@@ -1,15 +1,14 @@
 ---
 title: "Verifying Validity of Snapshots/Repositories and Trying to Repair Any Corruption"
 linkTitle: "Testing Validity of Backups and Fixing Corruption"
-weight: 5
+weight: 35
 ---
 
-* [Verifying Validity of Snapshots/Repositories](#verifying-validity-of-snapshotsrepositories)
-* [Repairing Corruption of Snapshots/Repositories](#repairing-corruption-of-snapshotsrepositories)
-
-## Verifying Validity of Snapshots/Repositories
+## Consistency 
 
 Backing up data is great, but you also need to be able to restore that data when (if) the time arises. That means you need to test snapshots regularly to ensure that a snapshot remains valid and has not become corrupt after you have created the snapshot. (There are various different reasons why a snapshot may become corrupt; see the [corruption repair discussion below](#repairing-corruption-of-snapshotsrepositories) for more details.)
+
+### Verifying Validity of Snapshots 
 
 The gold standard for testing the validity of backups is to simply [restore the snapshot](../../getting-started/); if restore is successful, then the backup is valid. However, in many situations it is not feasible to conduct a full restore of a snapshot, such as if you do not have enough local hard drive space to do a full restore or if the egress costs of your cloud storage are extremely high (e.g., Amazon S3 charges $0.09 per GB you download). 
 
@@ -25,7 +24,7 @@ If you do not want Kopia to download 100% of your files, you can set `--verify-f
 
 Currently, `kopia snapshot verify --verify-files-percent=# --file-parallelism=10 --parallel=10` must be run via CLI. KopiaUI does not yet have the ability to run `kopia snapshot verify` with the `--verify-files-percent` option, so all KopiaUI users will need to run the command via CLI.
 
-## Repairing Corruption of Snapshots/Repositories
+## Repairing Corruption of Snapshots
 
 ### How Corruption Happens
 
@@ -53,6 +52,6 @@ There are few tips to try, which are generally safe to try:
 
 4. If a repository can’t be opened but was working recently and maintenance has not run yet, it may be helpful to try to remove (or stash away) the most recently-written index files whose names start with `x` in the reverse timestamp order one by one until the issue is fixed. This will effectively roll back the repository writes to a prior state. Exercise caution when removing the files.
 
-5. If the steps above do not help, report your issue on https://kopia.discourse.group or https://slack.kopia.io. Kopia has many low-level data recovery tools, but they should not be used by end users without guidance from developers.
+5. If the steps above do not help, report your issue on https://kopia.discourse.group.
 
-> NOTE: Since all data corruption cases are unique, it’s generally not recommended to attempt fixes recommended to other users even for possibly similar issues, since the particular fix method may not be applicable.
+> NOTE: While Kopia has many low-level data recovery tools, it’s generally not recommended to attempt fixes recommended to other users even for possibly similar issues, since all data corruption cases are unique and the particular fix method may not be applicable. Following those methods may damage the repository further and make the data completely unrecoverable.

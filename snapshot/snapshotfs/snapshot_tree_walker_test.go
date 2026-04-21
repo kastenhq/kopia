@@ -14,10 +14,11 @@ import (
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
+	"github.com/kopia/kopia/snapshot/upload"
 )
 
 func TestSnapshotTreeWalker(t *testing.T) {
-	callbackCounter := new(int32)
+	var callbackCounter atomic.Int32
 
 	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant)
 
@@ -25,7 +26,7 @@ func TestSnapshotTreeWalker(t *testing.T) {
 		ctx,
 		snapshotfs.TreeWalkerOptions{
 			EntryCallback: func(ctx context.Context, entry fs.Entry, oid object.ID, entryPath string) error {
-				atomic.AddInt32(callbackCounter, 1)
+				callbackCounter.Add(1)
 				return nil
 			},
 		})
@@ -46,7 +47,7 @@ func TestSnapshotTreeWalker(t *testing.T) {
 	// root directory, 2 subdirectories + 2 unique files (dir1/file11 === dir2/file22)
 	const numUniqueObjects = 5
 
-	u := snapshotfs.NewUploader(env.RepositoryWriter)
+	u := upload.NewUploader(env.RepositoryWriter)
 	man, err := u.Upload(ctx, sourceRoot, nil, snapshot.SourceInfo{})
 	require.NoError(t, err)
 
@@ -56,12 +57,12 @@ func TestSnapshotTreeWalker(t *testing.T) {
 	require.NoError(t, env.RepositoryWriter.Flush(ctx))
 	require.NoError(t, w.Process(ctx, uploadedRoot, "."))
 
-	require.EqualValues(t, numUniqueObjects, atomic.LoadInt32(callbackCounter))
+	require.EqualValues(t, numUniqueObjects, callbackCounter.Load())
 
 	require.NoError(t, w.Process(ctx, uploadedRoot, "."))
 
 	// callback not invoked again
-	require.EqualValues(t, numUniqueObjects, atomic.LoadInt32(callbackCounter))
+	require.EqualValues(t, numUniqueObjects, callbackCounter.Load())
 
 	// add one more file, upload again
 	dir2.AddFile("file23", []byte{1, 2, 3, 4, 5}, 0o644)
@@ -76,11 +77,11 @@ func TestSnapshotTreeWalker(t *testing.T) {
 	require.NoError(t, w.Process(ctx, uploadedRoot, "."))
 
 	// uploading new object causes 3 new objects: 1 object, 1 update dir2, 1 updated root
-	require.EqualValues(t, numUniqueObjects+3, atomic.LoadInt32(callbackCounter))
+	require.EqualValues(t, numUniqueObjects+3, callbackCounter.Load())
 }
 
 func TestSnapshotTreeWalker_Errors(t *testing.T) {
-	someErr1 := errors.Errorf("some error")
+	someErr1 := errors.New("some error")
 
 	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant)
 
@@ -110,7 +111,7 @@ func TestSnapshotTreeWalker_Errors(t *testing.T) {
 	dir2.AddFile("file21", []byte{1, 2, 3, 4}, 0o644)
 	dir2.AddFile("file22", []byte{1, 2, 3}, 0o644) // same content as dir11/file11
 
-	u := snapshotfs.NewUploader(env.RepositoryWriter)
+	u := upload.NewUploader(env.RepositoryWriter)
 	man, err := u.Upload(ctx, sourceRoot, nil, snapshot.SourceInfo{})
 	require.NoError(t, err)
 
@@ -122,7 +123,7 @@ func TestSnapshotTreeWalker_Errors(t *testing.T) {
 }
 
 func TestSnapshotTreeWalker_MultipleErrors(t *testing.T) {
-	someErr1 := errors.Errorf("some error")
+	someErr1 := errors.New("some error")
 
 	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant)
 
@@ -157,7 +158,7 @@ func TestSnapshotTreeWalker_MultipleErrors(t *testing.T) {
 	dir2.AddFile("file21", []byte{1, 2, 3, 4}, 0o644)
 	dir2.AddFile("file22", []byte{1, 2, 3, 4, 5}, 0o644)
 
-	u := snapshotfs.NewUploader(env.RepositoryWriter)
+	u := upload.NewUploader(env.RepositoryWriter)
 	man, err := u.Upload(ctx, sourceRoot, nil, snapshot.SourceInfo{})
 	require.NoError(t, err)
 
@@ -172,7 +173,7 @@ func TestSnapshotTreeWalker_MultipleErrors(t *testing.T) {
 }
 
 func TestSnapshotTreeWalker_MultipleErrorsSameOID(t *testing.T) {
-	someErr1 := errors.Errorf("some error")
+	someErr1 := errors.New("some error")
 
 	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant)
 
@@ -207,7 +208,7 @@ func TestSnapshotTreeWalker_MultipleErrorsSameOID(t *testing.T) {
 	dir2.AddFile("file21", []byte{1, 2, 3, 4}, 0o644)
 	dir2.AddFile("file22", []byte{1, 2, 3}, 0o644) // same content as dir11/file11
 
-	u := snapshotfs.NewUploader(env.RepositoryWriter)
+	u := upload.NewUploader(env.RepositoryWriter)
 	man, err := u.Upload(ctx, sourceRoot, nil, snapshot.SourceInfo{})
 	require.NoError(t, err)
 

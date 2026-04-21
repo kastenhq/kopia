@@ -3,7 +3,7 @@ package cli
 import (
 	"context"
 
-	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/repo/compression"
@@ -22,6 +22,37 @@ type policyCompressionFlags struct {
 	policySetAddNeverCompress    []string
 	policySetRemoveNeverCompress []string
 	policySetClearNeverCompress  bool
+}
+
+type policyMetadataCompressionFlags struct {
+	policySetMetadataCompressionAlgorithm string
+}
+
+func (c *policyMetadataCompressionFlags) setup(cmd *kingpin.CmdClause) {
+	// Name of compression algorithm.
+	cmd.Flag("metadata-compression", "Metadata Compression algorithm").EnumVar(&c.policySetMetadataCompressionAlgorithm, supportedCompressionAlgorithms()...)
+}
+
+func (c *policyMetadataCompressionFlags) setMetadataCompressionPolicyFromFlags(
+	ctx context.Context,
+	p *policy.MetadataCompressionPolicy,
+	changeCount *int,
+) error { //nolint:unparam
+	if v := c.policySetMetadataCompressionAlgorithm; v != "" {
+		*changeCount++
+
+		if v == inheritPolicyString {
+			log(ctx).Info(" - resetting metadata compression algorithm to default value inherited from parent")
+
+			p.CompressorName = ""
+		} else {
+			log(ctx).Infof(" - setting metadata compression algorithm to %v", v)
+
+			p.CompressorName = compression.Name(v)
+		}
+	}
+
+	return nil
 }
 
 func (c *policyCompressionFlags) setup(cmd *kingpin.CmdClause) {
@@ -54,7 +85,7 @@ func (c *policyCompressionFlags) setCompressionPolicyFromFlags(ctx context.Conte
 		*changeCount++
 
 		if v == inheritPolicyString {
-			log(ctx).Infof(" - resetting compression algorithm to default value inherited from parent")
+			log(ctx).Info(" - resetting compression algorithm to default value inherited from parent")
 
 			p.CompressorName = ""
 		} else {

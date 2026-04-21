@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo/blob"
 )
 
@@ -23,12 +24,7 @@ type myStorage struct {
 }
 
 func TestRegistry(t *testing.T) {
-	blob.AddSupportedStorage("mystorage", func() interface{} {
-		return &myConfig{
-			Field: 3,
-		}
-	}, func(c context.Context, i interface{}, isCreate bool) (blob.Storage, error) {
-		mc := i.(*myConfig)
+	blob.AddSupportedStorage("mystorage", myConfig{Field: 3}, func(c context.Context, mc *myConfig, isCreate bool) (blob.Storage, error) {
 		return &myStorage{cfg: mc, create: isCreate}, nil
 	})
 
@@ -40,9 +36,11 @@ func TestRegistry(t *testing.T) {
 	}, true)
 
 	require.NoError(t, err)
-	require.IsType(t, (*myStorage)(nil), st)
-	require.Equal(t, 4, st.(*myStorage).cfg.Field)
-	require.True(t, st.(*myStorage).create)
+
+	mySt := testutil.EnsureType[*myStorage](t, st)
+
+	require.Equal(t, 4, mySt.cfg.Field)
+	require.True(t, mySt.create)
 
 	_, err = blob.NewStorage(context.Background(), blob.ConnectionInfo{
 		Type: "unknownstorage",
@@ -55,10 +53,7 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestConnectionInfo(t *testing.T) {
-	blob.AddSupportedStorage("mystorage2", func() interface{} {
-		return &myConfig{}
-	}, func(c context.Context, i interface{}, isCreate bool) (blob.Storage, error) {
-		mc := i.(*myConfig)
+	blob.AddSupportedStorage("mystorage2", myConfig{}, func(c context.Context, mc *myConfig, isCreate bool) (blob.Storage, error) {
 		return &myStorage{cfg: mc}, nil
 	})
 

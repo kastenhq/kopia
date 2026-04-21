@@ -1,5 +1,4 @@
 //go:build darwin || (linux && amd64)
-// +build darwin linux,amd64
 
 package robustness
 
@@ -60,7 +59,7 @@ func TestMain(m *testing.M) {
 		rs, err := th.snapshotter.GetRepositoryStatus()
 		exitOnError("failed to get repository status before upgrade", err)
 
-		prev := rs.ContentFormat.MutableParameters.Version
+		prev := rs.ContentFormat.Version
 
 		log.Println("Old repository format:", prev)
 		th.snapshotter.UpgradeRepository()
@@ -68,8 +67,11 @@ func TestMain(m *testing.M) {
 		rs, err = th.snapshotter.GetRepositoryStatus()
 		exitOnError("failed to get repository status after upgrade", err)
 
-		curr := rs.ContentFormat.MutableParameters.Version
+		curr := rs.ContentFormat.Version
 		log.Println("Upgraded repository format:", curr)
+
+		// Reset the env variable.
+		os.Setenv("KOPIA_UPGRADE_LOCK_ENABLED", "")
 	}
 
 	// run the tests
@@ -216,6 +218,8 @@ func (th *kopiaRobustnessTestHarness) getEngine() bool {
 }
 
 func (th *kopiaRobustnessTestHarness) cleanup(ctx context.Context) (retErr error) {
+	os.Setenv("KOPIA_UPGRADE_LOCK_ENABLED", "")
+
 	if th.engine != nil {
 		retErr = th.engine.Shutdown(ctx)
 	}
@@ -242,7 +246,7 @@ func (th *kopiaRobustnessTestHarness) cleanup(ctx context.Context) (retErr error
 		os.RemoveAll(th.baseDirPath)
 	}
 
-	return
+	return retErr
 }
 
 func (th *kopiaRobustnessTestHarness) getUpgrader() bool {

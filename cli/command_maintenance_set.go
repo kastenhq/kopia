@@ -23,6 +23,10 @@ type commandMaintenanceSet struct {
 	maxRetainedLogCount       int
 	maxRetainedLogAge         time.Duration
 	maxTotalRetainedLogSizeMB int64
+
+	extendObjectLocks []bool // optional boolean
+
+	listParallelism int
 }
 
 func (c *commandMaintenanceSet) setup(svc appServices, parent commandParent) {
@@ -36,6 +40,8 @@ func (c *commandMaintenanceSet) setup(svc appServices, parent commandParent) {
 	c.maxRetainedLogCount = -1
 	c.maxRetainedLogAge = -1
 	c.maxTotalRetainedLogSizeMB = -1
+
+	c.listParallelism = -1
 
 	cmd.Flag("owner", "Set maintenance owner user@hostname").StringVar(&c.maintenanceSetOwner)
 
@@ -51,6 +57,9 @@ func (c *commandMaintenanceSet) setup(svc appServices, parent commandParent) {
 	cmd.Flag("max-retained-log-count", "Set maximum number of log sessions to retain").IntVar(&c.maxRetainedLogCount)
 	cmd.Flag("max-retained-log-age", "Set maximum age of log sessions to retain").DurationVar(&c.maxRetainedLogAge)
 	cmd.Flag("max-retained-log-size-mb", "Set maximum total size of log sessions").Int64Var(&c.maxTotalRetainedLogSizeMB)
+	cmd.Flag("extend-object-locks", "Extend retention period of locked objects as part of full maintenance.").BoolListVar(&c.extendObjectLocks)
+
+	cmd.Flag("list-parallelism", "Override list parallelism.").IntVar(&c.listParallelism)
 
 	cmd.Action(svc.directRepositoryWriteAction(c.run))
 }
@@ -76,11 +85,20 @@ func (c *commandMaintenanceSet) setLogCleanupParametersFromFlags(ctx context.Con
 
 	if v := c.maxTotalRetainedLogSizeMB; v != -1 {
 		cl := p.LogRetention.OrDefault()
-		cl.MaxTotalSize = v << 20 //nolint:gomnd
+		cl.MaxTotalSize = v << 20 //nolint:mnd
 		p.LogRetention = cl
 		*changed = true
 
-		log(ctx).Infof("Setting total retained log size to %v.", units.BytesStringBase2(cl.MaxTotalSize))
+		log(ctx).Infof("Setting total retained log size to %v.", units.BytesString(cl.MaxTotalSize))
+	}
+}
+
+func (c *commandMaintenanceSet) setListBlobsParallelismFromFlags(ctx context.Context, p *maintenance.Params, changed *bool) {
+	if v := c.listParallelism; v != -1 {
+		p.ListParallelism = v
+		*changed = true
+
+		log(ctx).Infof("Setting list parallelism to %v.", v)
 	}
 }
 
@@ -121,6 +139,22 @@ func (c *commandMaintenanceSet) setMaintenanceEnabledAndIntervalFromFlags(ctx co
 	}
 }
 
+func (c *commandMaintenanceSet) setMaintenanceObjectLockExtendFromFlags(ctx context.Context, p *maintenance.Params, changed *bool) {
+	// we use lists to distinguish between flag not set
+	// Zero elements == not set, more than zero - flag set, in which case we pick the last value
+	if len(c.extendObjectLocks) > 0 {
+		lastVal := c.extendObjectLocks[len(c.extendObjectLocks)-1]
+		p.ExtendObjectLocks = lastVal
+		*changed = true
+
+		if lastVal {
+			log(ctx).Info("Object Lock extension maintenance enabled.")
+		} else {
+			log(ctx).Info("Object Lock extension maintenance disabled.")
+		}
+	}
+}
+
 func (c *commandMaintenanceSet) run(ctx context.Context, rep repo.DirectRepositoryWriter) error {
 	p, err := maintenance.GetParams(ctx, rep)
 	if err != nil {
@@ -138,6 +172,8 @@ func (c *commandMaintenanceSet) run(ctx context.Context, rep repo.DirectReposito
 	c.setMaintenanceEnabledAndIntervalFromFlags(ctx, &p.QuickCycle, "quick", c.maintenanceSetEnableQuick, c.maintenanceSetQuickFrequency, &changedParams)
 	c.setMaintenanceEnabledAndIntervalFromFlags(ctx, &p.FullCycle, "full", c.maintenanceSetEnableFull, c.maintenanceSetFullFrequency, &changedParams)
 	c.setLogCleanupParametersFromFlags(ctx, p, &changedParams)
+	c.setListBlobsParallelismFromFlags(ctx, p, &changedParams)
+	c.setMaintenanceObjectLockExtendFromFlags(ctx, p, &changedParams)
 
 	if pauseDuration := c.maintenanceSetPauseQuick; pauseDuration != -1 {
 		s.NextQuickMaintenanceTime = rep.Time().Add(pauseDuration)
@@ -154,7 +190,16 @@ func (c *commandMaintenanceSet) run(ctx context.Context, rep repo.DirectReposito
 	}
 
 	if !changedParams && !changedSchedule {
-		return errors.Errorf("no changes specified")
+		return errors.New("no changes specified")
+	}
+
+	blobCfg, err := rep.FormatManager().BlobCfgBlob(ctx)
+	if err != nil {
+		return errors.Wrap(err, "blob configuration")
+	}
+
+	if err = maintenance.CheckExtendRetention(ctx, blobCfg, p); err != nil {
+		return errors.Wrap(err, "unable to apply maintenance changes")
 	}
 
 	if changedSchedule {

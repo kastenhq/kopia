@@ -111,6 +111,10 @@ func (s *eventuallyConsistentStorage) GetCapacity(ctx context.Context) (blob.Cap
 	return s.realStorage.GetCapacity(ctx)
 }
 
+func (s *eventuallyConsistentStorage) IsReadOnly() bool {
+	return false
+}
+
 func (s *eventuallyConsistentStorage) GetBlob(ctx context.Context, id blob.ID, offset, length int64, output blob.OutputBuffer) error {
 	// don't bother caching partial reads
 	if length >= 0 {
@@ -250,13 +254,13 @@ func (s *eventuallyConsistentStorage) ListBlobs(ctx context.Context, prefix blob
 	var resultErr error
 
 	// process recently deleted items and resurrect them with some probability
-	s.recentlyDeleted.Range(func(key, value interface{}) bool {
-		blobID := key.(blob.ID)
+	s.recentlyDeleted.Range(func(key, value any) bool {
+		blobID := key.(blob.ID) //nolint:forcetypeassert
 		if !strings.HasPrefix(string(blobID), string(prefix)) {
 			return true
 		}
 
-		bm := value.(blob.Metadata)
+		bm := value.(blob.Metadata) //nolint:forcetypeassert
 		if age := now.Sub(bm.Timestamp); s.shouldApplyInconsistency(ctx, age, "resurrect recently deleted "+string(bm.BlobID)) {
 			if resultErr = callback(bm); resultErr != nil {
 				return false
@@ -283,6 +287,10 @@ func (s *eventuallyConsistentStorage) DisplayName() string {
 
 func (s *eventuallyConsistentStorage) FlushCaches(ctx context.Context) error {
 	return s.realStorage.FlushCaches(ctx)
+}
+
+func (s *eventuallyConsistentStorage) ExtendBlobRetention(ctx context.Context, b blob.ID, opts blob.ExtendOptions) error {
+	return s.realStorage.ExtendBlobRetention(ctx, b, opts)
 }
 
 // NewEventuallyConsistentStorage returns an eventually-consistent storage wrapper on top

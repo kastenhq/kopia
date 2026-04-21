@@ -41,6 +41,8 @@ type noAccessAuthorizationInfo struct{}
 
 func (noAccessAuthorizationInfo) ContentAccessLevel() AccessLevel { return AccessLevelNone }
 func (noAccessAuthorizationInfo) ManifestAccessLevel(labels map[string]string) AccessLevel {
+	_ = labels
+
 	return AccessLevelNone
 }
 
@@ -79,11 +81,11 @@ func (la legacyAuthorizationInfo) ManifestAccessLevel(labels map[string]string) 
 
 type legacyAuthorizer struct{}
 
-func (legacyAuthorizer) Authorize(ctx context.Context, rep repo.Repository, username string) AuthorizationInfo {
+func (legacyAuthorizer) Authorize(_ context.Context, _ repo.Repository, username string) AuthorizationInfo {
 	return legacyAuthorizationInfo{usernameAtHostname: username}
 }
 
-func (legacyAuthorizer) Refresh(ctx context.Context) error {
+func (legacyAuthorizer) Refresh(_ context.Context) error {
 	return nil
 }
 

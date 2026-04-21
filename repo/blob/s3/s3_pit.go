@@ -102,7 +102,7 @@ func newestAtUnlessDeleted(vs []versionMetadata, t time.Time) (v versionMetadata
 	return v, !v.IsDeleteMarker
 }
 
-// Removes versions that are newer than t. The filtering is done in place and
+// Removes versions that are newer than t. The filtering is done in place
 // and uses the same slice storage as vs. Assumes entries in vs are in descending
 // timestamp order.
 func getOlderThan(vs []versionMetadata, t time.Time) []versionMetadata {
@@ -118,7 +118,7 @@ func getOlderThan(vs []versionMetadata, t time.Time) []versionMetadata {
 // maybePointInTimeStore wraps s with a point-in-time store when s is versioned
 // and a point-in-time value is specified. Otherwise s is returned.
 func maybePointInTimeStore(ctx context.Context, s *s3Storage, pointInTime *time.Time) (blob.Storage, error) {
-	if pit := s.Options.PointInTime; pit == nil || pit.IsZero() {
+	if pit := s.PointInTime; pit == nil || pit.IsZero() {
 		return s, nil
 	}
 

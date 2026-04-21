@@ -32,14 +32,17 @@ type blobCache interface {
 
 type nullCache struct{}
 
+//nolint:revive
 func (nullCache) Get(ctx context.Context, blobID blob.ID) ([]byte, time.Time, bool) {
 	return nil, time.Time{}, false
 }
 
+//nolint:revive
 func (nullCache) Put(ctx context.Context, blobID blob.ID, data []byte) (time.Time, error) {
 	return clock.Now(), nil
 }
 
+//nolint:revive
 func (nullCache) Remove(ctx context.Context, ids []blob.ID) {
 }
 
@@ -53,7 +56,7 @@ type inMemoryCache struct {
 	times map[blob.ID]time.Time
 }
 
-func (c *inMemoryCache) Get(ctx context.Context, blobID blob.ID) ([]byte, time.Time, bool) {
+func (c *inMemoryCache) Get(_ context.Context, blobID blob.ID) ([]byte, time.Time, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -65,7 +68,7 @@ func (c *inMemoryCache) Get(ctx context.Context, blobID blob.ID) ([]byte, time.T
 	return nil, time.Time{}, false
 }
 
-func (c *inMemoryCache) Put(ctx context.Context, blobID blob.ID, data []byte) (time.Time, error) {
+func (c *inMemoryCache) Put(_ context.Context, blobID blob.ID, data []byte) (time.Time, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -75,7 +78,7 @@ func (c *inMemoryCache) Put(ctx context.Context, blobID blob.ID, data []byte) (t
 	return c.times[blobID], nil
 }
 
-func (c *inMemoryCache) Remove(ctx context.Context, ids []blob.ID) {
+func (c *inMemoryCache) Remove(_ context.Context, ids []blob.ID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -89,7 +92,7 @@ type onDiskCache struct {
 	cacheDirectory string
 }
 
-func (c *onDiskCache) Get(ctx context.Context, blobID blob.ID) ([]byte, time.Time, bool) {
+func (c *onDiskCache) Get(_ context.Context, blobID blob.ID) ([]byte, time.Time, bool) {
 	cachedFile := filepath.Join(c.cacheDirectory, string(blobID))
 
 	cst, err := os.Stat(cachedFile)
@@ -105,7 +108,7 @@ func (c *onDiskCache) Get(ctx context.Context, blobID blob.ID) ([]byte, time.Tim
 	return data, cacheMTime, err == nil
 }
 
-func (c *onDiskCache) Put(ctx context.Context, blobID blob.ID, data []byte) (time.Time, error) {
+func (c *onDiskCache) Put(_ context.Context, blobID blob.ID, data []byte) (time.Time, error) {
 	cachedFile := filepath.Join(c.cacheDirectory, string(blobID))
 
 	// optimistically assume cache directory exist, create it if not
@@ -156,7 +159,7 @@ func NewMemoryBlobCache(timeNow func() time.Time) blobCache {
 	}
 }
 
-// NewFormatBlobCache creates an implementationof blobCache for particular cache settings.
+// NewFormatBlobCache creates an implementation of blobCache for particular cache settings.
 func NewFormatBlobCache(cacheDir string, validDuration time.Duration, timeNow func() time.Time) blobCache {
 	if cacheDir != "" {
 		return NewDiskCache(cacheDir)

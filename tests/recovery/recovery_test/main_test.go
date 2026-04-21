@@ -1,5 +1,4 @@
 //go:build darwin || (linux && amd64)
-// +build darwin linux,amd64
 
 package recovery
 
@@ -13,6 +12,8 @@ import (
 
 const (
 	dataSubPath = "recovery-data"
+	dirPath     = "kopia_dummy_repo"
+	dataPath    = "crash-consistency-data"
 )
 
 var repoPathPrefix = flag.String("repo-path-prefix", "", "Point the robustness tests at this path prefix")

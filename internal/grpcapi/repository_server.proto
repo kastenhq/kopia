@@ -118,6 +118,9 @@ message DeleteManifestResponse {
 
 message FindManifestsRequest {
   map<string, string> labels = 1;
+
+  // if set to non-zero, the server will return up to N entries.
+  int32 page_size = 2;
 }
 
 message FindManifestsResponse {
@@ -131,6 +134,32 @@ message PrefetchContentsRequest {
 
 message PrefetchContentsResponse {
   repeated string content_ids = 1;
+}
+
+message ApplyRetentionPolicyRequest {
+  string source_path = 1;
+  bool really_delete = 2;
+}
+
+message ApplyRetentionPolicyResponse {
+  repeated string manifest_ids = 1;
+}
+
+enum NotificationEventArgType {
+  ARG_TYPE_UNKNOWN = 0; // unknown, not provided by old clients
+  ARG_TYPE_EMPTY = 1; // 
+  ARG_TYPE_ERROR_INFO = 2;
+  ARG_TYPE_MULTI_SNAPSHOT_STATUS = 3;
+}
+
+message SendNotificationRequest {
+  string template_name = 1;
+  bytes event_args = 2; // JSON-encoded
+  int32 severity = 3;
+  NotificationEventArgType event_args_type = 4;
+}
+
+message SendNotificationResponse {
 }
 
 message SessionRequest {
@@ -151,11 +180,14 @@ message SessionRequest {
     FindManifestsRequest find_manifests = 17;
     DeleteManifestRequest delete_manifest = 18;
     PrefetchContentsRequest prefetch_contents = 19;
+    ApplyRetentionPolicyRequest apply_retention_policy = 20;
+    SendNotificationRequest send_notification = 21;
   }
 }
 
 message SessionResponse {
   int64 request_id = 1; // corresponds to request ID
+  bool has_more = 3; // if set to true, the client should expect more responses with the same request_id.
 
   oneof response {
     ErrorResponse error = 2;
@@ -170,6 +202,8 @@ message SessionResponse {
     FindManifestsResponse find_manifests = 17;
     DeleteManifestResponse delete_manifest = 18;
     PrefetchContentsResponse prefetch_contents = 19;
+    ApplyRetentionPolicyResponse apply_retention_policy = 20;
+    SendNotificationResponse send_notification = 21;
   }
 }
 

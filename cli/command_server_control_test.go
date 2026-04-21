@@ -1,6 +1,8 @@
 package cli_test
 
 import (
+	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -58,6 +60,7 @@ func TestServerControl(t *testing.T) {
 	require.Eventually(t, func() bool {
 		lines := env.RunAndExpectSuccess(t, "server", "status", "--address", sp.BaseURL, "--server-control-password", sp.ServerControlPassword)
 		t.Logf("lines: %v", lines)
+
 		return hasLine(lines, "IDLE: test-user@test-host:"+dir1) && hasLine(lines, "IDLE: test-user@test-host:"+dir2)
 	}, waitTimeout, pollFrequency)
 
@@ -74,6 +77,7 @@ func TestServerControl(t *testing.T) {
 	require.Eventually(t, func() bool {
 		lines := env.RunAndExpectSuccess(t, "server", "status", "--address", sp.BaseURL, "--server-control-password", sp.ServerControlPassword, "--remote")
 		t.Logf("lines: %v", lines)
+
 		return hasLine(lines, "IDLE: test-user@test-host:"+dir3)
 	}, waitTimeout, pollFrequency)
 
@@ -162,12 +166,61 @@ func TestServerControl(t *testing.T) {
 	env.RunAndExpectFailure(t, "server", "shutdown", "--address", sp.BaseURL, "--server-control-password", sp.ServerControlPassword)
 }
 
-func hasLine(lines []string, lookFor string) bool {
-	for _, l := range lines {
-		if l == lookFor {
-			return true
-		}
+func TestServerControlUDS(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip()
 	}
 
-	return false
+	env := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, testenv.NewInProcRunner(t))
+
+	dir0 := testutil.TempDirectory(t)
+	// the socket path must be < 108 bytes (linux) or 104 bytes (Mac), so can't use long tempdir
+	dir1 := testutil.TempDirectoryShort(t)
+
+	env.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", env.RepoDir, "--override-username=another-user", "--override-hostname=another-host")
+	env.RunAndExpectSuccess(t, "snap", "create", dir0)
+
+	env.RunAndExpectSuccess(t, "repo", "connect", "filesystem", "--path", env.RepoDir, "--override-username=test-user", "--override-hostname=test-host")
+
+	serverStarted := make(chan struct{})
+	serverStopped := make(chan struct{})
+
+	var sp testutil.ServerParameters
+
+	go func() {
+		wait, _ := env.RunAndProcessStderr(t, sp.ProcessOutput,
+			"server", "start", "--insecure", "--random-server-control-password", "--address="+"unix:"+dir1+"/sock")
+
+		close(serverStarted)
+
+		wait()
+
+		close(serverStopped)
+	}()
+
+	select {
+	case <-serverStarted:
+		t.Logf("server started on %v", sp.BaseURL)
+
+	case <-time.After(5 * time.Second):
+		t.Fatalf("server did not start in time")
+	}
+
+	lines := env.RunAndExpectSuccess(t, "server", "status", "--address", sp.BaseURL, "--server-control-password", sp.ServerControlPassword, "--remote")
+	require.Len(t, lines, 1)
+	require.Contains(t, lines, "REMOTE: another-user@another-host:"+dir0)
+
+	env.RunAndExpectSuccess(t, "server", "shutdown", "--address", sp.BaseURL, "--server-control-password", sp.ServerControlPassword)
+
+	select {
+	case <-serverStopped:
+		t.Logf("server shut down")
+
+	case <-time.After(15 * time.Second):
+		t.Fatalf("server did not shutdown in time")
+	}
+}
+
+func hasLine(lines []string, lookFor string) bool {
+	return slices.Contains(lines, lookFor)
 }

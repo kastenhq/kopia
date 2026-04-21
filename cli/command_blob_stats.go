@@ -19,7 +19,7 @@ type commandBlobStats struct {
 }
 
 func (c *commandBlobStats) setup(svc appServices, parent commandParent) {
-	cmd := parent.Command("stats", "Content statistics")
+	cmd := parent.Command("stats", "Blob statistics")
 	cmd.Flag("raw", "Raw numbers").Short('r').BoolVar(&c.raw)
 	cmd.Flag("prefix", "Blob name prefix").StringVar(&c.prefix)
 	cmd.Action(svc.directRepositoryReadAction(c.run))
@@ -34,7 +34,7 @@ func (c *commandBlobStats) run(ctx context.Context, rep repo.DirectRepository) e
 
 	var sizeThresholds []int64
 
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		sizeThresholds = append(sizeThresholds, sizeThreshold)
 		countMap[sizeThreshold] = 0
 		sizeThreshold *= 10
@@ -62,10 +62,9 @@ func (c *commandBlobStats) run(ctx context.Context, rep repo.DirectRepository) e
 		return errors.Wrap(err, "error listing blobs")
 	}
 
-	sizeToString := units.BytesStringBase10
+	sizeToString := units.BytesString[int64]
 	if c.raw {
 		sizeToString = func(l int64) string {
-			//nolint:gomnd
 			return strconv.FormatInt(l, 10)
 		}
 	}

@@ -17,24 +17,30 @@ func Frozen(t time.Time) func() time.Time {
 }
 
 // AutoAdvance returns a time source function that returns a time equal to
-// 't + ((n - 1) * dt)' wheren n is the number of serialized invocations of
+// 'start + ((n - 1) * dt)' where n is the number of serialized invocations of
 // the returned function. The returned function will generate a time series of
-// the form [t, t+dt, t+2dt, t+3dt, ...].
-func AutoAdvance(t time.Time, dt time.Duration) func() time.Time {
-	return NewTimeAdvance(t, dt).NowFunc()
+// the form [start, start+dt, start+2dt, start+3dt, ...].
+func AutoAdvance(start time.Time, dt time.Duration) func() time.Time {
+	return NewAutoAdvance(start, dt).NowFunc()
 }
 
 // TimeAdvance allows controlling the passage of time. Intended to be used in
 // tests.
 type TimeAdvance struct {
-	// +checkatomic
-	delta  int64
+	delta  atomic.Int64
 	autoDt int64
 	base   time.Time
 }
 
-// NewTimeAdvance creates a TimeAdvance with the given start time.
-func NewTimeAdvance(start time.Time, autoDelta time.Duration) *TimeAdvance {
+// NewTimeAdvance creates a TimeAdvance clock with the given start time.
+// The returned clock does not automatically advance time when NowFunc is called.
+func NewTimeAdvance(start time.Time) *TimeAdvance {
+	return NewAutoAdvance(start, 0)
+}
+
+// NewAutoAdvance creates an auto-advancing clock with the given start time and
+// autoDelta automatic time increase en each call to NowFunc().
+func NewAutoAdvance(start time.Time, autoDelta time.Duration) *TimeAdvance {
 	return &TimeAdvance{
 		autoDt: int64(autoDelta),
 		base:   start,
@@ -44,7 +50,7 @@ func NewTimeAdvance(start time.Time, autoDelta time.Duration) *TimeAdvance {
 // NowFunc returns a time provider function for t.
 func (t *TimeAdvance) NowFunc() func() time.Time {
 	return func() time.Time {
-		dt := atomic.AddInt64(&t.delta, t.autoDt) - t.autoDt
+		dt := t.delta.Add(t.autoDt) - t.autoDt
 
 		return t.base.Add(time.Duration(dt))
 	}
@@ -53,7 +59,7 @@ func (t *TimeAdvance) NowFunc() func() time.Time {
 // Advance advances t by dt, such that the next call to t.NowFunc()() returns
 // current t + dt.
 func (t *TimeAdvance) Advance(dt time.Duration) time.Time {
-	advance := atomic.AddInt64(&t.delta, int64(dt))
+	advance := t.delta.Add(int64(dt))
 
 	return t.base.Add(time.Duration(advance))
 }
@@ -81,8 +87,8 @@ func (t *ClockTimeWithOffset) NowFunc() func() time.Time {
 	}
 }
 
-// Advance advances t by dt, such that the next call to t.NowFunc()() returns
-// current t + dt.
+// Advance increases the time offset by dt, such that the next call to
+// t.NowFunc()() returns current time + new offset.
 func (t *ClockTimeWithOffset) Advance(dt time.Duration) time.Time {
 	t.mu.Lock()
 	defer t.mu.Unlock()

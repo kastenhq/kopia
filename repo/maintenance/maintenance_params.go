@@ -23,8 +23,13 @@ type Params struct {
 	FullCycle  CycleParams `json:"full"`
 
 	LogRetention LogRetentionOptions `json:"logRetention"`
+
+	ExtendObjectLocks bool `json:"extendObjectLocks"`
+
+	ListParallelism int `json:"listParallelism"`
 }
 
+// isOwnedByByThisUser determines whether current user is the maintenance owner.
 func (p *Params) isOwnedByByThisUser(rep repo.Repository) bool {
 	return p.Owner == rep.ClientOptions().UsernameAtHost()
 }
@@ -34,13 +39,18 @@ func DefaultParams() Params {
 	return Params{
 		FullCycle: CycleParams{
 			Enabled:  true,
-			Interval: 24 * time.Hour, //nolint:gomnd
+			Interval: 24 * time.Hour, //nolint:mnd
 		},
 		QuickCycle: CycleParams{
 			Enabled:  true,
 			Interval: 1 * time.Hour,
 		},
 		LogRetention: defaultLogRetention(),
+		// Don't attempt to extend object locks by default. This option may not be
+		// supported by all storage providers or blob implementations (currently
+		// supported by S3 backend) and may cause data to be kept longer than
+		// desired if the retention period is relatively long.
+		ExtendObjectLocks: false,
 	}
 }
 
@@ -83,7 +93,7 @@ func GetParams(ctx context.Context, rep repo.Repository) (*Params, error) {
 		return &p, nil
 	}
 
-	// arbitrality pick first pick ID to return in case there's more than one
+	// arbitrarily pick first pick ID to return in case there's more than one
 	// this is possible when two repository clients independently create manifests at approximately the same time
 	// so it should not really matter which one we pick.
 	// see https://github.com/kopia/kopia/issues/391
@@ -99,19 +109,8 @@ func GetParams(ctx context.Context, rep repo.Repository) (*Params, error) {
 
 // SetParams sets the maintenance parameters.
 func SetParams(ctx context.Context, rep repo.RepositoryWriter, par *Params) error {
-	md, err := manifestIDs(ctx, rep)
-	if err != nil {
-		return err
-	}
-
-	if _, err := rep.PutManifest(ctx, manifestLabels, par); err != nil {
+	if _, err := rep.ReplaceManifests(ctx, manifestLabels, par); err != nil {
 		return errors.Wrap(err, "put manifest")
-	}
-
-	for _, m := range md {
-		if err := rep.DeleteManifest(ctx, m.ID); err != nil {
-			return errors.Wrap(err, "delete manifest")
-		}
 	}
 
 	return nil

@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/gather"
+	"github.com/kopia/kopia/internal/metrics"
 	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/format"
@@ -34,7 +35,8 @@ type contentReader interface {
 
 type contentManager interface {
 	contentReader
-	SupportsContentCompression() (bool, error)
+
+	SupportsContentCompression() bool
 	WriteContent(ctx context.Context, data gather.Bytes, prefix content.IDPrefix, comp compression.HeaderID) (content.ID, error)
 }
 
@@ -42,9 +44,9 @@ type contentManager interface {
 type Manager struct {
 	Format format.ObjectFormat
 
-	contentMgr  contentManager
-	newSplitter splitter.Factory
-	writerPool  sync.Pool
+	contentMgr         contentManager
+	newDefaultSplitter splitter.Factory
+	writerPool         sync.Pool
 }
 
 // NewWriter creates an ObjectWriter for writing to the repository.
@@ -52,10 +54,23 @@ func (om *Manager) NewWriter(ctx context.Context, opt WriterOptions) Writer {
 	w, _ := om.writerPool.Get().(*objectWriter)
 	w.ctx = ctx
 	w.om = om
-	w.splitter = om.newSplitter()
+
+	var splitFactory splitter.Factory
+
+	if opt.Splitter != "" {
+		splitFactory = splitter.GetFactory(opt.Splitter)
+	}
+
+	if splitFactory == nil {
+		splitFactory = om.newDefaultSplitter
+	}
+
+	w.splitter = splitFactory()
+
 	w.description = opt.Description
 	w.prefix = opt.Prefix
 	w.compressor = compression.ByName[opt.Compressor]
+	w.metadataCompressor = compression.ByName[opt.MetadataCompressor]
 	w.totalLength = 0
 	w.currentPosition = 0
 
@@ -89,12 +104,12 @@ func (om *Manager) closedWriter(ow *objectWriter) {
 //
 // For example when uploading a 100 GB file it is beneficial to independently upload sections of [0..25GB),
 // [25..50GB), [50GB..75GB) and [75GB..100GB) and concatenate them together as this allows us to run four splitters
-// in parallel utilizing more CPU cores. Because some split points now start at fixed bounaries and not content-specific,
+// in parallel utilizing more CPU cores. Because some split points now start at fixed boundaries and not content-specific,
 // this causes some slight loss of deduplication at concatenation points (typically 1-2 contents, usually <10MB),
 // so this method should only be used for very large files where this overhead is relatively small.
-func (om *Manager) Concatenate(ctx context.Context, objectIDs []ID) (ID, error) {
+func (om *Manager) Concatenate(ctx context.Context, objectIDs []ID, metadataComp compression.Name) (ID, error) {
 	if len(objectIDs) == 0 {
-		return EmptyID, errors.Errorf("empty list of objects")
+		return EmptyID, errors.New("empty list of objects")
 	}
 
 	if len(objectIDs) == 1 {
@@ -114,11 +129,13 @@ func (om *Manager) Concatenate(ctx context.Context, objectIDs []ID) (ID, error) 
 		}
 	}
 
-	log(ctx).Debugf("concatenated: %v total: %v", concatenatedEntries, totalLength)
+	log(ctx).Debugf("concatenated %d entries, total object length: %d", len(concatenatedEntries), totalLength)
 
 	w := om.NewWriter(ctx, WriterOptions{
-		Prefix:      indirectContentPrefix,
-		Description: "CONCATENATED INDEX",
+		Prefix:             indirectContentPrefix,
+		Description:        "CONCATENATED INDEX",
+		Compressor:         metadataComp,
+		MetadataCompressor: metadataComp,
 	})
 	defer w.Close() //nolint:errcheck
 
@@ -131,7 +148,7 @@ func (om *Manager) Concatenate(ctx context.Context, objectIDs []ID) (ID, error) 
 		return EmptyID, errors.Wrap(err, "error writing concatenated index")
 	}
 
-	return IndirectObjectID(concatID), nil
+	return indirectObjectID(concatID), nil
 }
 
 func appendIndexEntriesForObject(ctx context.Context, cr contentReader, indexEntries []IndirectObjectEntry, startingLength int64, objectID ID) (result []IndirectObjectEntry, totalLength int64, _ error) {
@@ -179,7 +196,7 @@ func appendIndexEntries(indexEntries []IndirectObjectEntry, startingLength int64
 	return indexEntries, totalLength
 }
 
-func noop(contentID content.ID) error { return nil }
+func noop(content.ID) error { return nil }
 
 // PrefetchBackingContents attempts to brings contents backing the provided object IDs into the cache.
 // This may succeed only partially due to cache size limits and other.
@@ -197,14 +214,16 @@ func PrefetchBackingContents(ctx context.Context, contentMgr contentManager, obj
 }
 
 // NewObjectManager creates an ObjectManager with the specified content manager and format.
-func NewObjectManager(ctx context.Context, bm contentManager, f format.ObjectFormat) (*Manager, error) {
+func NewObjectManager(_ context.Context, bm contentManager, f format.ObjectFormat, mr *metrics.Registry) (*Manager, error) {
+	_ = mr
+
 	om := &Manager{
 		contentMgr: bm,
 		Format:     f,
 	}
 
 	om.writerPool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return new(objectWriter)
 		},
 	}
@@ -219,7 +238,7 @@ func NewObjectManager(ctx context.Context, bm contentManager, f format.ObjectFor
 		return nil, errors.Errorf("unsupported splitter %q", f.Splitter)
 	}
 
-	om.newSplitter = splitter.Pooled(os)
+	om.newDefaultSplitter = os
 
 	return om, nil
 }

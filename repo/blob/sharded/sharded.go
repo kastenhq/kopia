@@ -22,7 +22,7 @@ const CompleteBlobSuffix = ".f"
 
 var log = logging.Module("sharded") // +checklocksignore
 
-// Impl must be implemented by underlying provided.
+// Impl must be implemented by underlying provider.
 type Impl interface {
 	GetBlobFromPath(ctx context.Context, dirPath, filePath string, offset, length int64, output blob.OutputBuffer) error
 	GetMetadataFromPath(ctx context.Context, dirPath, filePath string) (blob.Metadata, error)
@@ -72,14 +72,14 @@ func (s *Storage) ListBlobs(ctx context.Context, prefix blob.ID, callback func(b
 	pw := parallelwork.NewQueue()
 
 	// channel to which pw will write blob.Metadata, some buf
-	result := make(chan blob.Metadata, 128) //nolint:gomnd
+	result := make(chan blob.Metadata, 128) //nolint:mnd
 
 	finished := make(chan struct{})
 	defer close(finished)
 
 	var walkDir func(string, string) error
 
-	walkDir = func(directory string, currentPrefix string) error {
+	walkDir = func(directory, currentPrefix string) error {
 		select {
 		case <-finished: // already finished
 			return nil
@@ -259,12 +259,12 @@ func (s *Storage) getShardDirectory(ctx context.Context, blobID blob.ID) (string
 func (s *Storage) GetShardedPathAndFilePath(ctx context.Context, blobID blob.ID) (shardPath, filePath string, err error) {
 	shardPath, blobID, err = s.getShardDirectory(ctx, blobID)
 	if err != nil {
-		return
+		return "", "", err
 	}
 
 	filePath = path.Join(shardPath, s.makeFileName(blobID))
 
-	return
+	return shardPath, filePath, nil
 }
 
 // New returns new sharded.Storage helper.

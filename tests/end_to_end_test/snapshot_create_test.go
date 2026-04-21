@@ -5,6 +5,8 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -18,6 +20,7 @@ import (
 	"github.com/kopia/kopia/internal/cachedir"
 	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/snapshot"
+	"github.com/kopia/kopia/snapshot/policy"
 	"github.com/kopia/kopia/tests/clitestutil"
 	"github.com/kopia/kopia/tests/testenv"
 )
@@ -501,7 +504,6 @@ func TestSnapshotCreateWithIgnore(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.desc, func(t *testing.T) {
 			runner := testenv.NewInProcRunner(t)
 			e := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, runner)
@@ -513,6 +515,7 @@ func TestSnapshotCreateWithIgnore(t *testing.T) {
 			}
 
 			defer e.RunAndExpectSuccess(t, "repo", "disconnect")
+
 			e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 			e.RunAndExpectSuccess(t, "snapshot", "create", baseDir)
 			sources := clitestutil.ListSnapshotsAndExpectSuccess(t, e)
@@ -529,6 +532,7 @@ func TestSnapshotCreateWithIgnore(t *testing.T) {
 			var expected []string
 			for _, ex := range tc.expected {
 				expected = appendIfMissing(expected, ex)
+
 				if !strings.HasSuffix(ex, "/") {
 					for d, _ := path.Split(ex); d != ""; d, _ = path.Split(d) {
 						expected = appendIfMissing(expected, d)
@@ -539,6 +543,7 @@ func TestSnapshotCreateWithIgnore(t *testing.T) {
 
 			sort.Strings(output)
 			sort.Strings(expected)
+
 			if diff := pretty.Compare(output, expected); diff != "" {
 				t.Errorf("unexpected directory tree, diff(-got,+want): %v\n", diff)
 			}
@@ -553,8 +558,8 @@ func TestSnapshotCreateAllWithManualSnapshot(t *testing.T) {
 	e := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, runner)
 
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
-	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 
+	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir2)
 
@@ -581,6 +586,7 @@ func TestSnapshotCreateWithStdinStream(t *testing.T) {
 	e := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, runner)
 
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
+
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 
 	// Create a temporary pipe file with test data
@@ -640,10 +646,8 @@ func TestSnapshotCreateWithStdinStream(t *testing.T) {
 }
 
 func appendIfMissing(slice []string, i string) []string {
-	for _, ele := range slice {
-		if ele == i {
-			return slice
-		}
+	if slices.Contains(slice, i) {
+		return slice
 	}
 
 	return append(slice, i)
@@ -719,7 +723,7 @@ func TestSnapshotCreateAllFlushPerSource(t *testing.T) {
 	require.Len(t, indexList2, len(indexList1)+1)
 	require.Len(t, metadataBlobList2, len(metadataBlobList1)+1)
 
-	// snapshot with --flush-per-source, since there are 3 soufces, we'll have 3 index blobs
+	// snapshot with --flush-per-source, since there are 3 sources, we'll have 3 index blobs
 	e.RunAndExpectSuccess(t, "snapshot", "create", "--all", "--flush-per-source")
 
 	indexList3 := e.RunAndExpectSuccess(t, "index", "ls")
@@ -727,4 +731,72 @@ func TestSnapshotCreateAllFlushPerSource(t *testing.T) {
 
 	require.Len(t, indexList3, len(indexList2)+3)
 	require.Len(t, metadataBlobList3, len(metadataBlobList2)+3)
+}
+
+func TestSnapshotCreateAllSnapshotPath(t *testing.T) {
+	t.Parallel()
+
+	runner := testenv.NewInProcRunner(t)
+	e := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, runner)
+
+	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
+
+	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir, "--override-hostname=foo", "--override-username=foo")
+	e.RunAndExpectSuccess(t, "snapshot", "create", "--override-source", "bar@bar:/foo/bar", sharedTestDataDir1)
+	e.RunAndExpectSuccess(t, "snapshot", "create", "--override-source", "bar@bar:C:\\foo\\baz", sharedTestDataDir2)
+	e.RunAndExpectSuccess(t, "snapshot", "create", "--override-source", "/foo/bar", sharedTestDataDir3)
+
+	// Make sure the scheduling policy with manual field is set and visible in the policy list, includes global policy
+	var plist []policy.TargetWithPolicy
+
+	testutil.MustParseJSONLines(t, e.RunAndExpectSuccess(t, "policy", "list", "--json"), &plist)
+
+	if got, want := len(plist), 4; got != want {
+		t.Fatalf("got %v policies, wanted %v", got, want)
+	}
+
+	// all non-global policies should be manual
+	for _, p := range plist {
+		if (p.Target != snapshot.SourceInfo{}) {
+			require.True(t, p.SchedulingPolicy.Manual)
+		}
+	}
+
+	si := clitestutil.ListSnapshotsAndExpectSuccess(t, e, "--all")
+	if got, want := len(si), 3; got != want {
+		t.Fatalf("got %v sources, wanted %v", got, want)
+	}
+
+	require.Equal(t, "bar", si[0].User)
+	require.Equal(t, "bar", si[0].Host)
+	require.Equal(t, "/foo/bar", si[0].Path)
+
+	require.Equal(t, "bar", si[1].User)
+	require.Equal(t, "bar", si[1].Host)
+	require.Equal(t, "C:\\foo\\baz", si[1].Path)
+
+	require.Equal(t, "foo", si[2].User)
+	require.Equal(t, "foo", si[2].Host)
+
+	if runtime.GOOS == windowsOSName {
+		require.Regexp(t, `[A-Z]:\\foo\\bar`, si[2].Path)
+	} else {
+		require.Equal(t, "/foo/bar", si[2].Path)
+	}
+}
+
+func TestSnapshotCreateWithAllAndPath(t *testing.T) {
+	t.Parallel()
+
+	runner := testenv.NewInProcRunner(t)
+	e := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, runner)
+
+	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
+
+	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
+
+	// creating a snapshot with a directory and --all should fail
+	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
+	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir2)
+	e.RunAndExpectFailure(t, "snapshot", "create", sharedTestDataDir1, "--all")
 }

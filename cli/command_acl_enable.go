@@ -27,7 +27,7 @@ func (c *commandACLEnable) run(ctx context.Context, rep repo.RepositoryWriter) e
 	}
 
 	if len(entries) != 0 && !c.reset {
-		return errors.Errorf("ACLs already enabled")
+		return errors.New("ACLs already enabled")
 	}
 
 	if c.reset {
@@ -41,7 +41,7 @@ func (c *commandACLEnable) run(ctx context.Context, rep repo.RepositoryWriter) e
 	}
 
 	for _, e := range auth.DefaultACLs {
-		if err := acl.AddACL(ctx, rep, e); err != nil {
+		if err := acl.AddACL(ctx, rep, e, false); err != nil {
 			return errors.Wrap(err, "unable to add default ACL")
 		}
 	}

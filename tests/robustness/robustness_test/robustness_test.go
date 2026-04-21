@@ -1,11 +1,9 @@
 //go:build darwin || (linux && amd64)
-// +build darwin linux,amd64
 
 package robustness
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 	"testing"
 
@@ -35,12 +33,14 @@ func TestManySmallFiles(t *testing.T) {
 	ctx := testlogging.ContextWithLevel(t, testlogging.LevelInfo)
 
 	_, err := eng.ExecAction(ctx, engine.WriteRandomFilesActionKey, fileWriteOpts)
+	err = eng.CheckErrRecovery(ctx, err, engine.ActionOpts{})
 	require.NoError(t, err)
 
 	snapOut, err := eng.ExecAction(ctx, engine.SnapshotDirActionKey, nil)
 	require.NoError(t, err)
 
 	_, err = eng.ExecAction(ctx, engine.RestoreSnapshotActionKey, snapOut)
+	err = eng.CheckErrRecovery(ctx, err, engine.ActionOpts{})
 	require.NoError(t, err)
 }
 
@@ -70,7 +70,7 @@ func TestOneLargeFile(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
+func TestManySmallFilesAcrossDirectoryTree(t *testing.T) {
 	// TODO: Test takes too long - need to address performance issues with fio writes
 	const (
 		fileSize      = 4096
@@ -91,12 +91,14 @@ func TestManySmallFilesAcrossDirecoryTree(t *testing.T) {
 	ctx := testlogging.ContextWithLevel(t, testlogging.LevelInfo)
 
 	_, err := eng.ExecAction(ctx, engine.WriteRandomFilesActionKey, fileWriteOpts)
+	err = eng.CheckErrRecovery(ctx, err, engine.ActionOpts{})
 	require.NoError(t, err)
 
 	snapOut, err := eng.ExecAction(ctx, engine.SnapshotDirActionKey, nil)
 	require.NoError(t, err)
 
 	_, err = eng.ExecAction(ctx, engine.RestoreSnapshotActionKey, snapOut)
+	err = eng.CheckErrRecovery(ctx, err, engine.ActionOpts{})
 	require.NoError(t, err)
 }
 
@@ -112,7 +114,7 @@ func TestRandomizedSmall(t *testing.T) {
 			string(engine.DeleteRandomSubdirectoryActionKey): strconv.Itoa(1),
 		},
 		engine.WriteRandomFilesActionKey: map[string]string{
-			fiofilewriter.IOLimitPerWriteAction:    fmt.Sprintf("%d", 512*1024*1024),
+			fiofilewriter.IOLimitPerWriteAction:    strconv.Itoa(512 * 1024 * 1024),
 			fiofilewriter.MaxNumFilesPerWriteField: strconv.Itoa(100),
 			fiofilewriter.MaxFileSizeField:         strconv.Itoa(64 * 1024 * 1024),
 			fiofilewriter.MaxDirDepthField:         strconv.Itoa(3),

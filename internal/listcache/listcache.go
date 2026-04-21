@@ -5,6 +5,7 @@ package listcache
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -69,7 +70,7 @@ func (s *listCacheStorage) readBlobsFromCache(ctx context.Context, prefix blob.I
 	}
 
 	if err := json.NewDecoder(verified.Bytes().Reader()).Decode(&cl); err != nil {
-		log(ctx).Warnf("cant't unmarshal cached list results for %v, ignoring", prefix)
+		log(ctx).Warnf("can't unmarshal cached list results for %v, ignoring", prefix)
 		return nil
 	}
 
@@ -140,13 +141,7 @@ func (s *listCacheStorage) DeleteBlob(ctx context.Context, blobID blob.ID) error
 }
 
 func (s *listCacheStorage) isCachedPrefix(prefix blob.ID) bool {
-	for _, p := range s.prefixes {
-		if prefix == p {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(s.prefixes, prefix)
 }
 
 func (s *listCacheStorage) invalidateAfterUpdate(ctx context.Context, blobID blob.ID) {

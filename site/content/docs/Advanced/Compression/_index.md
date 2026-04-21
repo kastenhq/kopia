@@ -4,6 +4,8 @@ linkTitle: "Compression"
 weight: 20
 ---
 
+## Compression
+
 Kopia offers internal content compression feature. Each data block stored may be compressed with the algorithm of user choice.
 
 Here is how the whole process works in a summary (with the [architecture](/docs/advanced/architecture/) in your belly first). When Kopia sees a file to backup, it first splits its data into "chunks" with the configured splitter. Then compute its hash with the configured hash algorithm, and compare it against the existing database. If a matching hash is found, this chunk is already stored, thus can be safely discarded. Otherwise, Kopia applies the compression algorithm on the chunk, encrypt it, and pack a few of such into a blob if fit.
@@ -12,7 +14,7 @@ Kopia allows user to set compression algorithm, minimum and maximum file size an
 
 To see how much data is saved by compression in a repository, use `kopia content stats` command. To see the size before and after compression for each content object, use `kopia content list --json` command then look for ID.
 
-#### Algorithm
+### Algorithm
 
 Some algorithms come with different presets. Others are fixed as the code was originally designed. For example, the [s2 compression](https://github.com/klauspost/compress/tree/master/s2) presents 3 variants: default, better and parallel-n. "default" balances between compression ratio and performance, while "better" offers higher compression ratio at the cost of performance. Both of the two have the concurrency equal to the number of logical cores. "parallel-n" is basically "default" with fixed amount of concurrency.
 
@@ -33,18 +35,17 @@ Repeating 1 times per compression method (total 466.7 MiB).
   3. s2-parallel-4              127.1 MiB    2.3 GiB/s    2951   344.1 MiB
   4. pgzip-best-speed           96.7 MiB     2.1 GiB/s    4127   324.1 MiB
   5. pgzip                      86.3 MiB     1.2 GiB/s    4132   298.7 MiB
-  6. lz4                        131.8 MiB    458.9 MiB/s  17     321.7 MiB
-  7. zstd-fastest               79.8 MiB     356.2 MiB/s  22503  246 MiB
-  8. zstd                       76.8 MiB     323.7 MiB/s  22605  237.8 MiB
-  9. deflate-best-speed         96.7 MiB     220.8 MiB/s  45     310.8 MiB
- 10. gzip-best-speed            94.9 MiB     165 MiB/s    40     305.2 MiB
- 11. deflate-default            86.3 MiB     143.1 MiB/s  34     311 MiB
- 12. zstd-better-compression    74.2 MiB     104 MiB/s    22496  251.4 MiB
- 13. pgzip-best-compression     83 MiB       55.9 MiB/s   4359   299.1 MiB
- 14. gzip                       83.6 MiB     40.5 MiB/s   69     304.8 MiB
- 15. zstd-best-compression      68.9 MiB     19.2 MiB/s   22669  303.4 MiB
- 16. deflate-best-compression   83 MiB       5.6 MiB/s    134    311 MiB
- 17. gzip-best-compression      83 MiB       5.1 MiB/s    137    304.8 MiB
+  6. zstd-fastest               79.8 MiB     356.2 MiB/s  22503  246 MiB
+  7. zstd                       76.8 MiB     323.7 MiB/s  22605  237.8 MiB
+  8. deflate-best-speed         96.7 MiB     220.8 MiB/s  45     310.8 MiB
+  9. gzip-best-speed            94.9 MiB     165 MiB/s    40     305.2 MiB
+ 10. deflate-default            86.3 MiB     143.1 MiB/s  34     311 MiB
+ 11. zstd-better-compression    74.2 MiB     104 MiB/s    22496  251.4 MiB
+ 12. pgzip-best-compression     83 MiB       55.9 MiB/s   4359   299.1 MiB
+ 13. gzip                       83.6 MiB     40.5 MiB/s   69     304.8 MiB
+ 14. zstd-best-compression      68.9 MiB     19.2 MiB/s   22669  303.4 MiB
+ 15. deflate-best-compression   83 MiB       5.6 MiB/s    134    311 MiB
+ 16. gzip-best-compression      83 MiB       5.1 MiB/s    137    304.8 MiB
 ```
 
 As you can see, s2 compression clearly favors performance over compression ratio. zstd on the other hand results almost half the size as s2. pgzip arguably offers the best balance on two worlds.
@@ -71,22 +72,24 @@ Repeating 100 times per compression method (total 12.5 MiB).
   8. gzip-best-speed            33.7 KiB     150.6 MiB/s  28     1.2 MiB
   9. pgzip-best-speed           34.3 KiB     143.7 MiB/s  1649   220.2 MiB
  10. deflate-default            31.2 KiB     126.3 MiB/s  22     1.1 MiB
- 11. lz4                        44.7 KiB     112.6 MiB/s  435    816.7 MiB
- 12. pgzip                      31.2 KiB     94.6 MiB/s   2634   277.5 MiB
- 13. gzip                       30.4 KiB     39.5 MiB/s   26     874.7 KiB
- 14. deflate-best-compression   30.4 KiB     25.4 MiB/s   21     1 MiB
- 15. gzip-best-compression      30.4 KiB     24.5 MiB/s   27     874.9 KiB
- 16. pgzip-best-compression     30.4 KiB     23.1 MiB/s   2646   281.8 MiB
- 17. zstd-best-compression      25.1 KiB     19.3 MiB/s   882    99.3 MiB
+ 11. pgzip                      31.2 KiB     94.6 MiB/s   2634   277.5 MiB
+ 12. gzip                       30.4 KiB     39.5 MiB/s   26     874.7 KiB
+ 13. deflate-best-compression   30.4 KiB     25.4 MiB/s   21     1 MiB
+ 14. gzip-best-compression      30.4 KiB     24.5 MiB/s   27     874.9 KiB
+ 15. pgzip-best-compression     30.4 KiB     23.1 MiB/s   2646   281.8 MiB
+ 16. zstd-best-compression      25.1 KiB     19.3 MiB/s   882    99.3 MiB
 ```
 
-While s2 significantly uses way less memory in this case, pgzip's numbers seem indifferent to the input size. [Turns out](https://github.com/klauspost/pgzip/issues/44), pgzip has different memory usage logic. It would quickly allocate necessary memory and plateau, which s2 is more on a linear fashion. Here is rough graph is demonstrate the difference:
+While s2 uses significantly less memory in this case, pgzip's numbers seem indifferent to the input size. [Turns out](https://github.com/klauspost/pgzip/issues/44), pgzip has different memory usage logic. It would quickly allocate necessary memory and plateau, which s2 exhibits more of a linear growth. The graph below illustrates the difference.
 
 ![s2 vs pgzip](s2_vs_pgzip.svg)
 
 Therefore, if your backup target is small, and memory is extremely restricted, s2 might be necessary. Otherwise, all algorithms are valid candidates.
 
-#### Minimum file size and extensions to compress
+Note: Newer Kopia versions no longer support reading contents that were compressed with the deprecated LZ4 algorithm. If your repository contains data written with LZ4, you must migrate it first using a Kopia version that still supports LZ4—for example by restoring the affected snapshots and/or repacking the repository with one of the currently supported compression algorithms—before upgrading.
+
+
+### Minimum file size and extensions to compress
 
 As discussed above, some compression algorithms make sense only if the payload is large enough. So it might be beneficial to set a minimum file size when using these algorithms.
 
@@ -94,7 +97,7 @@ On the other hand, if Kopia notices that a data chunk grows size after compressi
 
 As for extensions, some file formats are already heavily compressed, such as video files. Applying general-purposed compression would not have much effect, while wasting CPU time. These file extensions are suggested to be set to never compressed.
 
-#### Side note
+### Side note
 
 We also compared the efficiency of compressing a file as whole using standalone tools versus Kopia (that is, split with default `DYNAMIC-4M-BUZHASH` then compress). Here is the result
 

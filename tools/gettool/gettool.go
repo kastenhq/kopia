@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -27,6 +28,7 @@ type ToolInfo struct {
 	stripPathComponents int
 	unsupportedArch     map[string]bool
 	unsupportedOSArch   map[string]bool
+	macosUniversalArch  string
 }
 
 func (ti ToolInfo) actualURL(version, goos, goarch string) string {
@@ -40,6 +42,11 @@ func (ti ToolInfo) actualURL(version, goos, goarch string) string {
 
 	u := ti.urlTemplate
 	u = strings.ReplaceAll(u, "VERSION", version)
+
+	if goos == "darwin" && ti.macosUniversalArch != "" {
+		goarch = ti.macosUniversalArch
+	}
+
 	u = strings.ReplaceAll(u, "GOARCH", replacementFromMap(goarch, ti.archMap))
 	u = strings.ReplaceAll(u, "GOOS", replacementFromMap(goos, ti.osMap))
 	u = strings.ReplaceAll(u, "EXT", replacementFromMap(goos, map[string]string{
@@ -62,18 +69,13 @@ var tools = map[string]ToolInfo{
 	},
 	"hugo": {
 		urlTemplate: "https://github.com/gohugoio/hugo/releases/download/vVERSION/hugo_extended_VERSION_GOOS-GOARCH.EXT",
-		archMap: map[string]string{
-			"amd64": "64bit", "arm": "ARM", "arm64": "ARM64",
-		},
-		osMap: map[string]string{
-			"linux": "Linux", "darwin": "macOS",
-		},
 		unsupportedArch: map[string]bool{
 			"arm": true,
 		},
 		unsupportedOSArch: map[string]bool{
 			"linux/arm64": true,
 		},
+		macosUniversalArch: "universal",
 	},
 	"gotestsum": {
 		urlTemplate: "https://github.com/gotestyourself/gotestsum/releases/download/vVERSION/gotestsum_VERSION_GOOS_GOARCH.tar.gz",
@@ -130,7 +132,7 @@ var (
 	goarch    = flag.String("goarch", runtime.GOARCH, "Override GOARCH")
 
 	testAll             = flag.Bool("test-all", false, "Unpacks the package for all GOOS/ARCH combinations")
-	regenerateChecksums = flag.Bool("regenerate-checksums", false, "Regenerate checksums")
+	regenerateChecksums = flag.String("regenerate-checksums", "", "Regenerate checksums")
 )
 
 //nolint:gochecknoglobals
@@ -178,13 +180,14 @@ func main() {
 	}
 
 	checksums := parseEmbeddedChecksums()
+	downloadedChecksums := map[string]string{}
 
 	var errorCount int
 
-	for _, toolNameVersion := range strings.Split(*tool, ",") {
+	for toolNameVersion := range strings.SplitSeq(*tool, ",") {
 		parts := strings.Split(toolNameVersion, ":")
 
-		//nolint:gomnd
+		//nolint:mnd
 		if len(parts) != 2 {
 			log.Fatalf("invalid tool spec, must be tool:version[,tool:version]")
 		}
@@ -192,20 +195,20 @@ func main() {
 		toolName := parts[0]
 		toolVersion := parts[1]
 
-		if err := downloadTool(toolName, toolVersion, checksums, &errorCount); err != nil {
+		if err := downloadTool(toolName, toolVersion, checksums, downloadedChecksums, &errorCount); err != nil {
 			log.Fatalf("unable to download %v version %v: %v", toolName, toolVersion, err)
 		}
 	}
 
 	// all good
-	if errorCount == 0 && !*regenerateChecksums {
+	if errorCount == 0 && *regenerateChecksums == "" {
 		return
 	}
 
 	// on failure print current checksums, so they can be copy/pasted as the new baseline
 	var lines []string
 
-	for k, v := range checksums {
+	for k, v := range downloadedChecksums {
 		lines = append(lines, fmt.Sprintf("%v: %v", k, v))
 	}
 
@@ -215,14 +218,33 @@ func main() {
 		fmt.Println(l)
 	}
 
-	if *regenerateChecksums {
+	if *regenerateChecksums != "" {
+		if err := writeLinesToFile(lines); err != nil {
+			log.Fatal(err)
+		}
+
 		return
 	}
 
 	log.Fatalf("Error(s) encountered, see log messages above.")
 }
 
-func downloadTool(toolName, toolVersion string, checksums map[string]string, errorCount *int) error {
+func writeLinesToFile(lines []string) error {
+	f, err := os.Create(*regenerateChecksums)
+	if err != nil {
+		return errors.Wrap(err, "writeLinesToFile")
+	}
+
+	defer f.Close() //nolint:errcheck
+
+	for _, l := range lines {
+		fmt.Fprintln(f, l) //nolint:errcheck
+	}
+
+	return nil
+}
+
+func downloadTool(toolName, toolVersion string, oldChecksums, downloadedChecksums map[string]string, errorCount *int) error {
 	t, ok := tools[toolName]
 	if !ok {
 		return errors.Errorf("unsupported tool: %q", toolName)
@@ -235,7 +257,7 @@ func downloadTool(toolName, toolVersion string, checksums map[string]string, err
 				continue
 			}
 
-			if err := autodownload.Download(u, filepath.Join(*outputDir, ba.goos, ba.goarch), checksums, t.stripPathComponents); err != nil {
+			if err := autodownload.Download(u, filepath.Join(*outputDir, ba.goos, ba.goarch), oldChecksums, t.stripPathComponents); err != nil {
 				log.Printf("ERROR %v: %v", u, err)
 
 				*errorCount++
@@ -245,20 +267,21 @@ func downloadTool(toolName, toolVersion string, checksums map[string]string, err
 		return nil
 	}
 
-	if *regenerateChecksums {
+	if *regenerateChecksums != "" {
 		for _, ba := range buildArchitectures {
 			u := t.actualURL(toolVersion, ba.goos, ba.goarch)
 			if u == "" {
 				continue
 			}
 
-			if checksums[u] != "" {
+			if oldChecksums[u] != "" {
+				downloadedChecksums[u] = oldChecksums[u]
 				continue
 			}
 
 			log.Printf("downloading %v...", u)
 
-			if err := autodownload.Download(u, filepath.Join(*outputDir, ba.goos, ba.goarch), checksums, t.stripPathComponents); err != nil {
+			if err := autodownload.Download(u, filepath.Join(*outputDir, ba.goos, ba.goarch), downloadedChecksums, t.stripPathComponents); err != nil {
 				log.Printf("ERROR %v: %v", u, err)
 
 				*errorCount++
@@ -275,7 +298,7 @@ func downloadTool(toolName, toolVersion string, checksums map[string]string, err
 
 	fmt.Printf("Downloading %v version %v from %v...\n", toolName, toolVersion, u)
 
-	if err := autodownload.Download(u, *outputDir, checksums, t.stripPathComponents); err != nil {
+	if err := autodownload.Download(u, *outputDir, oldChecksums, t.stripPathComponents); err != nil {
 		return errors.Wrap(err, "unable to download")
 	}
 

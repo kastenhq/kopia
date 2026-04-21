@@ -10,31 +10,34 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/repo/maintenancestats"
 )
 
 const (
-	maintenanceScheduleKeySize = 32
-	maintenanceScheduleBlobID  = "kopia.maintenance"
+	maintenanceScheduleKeySize    = 32
+	maintenanceScheduleBlobID     = "kopia.maintenance"
+	maintenanceScheduleKeyPurpose = "maintenance schedule"
 )
 
 //nolint:gochecknoglobals
 var (
-	maintenanceScheduleKeyPurpose    = []byte("maintenance schedule")
 	maintenanceScheduleAEADExtraData = []byte("maintenance")
 )
 
 // maxRetainedRunInfoPerRunType the maximum number of retained RunInfo entries per run type.
-const maxRetainedRunInfoPerRunType = 5
+const maxRetainedRunInfoPerRunType = 50
 
 // RunInfo represents information about a single run of a maintenance task.
 type RunInfo struct {
-	Start   time.Time `json:"start"`
-	End     time.Time `json:"end"`
-	Success bool      `json:"success,omitempty"`
-	Error   string    `json:"error,omitempty"`
+	Start   time.Time                `json:"start"`
+	End     time.Time                `json:"end"`
+	Success bool                     `json:"success,omitempty"`
+	Error   string                   `json:"error,omitempty"`
+	Extra   []maintenancestats.Extra `json:"extra,omitempty"`
 }
 
 // Schedule keeps track of scheduled maintenance times.
@@ -45,7 +48,7 @@ type Schedule struct {
 	Runs map[TaskType][]RunInfo `json:"runs"`
 }
 
-// ReportRun adds the provided run information to the history and discards oldest entried.
+// ReportRun adds the provided run information to the history and discards oldest entries.
 func (s *Schedule) ReportRun(taskType TaskType, info RunInfo) {
 	if s.Runs == nil {
 		s.Runs = map[TaskType][]RunInfo{}
@@ -62,7 +65,12 @@ func (s *Schedule) ReportRun(taskType TaskType, info RunInfo) {
 }
 
 func getAES256GCM(rep repo.DirectRepository) (cipher.AEAD, error) {
-	c, err := aes.NewCipher(rep.DeriveKey(maintenanceScheduleKeyPurpose, maintenanceScheduleKeySize))
+	k, err := rep.DeriveKey(maintenanceScheduleKeyPurpose, maintenanceScheduleKeySize)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to derive key for encrypting maintenance schedule blob")
+	}
+
+	c, err := aes.NewCipher(k)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to create AES-256 cipher")
 	}
@@ -72,10 +80,16 @@ func getAES256GCM(rep repo.DirectRepository) (cipher.AEAD, error) {
 }
 
 // TimeToAttemptNextMaintenance returns the time when we should attempt next maintenance.
-func TimeToAttemptNextMaintenance(ctx context.Context, rep repo.DirectRepository, max time.Time) (time.Time, error) {
+// if the maintenance is not owned by this user, returns time.Time{}.
+func TimeToAttemptNextMaintenance(ctx context.Context, rep repo.DirectRepository) (time.Time, error) {
 	mp, err := GetParams(ctx, rep)
 	if err != nil {
 		return time.Time{}, errors.Wrap(err, "unable to get maintenance parameters")
+	}
+
+	// if maintenance is not owned by this user, do not run maintenance here.
+	if !mp.isOwnedByByThisUser(rep) {
+		return time.Time{}, nil
 	}
 
 	ms, err := GetSchedule(ctx, rep)
@@ -83,23 +97,21 @@ func TimeToAttemptNextMaintenance(ctx context.Context, rep repo.DirectRepository
 		return time.Time{}, errors.Wrap(err, "unable to get maintenance schedule")
 	}
 
-	// if maintenance is not owned by this user, return 'max' because ownership may change.
-	if !mp.isOwnedByByThisUser(rep) {
-		log(ctx).Debugw("maintenance not owned by current user.")
-		return max, nil
-	}
-
-	nextMaintenanceTime := max
+	var nextMaintenanceTime time.Time
 
 	if mp.FullCycle.Enabled {
-		if ms.NextFullMaintenanceTime.Before(nextMaintenanceTime) {
-			nextMaintenanceTime = ms.NextFullMaintenanceTime
+		nextMaintenanceTime = ms.NextFullMaintenanceTime
+		if nextMaintenanceTime.IsZero() {
+			nextMaintenanceTime = clock.Now()
 		}
 	}
 
 	if mp.QuickCycle.Enabled {
-		if ms.NextQuickMaintenanceTime.Before(nextMaintenanceTime) {
+		if nextMaintenanceTime.IsZero() || ms.NextQuickMaintenanceTime.Before(nextMaintenanceTime) {
 			nextMaintenanceTime = ms.NextQuickMaintenanceTime
+			if nextMaintenanceTime.IsZero() {
+				nextMaintenanceTime = clock.Now()
+			}
 		}
 	}
 
@@ -130,7 +142,7 @@ func GetSchedule(ctx context.Context, rep repo.DirectRepository) (*Schedule, err
 	v := tmp.ToByteSlice()
 
 	if len(v) < c.NonceSize() {
-		return nil, errors.Errorf("invalid schedule blob")
+		return nil, errors.New("invalid schedule blob")
 	}
 
 	j, err := c.Open(nil, v[0:c.NonceSize()], v[c.NonceSize():], maintenanceScheduleAEADExtraData)
@@ -175,7 +187,7 @@ func SetSchedule(ctx context.Context, rep repo.DirectRepositoryWriter, s *Schedu
 }
 
 // ReportRun reports timing of a maintenance run and persists it in repository.
-func ReportRun(ctx context.Context, rep repo.DirectRepositoryWriter, taskType TaskType, s *Schedule, run func() error) error {
+func ReportRun(ctx context.Context, rep repo.DirectRepositoryWriter, taskType TaskType, s *Schedule, run func() (maintenancestats.Kind, error)) error {
 	if s == nil {
 		var err error
 
@@ -189,7 +201,7 @@ func ReportRun(ctx context.Context, rep repo.DirectRepositoryWriter, taskType Ta
 		Start: rep.Time(),
 	}
 
-	runErr := run()
+	stats, runErr := run()
 
 	ri.End = rep.Time()
 
@@ -197,13 +209,28 @@ func ReportRun(ctx context.Context, rep repo.DirectRepositoryWriter, taskType Ta
 		ri.Error = runErr.Error()
 	} else {
 		ri.Success = true
+		ri.Extra = buildRunStats(ctx, stats)
 	}
 
 	s.ReportRun(taskType, ri)
 
 	if err := SetSchedule(ctx, rep, s); err != nil {
-		log(ctx).Errorf("unable to report run: %v", err)
+		userLog(ctx).Errorf("unable to report run: %v", err)
 	}
 
 	return runErr
+}
+
+func buildRunStats(ctx context.Context, stats maintenancestats.Kind) []maintenancestats.Extra {
+	if stats == nil {
+		return nil
+	}
+
+	extra, err := maintenancestats.BuildExtra(stats)
+	if err != nil {
+		userLog(ctx).Warnf("error building raw data from stats %v, err %v", stats, err)
+		return nil
+	}
+
+	return []maintenancestats.Extra{extra}
 }

@@ -23,7 +23,7 @@ func (o *TarOutput) Parallelizable() bool {
 }
 
 // BeginDirectory implements restore.Output interface.
-func (o *TarOutput) BeginDirectory(ctx context.Context, relativePath string, d fs.Directory) error {
+func (o *TarOutput) BeginDirectory(_ context.Context, relativePath string, d fs.Directory) error {
 	if relativePath == "" {
 		return nil
 	}
@@ -45,17 +45,21 @@ func (o *TarOutput) BeginDirectory(ctx context.Context, relativePath string, d f
 }
 
 // FinishDirectory implements restore.Output interface.
+//
+//nolint:revive
 func (o *TarOutput) FinishDirectory(ctx context.Context, relativePath string, e fs.Directory) error {
 	return nil
 }
 
 // WriteDirEntry implements restore.Output interface.
+//
+//nolint:revive
 func (o *TarOutput) WriteDirEntry(ctx context.Context, relativePath string, de *snapshot.DirEntry, e fs.Directory) error {
 	return nil
 }
 
 // Close implements restore.Output interface.
-func (o *TarOutput) Close(ctx context.Context) error {
+func (o *TarOutput) Close(_ context.Context) error {
 	if err := o.tf.Close(); err != nil {
 		return errors.Wrap(err, "error closing tar")
 	}
@@ -65,7 +69,7 @@ func (o *TarOutput) Close(ctx context.Context) error {
 }
 
 // WriteFile implements restore.Output interface.
-func (o *TarOutput) WriteFile(ctx context.Context, relativePath string, f fs.File) error {
+func (o *TarOutput) WriteFile(ctx context.Context, relativePath string, f fs.File, _ FileWriteProgress) error {
 	r, err := f.Open(ctx)
 	if err != nil {
 		return errors.Wrap(err, "error opening file")
@@ -94,6 +98,8 @@ func (o *TarOutput) WriteFile(ctx context.Context, relativePath string, f fs.Fil
 }
 
 // FileExists implements restore.Output interface.
+//
+//nolint:revive
 func (o *TarOutput) FileExists(ctx context.Context, relativePath string, f fs.File) bool {
 	return false
 }
@@ -123,6 +129,8 @@ func (o *TarOutput) CreateSymlink(ctx context.Context, relativePath string, l fs
 }
 
 // SymlinkExists implements restore.Output interface.
+//
+//nolint:revive
 func (o *TarOutput) SymlinkExists(ctx context.Context, relativePath string, l fs.Symlink) bool {
 	return false
 }

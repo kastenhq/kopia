@@ -2,27 +2,28 @@ package server_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/gorilla/mux"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kopia/kopia/internal/apiclient"
-	"github.com/kopia/kopia/internal/auth"
-	"github.com/kopia/kopia/internal/passwordpersist"
+	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/repotesting"
-	"github.com/kopia/kopia/internal/server"
-	"github.com/kopia/kopia/internal/testlogging"
+	"github.com/kopia/kopia/internal/servertesting"
 	"github.com/kopia/kopia/internal/testutil"
+	"github.com/kopia/kopia/notification"
+	"github.com/kopia/kopia/notification/notifydata"
+	"github.com/kopia/kopia/notification/notifyprofile"
+	"github.com/kopia/kopia/notification/notifytemplate"
+	"github.com/kopia/kopia/notification/sender"
+	"github.com/kopia/kopia/notification/sender/webhook"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/manifest"
@@ -31,116 +32,45 @@ import (
 )
 
 const (
-	testUsername = "foo"
-	testHostname = "bar"
-	testPassword = "123"
 	testPathname = "/tmp/path"
-
-	testUIUsername = "ui-user"
-	testUIPassword = "123456"
 
 	maxCacheSizeBytes = 1e6
 )
 
-//nolint:thelper
-func startServer(t *testing.T, env *repotesting.Environment, tls bool) *repo.APIServerInfo {
-	ctx := testlogging.Context(t)
-
-	s, err := server.New(ctx, &server.Options{
-		ConfigFile:      env.ConfigFile(),
-		PasswordPersist: passwordpersist.File(),
-		Authorizer:      auth.LegacyAuthorizer(),
-		Authenticator: auth.CombineAuthenticators(
-			auth.AuthenticateSingleUser(testUsername+"@"+testHostname, testPassword),
-			auth.AuthenticateSingleUser(testUIUsername, testUIPassword),
-		),
-		RefreshInterval:   1 * time.Minute,
-		UIUser:            testUIUsername,
-		UIPreferencesFile: filepath.Join(testutil.TempDirectory(t), "ui-pref.json"),
-	})
-
-	require.NoError(t, err)
-
-	s.SetRepository(ctx, env.Repository)
-
-	// ensure we disconnect the repository before shutting down the server.
-	t.Cleanup(func() { s.SetRepository(ctx, nil) })
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	asi := &repo.APIServerInfo{}
-
-	m := mux.NewRouter()
-	s.SetupHTMLUIAPIHandlers(m)
-	s.SetupRepositoryAPIHandlers(m)
-	s.SetupControlAPIHandlers(m)
-	s.ServeStaticFiles(m, server.AssetFile())
-
-	hs := httptest.NewUnstartedServer(s.GRPCRouterHandler(m))
-	if tls {
-		hs.EnableHTTP2 = true
-		hs.StartTLS()
-		serverHash := sha256.Sum256(hs.Certificate().Raw)
-		asi.BaseURL = hs.URL
-		asi.TrustedServerCertificateFingerprint = hex.EncodeToString(serverHash[:])
-	} else {
-		hs.Start()
-		asi.BaseURL = hs.URL
-	}
-
-	t.Cleanup(hs.Close)
-
-	return asi
-}
-
-func TestServer_REST(t *testing.T) {
-	testServer(t, true)
-}
-
-func TestServer_GRPC(t *testing.T) {
-	testServer(t, false)
-}
-
-//nolint:thelper
-func testServer(t *testing.T, disableGRPC bool) {
+func TestServer(t *testing.T) {
 	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant)
-	apiServerInfo := startServer(t, env, true)
-
-	apiServerInfo.DisableGRPC = disableGRPC
+	apiServerInfo := servertesting.StartServer(t, env, true)
 
 	ctx2, cancel := context.WithCancel(ctx)
 
-	rep, err := repo.OpenAPIServer(ctx2, apiServerInfo, repo.ClientOptions{
-		Username: testUsername,
-		Hostname: testHostname,
-	}, &content.CachingOptions{
-		CacheDirectory:    testutil.TempDirectory(t),
-		MaxCacheSizeBytes: maxCacheSizeBytes,
-	}, testPassword)
+	rep, err := servertesting.ConnectAndOpenAPIServer(t, ctx2, apiServerInfo, repo.ClientOptions{
+		Username: servertesting.TestUsername,
+		Hostname: servertesting.TestHostname,
+	}, content.CachingOptions{
+		CacheDirectory:        testutil.TempDirectory(t),
+		ContentCacheSizeBytes: maxCacheSizeBytes,
+	}, servertesting.TestPassword, &repo.Options{})
 
 	// cancel immediately to ensure we did not spawn goroutines that depend on ctx inside
 	// repo.OpenAPIServer()
 	cancel()
 
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	defer rep.Close(ctx)
 
 	remoteRepositoryTest(ctx, t, rep)
+	remoteRepositoryNotificationTest(t, ctx, rep, env.RepositoryWriter)
 }
 
-func TestGPRServer_AuthenticationError(t *testing.T) {
+func TestGRPCServer_AuthenticationError(t *testing.T) {
 	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant)
-	apiServerInfo := startServer(t, env, true)
+	apiServerInfo := servertesting.StartServer(t, env, true)
 
-	if _, err := repo.OpenGRPCAPIRepository(ctx, apiServerInfo, repo.ClientOptions{
+	if _, err := servertesting.ConnectAndOpenAPIServer(t, ctx, apiServerInfo, repo.ClientOptions{
 		Username: "bad-username",
 		Hostname: "bad-hostname",
-	}, nil, "bad-password"); err == nil {
+	}, content.CachingOptions{}, "bad-password", &repo.Options{}); err == nil {
 		t.Fatal("unexpected success when connecting with invalid username")
 	}
 }
@@ -148,21 +78,21 @@ func TestGPRServer_AuthenticationError(t *testing.T) {
 //nolint:gocyclo
 func TestServerUIAccessDeniedToRemoteUser(t *testing.T) {
 	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant)
-	si := startServer(t, env, true)
+	si := servertesting.StartServer(t, env, true)
 
 	remoteUserClient, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             si.BaseURL,
 		TrustedServerCertificateFingerprint: si.TrustedServerCertificateFingerprint,
-		Username:                            testUsername + "@" + testHostname,
-		Password:                            testPassword,
+		Username:                            servertesting.TestUsername + "@" + servertesting.TestHostname,
+		Password:                            servertesting.TestPassword,
 	})
 	require.NoError(t, err)
 
 	uiUserWithoutCSRFToken, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             si.BaseURL,
 		TrustedServerCertificateFingerprint: si.TrustedServerCertificateFingerprint,
-		Username:                            testUIUsername,
-		Password:                            testUIPassword,
+		Username:                            servertesting.TestUIUsername,
+		Password:                            servertesting.TestUIPassword,
 	})
 
 	require.NoError(t, err)
@@ -170,8 +100,8 @@ func TestServerUIAccessDeniedToRemoteUser(t *testing.T) {
 	uiUserClient, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             si.BaseURL,
 		TrustedServerCertificateFingerprint: si.TrustedServerCertificateFingerprint,
-		Username:                            testUIUsername,
-		Password:                            testUIPassword,
+		Username:                            servertesting.TestUIUsername,
+		Password:                            servertesting.TestUIPassword,
 	})
 
 	require.NoError(t, err)
@@ -191,9 +121,6 @@ func TestServerUIAccessDeniedToRemoteUser(t *testing.T) {
 	}
 
 	for urlSuffix, wantStatus := range getUrls {
-		urlSuffix := urlSuffix
-		wantStatus := wantStatus
-
 		t.Run(urlSuffix, func(t *testing.T) {
 			var hsr apiclient.HTTPStatusError
 
@@ -250,8 +177,8 @@ func remoteRepositoryTest(ctx context.Context, t *testing.T, rep repo.Repository
 		manifestID, manifestID2 manifest.ID
 		written                 = make([]byte, 100000)
 		srcInfo                 = snapshot.SourceInfo{
-			Host:     testHostname,
-			UserName: testUsername,
+			Host:     servertesting.TestHostname,
+			UserName: servertesting.TestUsername,
 			Path:     testPathname,
 		}
 	)
@@ -274,7 +201,7 @@ func remoteRepositoryTest(ctx context.Context, t *testing.T, rep repo.Repository
 		require.NoError(t, w.Flush(ctx))
 
 		if uploaded == 0 {
-			return errors.Errorf("did not report uploaded bytes")
+			return errors.New("did not report uploaded bytes")
 		}
 
 		uploaded = 0
@@ -282,7 +209,7 @@ func remoteRepositoryTest(ctx context.Context, t *testing.T, rep repo.Repository
 		require.NoError(t, w.Flush(ctx))
 
 		if uploaded != 0 {
-			return errors.Errorf("unexpected upload when writing duplicate object")
+			return errors.New("unexpected upload when writing duplicate object")
 		}
 
 		if result != result2 {
@@ -302,7 +229,7 @@ func remoteRepositoryTest(ctx context.Context, t *testing.T, rep repo.Repository
 
 		_, err = ow.Result()
 		if err == nil {
-			return errors.Errorf("unexpected success writing object with 'm' prefix")
+			return errors.New("unexpected success writing object with 'm' prefix")
 		}
 
 		manifestID, err = snapshot.SaveSnapshot(ctx, w, &snapshot.Manifest{
@@ -339,10 +266,63 @@ func remoteRepositoryTest(ctx context.Context, t *testing.T, rep repo.Repository
 	mustPrefetchObjects(ctx, t, rep, result)
 }
 
+//nolint:thelper
+func remoteRepositoryNotificationTest(t *testing.T, ctx context.Context, rep repo.Repository, rw repo.RepositoryWriter) {
+	require.Implements(t, (*repo.RemoteNotifications)(nil), rep)
+
+	mux := http.NewServeMux()
+
+	var numRequestsReceived atomic.Int32
+
+	mux.HandleFunc("/some-path", func(w http.ResponseWriter, r *http.Request) {
+		numRequestsReceived.Add(1)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	require.NoError(t, notifyprofile.SaveProfile(ctx, rw, notifyprofile.Config{
+		ProfileName: "my-profile",
+		MethodConfig: sender.MethodConfig{
+			Type: "webhook",
+			Config: &webhook.Options{
+				Endpoint: server.URL + "/some-path",
+				Method:   "POST",
+			},
+		},
+	}))
+	require.NoError(t, rw.Flush(ctx))
+
+	notification.Send(ctx, rep, notifytemplate.TestNotification, notifydata.EmptyEventData{}, notification.SeverityError, notifytemplate.DefaultOptions)
+	require.Equal(t, int32(1), numRequestsReceived.Load())
+
+	// another webhook which fails
+
+	require.NoError(t, notifyprofile.SaveProfile(ctx, rw, notifyprofile.Config{
+		ProfileName: "my-profile",
+		MethodConfig: sender.MethodConfig{
+			Type: "webhook",
+			Config: &webhook.Options{
+				Endpoint: server.URL + "/some-nonexistent-path",
+				Method:   "POST",
+			},
+		},
+	}))
+
+	require.NoError(t, rw.Flush(ctx))
+
+	t0 := clock.Now()
+	t1 := clock.Now().Add(10 * time.Second)
+
+	notification.Send(ctx, rep, "generic-error",
+		notifydata.NewErrorInfo("op", "some error occurred", t0, t1, errors.New("some error")), notification.SeverityError, notifytemplate.DefaultOptions)
+	require.Equal(t, int32(1), numRequestsReceived.Load())
+}
+
 func mustWriteObject(ctx context.Context, t *testing.T, w repo.RepositoryWriter, data []byte) object.ID {
 	t.Helper()
 
-	ow := w.NewObjectWriter(ctx, object.WriterOptions{})
+	ow := w.NewObjectWriter(ctx, object.WriterOptions{MetadataCompressor: "zstd-fastest"})
 
 	_, err := ow.Write(data)
 	require.NoError(t, err)
@@ -415,13 +395,11 @@ func mustListSnapshotCount(ctx context.Context, t *testing.T, rep repo.Repositor
 	t.Helper()
 
 	snaps, err := snapshot.ListSnapshots(ctx, rep, snapshot.SourceInfo{
-		UserName: testUsername,
-		Host:     testHostname,
+		UserName: servertesting.TestUsername,
+		Host:     servertesting.TestHostname,
 		Path:     testPathname,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	if got, want := len(snaps), wantCount; got != want {
 		t.Fatalf("unexpected number of snapshots: %v, want %v", got, want)

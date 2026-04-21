@@ -8,6 +8,8 @@ import (
 )
 
 // osInterface is an operating system file interface, used by filesystemStorage to support mocking.
+//
+//nolint:interfacebloat
 type osInterface interface {
 	Open(fname string) (osReadFile, error)
 	IsNotExist(err error) bool
@@ -15,6 +17,7 @@ type osInterface interface {
 	IsPathError(err error) bool
 	IsLinkError(err error) bool
 	IsPathSeparator(c byte) bool
+	IsStale(err error) bool
 	Remove(fname string) error
 	Rename(oldname, newname string) error
 	ReadDir(dirname string) ([]fs.DirEntry, error)
@@ -35,4 +38,6 @@ type osReadFile interface {
 
 type osWriteFile interface {
 	io.WriteCloser
+
+	Sync() error
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"reflect"
 	"testing"
@@ -76,9 +77,9 @@ func TestStreamingFile(t *testing.T) {
 
 func TestStreamingFileModTime(t *testing.T) {
 	data := []byte("data")
-	f1 := StreamingFileFromReader("f1", bytes.NewReader(data))
+	f1 := StreamingFileFromReader("f1", io.NopCloser(bytes.NewReader(data)))
 	mt := time.Date(2021, 1, 2, 3, 4, 5, 0, time.UTC)
-	f2 := StreamingFileWithModTimeFromReader("f2", mt, bytes.NewReader(data))
+	f2 := StreamingFileWithModTimeFromReader("f2", mt, io.NopCloser(bytes.NewReader(data)))
 
 	assert.True(t, f1.ModTime().After(f2.ModTime()))
 }
@@ -130,18 +131,13 @@ func TestStreamingFileGetReader(t *testing.T) {
 func TestStreamingDirectory(t *testing.T) {
 	// Create a temporary file with test data
 	content := []byte("Temporary file content")
-	r := bytes.NewReader(content)
+	r := io.NopCloser(bytes.NewReader(content))
 
 	f := StreamingFileFromReader(testFileName, r)
 
 	rootDir := NewStreamingDirectory(
 		"root",
-		func(
-			ctx context.Context,
-			callback func(context.Context, fs.Entry) error,
-		) error {
-			return callback(ctx, f)
-		},
+		fs.StaticIterator([]fs.Entry{f}, nil),
 	)
 
 	entries, err := fs.GetAllEntries(testlogging.Context(t), rootDir)
@@ -150,7 +146,7 @@ func TestStreamingDirectory(t *testing.T) {
 	assert.Len(t, entries, 1)
 
 	e := entries[0]
-	require.Equal(t, e.Name(), testFileName)
+	require.Equal(t, testFileName, e.Name())
 
 	// Read and compare data
 	reader, err := f.GetReader(testlogging.Context(t))
@@ -167,18 +163,13 @@ func TestStreamingDirectory(t *testing.T) {
 func TestStreamingDirectory_MultipleIterationsFails(t *testing.T) {
 	// Create a temporary file with test data
 	content := []byte("Temporary file content")
-	r := bytes.NewReader(content)
+	r := io.NopCloser(bytes.NewReader(content))
 
 	f := StreamingFileFromReader(testFileName, r)
 
 	rootDir := NewStreamingDirectory(
 		"root",
-		func(
-			ctx context.Context,
-			callback func(context.Context, fs.Entry) error,
-		) error {
-			return callback(ctx, f)
-		},
+		fs.StaticIterator([]fs.Entry{f}, nil),
 	)
 
 	entries, err := fs.GetAllEntries(testlogging.Context(t), rootDir)
@@ -187,7 +178,7 @@ func TestStreamingDirectory_MultipleIterationsFails(t *testing.T) {
 	assert.Len(t, entries, 1)
 
 	_, err = fs.GetAllEntries(testlogging.Context(t), rootDir)
-	assert.Error(t, err)
+	require.Error(t, err)
 }
 
 var errCallback = errors.New("callback error")
@@ -195,41 +186,17 @@ var errCallback = errors.New("callback error")
 func TestStreamingDirectory_ReturnsCallbackError(t *testing.T) {
 	// Create a temporary file with test data
 	content := []byte("Temporary file content")
-	r := bytes.NewReader(content)
+	r := io.NopCloser(bytes.NewReader(content))
 
 	f := StreamingFileFromReader(testFileName, r)
 
 	rootDir := NewStreamingDirectory(
 		"root",
-		func(
-			ctx context.Context,
-			callback func(context.Context, fs.Entry) error,
-		) error {
-			return callback(ctx, f)
-		},
+		fs.StaticIterator([]fs.Entry{f}, nil),
 	)
 
-	err := rootDir.IterateEntries(testlogging.Context(t), func(context.Context, fs.Entry) error {
+	err := fs.IterateEntries(testlogging.Context(t), rootDir, func(context.Context, fs.Entry) error {
 		return errCallback
 	})
-	assert.ErrorIs(t, err, errCallback)
-}
-
-var errIteration = errors.New("iteration error")
-
-func TestStreamingDirectory_ReturnsReadDirError(t *testing.T) {
-	rootDir := NewStreamingDirectory(
-		"root",
-		func(
-			ctx context.Context,
-			callback func(context.Context, fs.Entry) error,
-		) error {
-			return errIteration
-		},
-	)
-
-	err := rootDir.IterateEntries(testlogging.Context(t), func(context.Context, fs.Entry) error {
-		return nil
-	})
-	assert.ErrorIs(t, err, errIteration)
+	require.ErrorIs(t, err, errCallback)
 }

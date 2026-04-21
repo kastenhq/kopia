@@ -50,7 +50,7 @@ func (d webdavDirWithFakeClock) OpenFile(ctx context.Context, fname string, flag
 	}
 
 	// change file time after creation to simulate fake time scale.
-	osf := f.(*os.File)
+	osf := f.(*os.File) //nolint:forcetypeassert
 	now := d.fts.Now()
 
 	if err := os.Chtimes(osf.Name(), now, now); err != nil {
@@ -87,22 +87,22 @@ func TestEndurance(t *testing.T) {
 
 	e.RunAndExpectSuccess(t, "repo", "create", "webdav", "--url", sts.URL)
 
-	failureCount := new(int32)
+	var failureCount atomic.Int32
+
 	rwMutex := &sync.RWMutex{}
 
 	t.Run("Runners", func(t *testing.T) {
-		for i := 0; i < enduranceRunnerCount; i++ {
-			i := i
-
+		for i := range enduranceRunnerCount {
 			t.Run(fmt.Sprintf("Runner-%v", i), func(t *testing.T) {
 				t.Parallel()
+
 				defer func() {
 					if t.Failed() {
-						atomic.AddInt32(failureCount, 1)
+						failureCount.Add(1)
 					}
 				}()
 
-				enduranceRunner(t, i, ft.URL, sts.URL, failureCount, rwMutex, testTime)
+				enduranceRunner(t, i, ft.URL, sts.URL, &failureCount, rwMutex, testTime)
 			})
 		}
 	})
@@ -145,7 +145,7 @@ func actionSnapshotExisting(t *testing.T, e *testenv.CLITest, s *runnerState) {
 	t.Helper()
 
 	randomPath := s.dirs[rand.Intn(len(s.dirs))]
-	e.RunAndExpectSuccess(t, "snapshot", "create", randomPath)
+	e.RunAndExpectSuccess(t, "--no-auto-maintenance", "snapshot", "create", randomPath)
 
 	s.snapshottedAnything = true
 }
@@ -157,7 +157,7 @@ func actionSnapshotAll(t *testing.T, e *testenv.CLITest, s *runnerState) {
 		return
 	}
 
-	e.RunAndExpectSuccess(t, "snapshot", "create", "--all")
+	e.RunAndExpectSuccess(t, "--no-auto-maintenance", "snapshot", "create", "--all")
 }
 
 func actionSnapshotVerify(t *testing.T, e *testenv.CLITest, s *runnerState) {
@@ -259,7 +259,7 @@ func pickRandomEnduranceTestAction() *actionInfo {
 	panic("impossible")
 }
 
-func enduranceRunner(t *testing.T, runnerID int, fakeTimeServer, webdavServer string, failureCount *int32, lock *sync.RWMutex, fakeClock *faketime.ClockTimeWithOffset) {
+func enduranceRunner(t *testing.T, runnerID int, fakeTimeServer, webdavServer string, failureCount *atomic.Int32, lock *sync.RWMutex, fakeClock *faketime.ClockTimeWithOffset) {
 	t.Helper()
 
 	nowFunc := fakeClock.NowFunc()
@@ -273,7 +273,7 @@ func enduranceRunner(t *testing.T, runnerID int, fakeTimeServer, webdavServer st
 	e.RunAndExpectSuccess(t, "repo", "connect", "webdav", "--url", webdavServer, "--override-username="+fmt.Sprintf("runner-%v", runnerID))
 
 	if runnerID == 0 {
-		e.RunAndExpectSuccess(t, "gc", "set", "--enable-full=true", "--full-interval=4h", "--owner=me")
+		e.RunAndExpectSuccess(t, "maintenance", "set", "--enable-full=true", "--full-interval=4h", "--owner=me")
 	}
 
 	var s runnerState
@@ -284,7 +284,7 @@ func enduranceRunner(t *testing.T, runnerID int, fakeTimeServer, webdavServer st
 	actionAddNewSource(t, e, &s)
 
 	for now, k := nowFunc(), 0; now.Before(endTime); now, k = nowFunc(), k+1 {
-		if atomic.LoadInt32(failureCount) != 0 {
+		if failureCount.Load() != 0 {
 			t.Logf("Aborting early because of failures.")
 			break
 		}

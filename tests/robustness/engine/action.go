@@ -1,5 +1,4 @@
 //go:build darwin || (linux && amd64)
-// +build darwin linux,amd64
 
 package engine
 
@@ -42,7 +41,7 @@ func (e *Engine) ExecAction(ctx context.Context, actionKey ActionKey, opts map[s
 	var out map[string]string
 
 	n := robustness.GetOptAsIntOrDefault(ActionRepeaterField, opts, defaultActionRepeats)
-	for i := 0; i < n; i++ {
+	for range n {
 		out, err = action.f(ctx, e, opts, logEntry)
 		if err != nil {
 			break
@@ -78,12 +77,14 @@ func (e *Engine) RandomAction(ctx context.Context, actionOpts ActionOpts) error 
 	}
 
 	_, err := e.ExecAction(ctx, actionName, actionOpts[actionName])
-	err = e.checkErrRecovery(ctx, err, actionOpts)
+	err = e.CheckErrRecovery(ctx, err, actionOpts)
 
 	return err
 }
 
-func (e *Engine) checkErrRecovery(ctx context.Context, incomingErr error, actionOpts ActionOpts) (outgoingErr error) {
+// CheckErrRecovery tries to recover from no space left error
+// by deleting data directories.
+func (e *Engine) CheckErrRecovery(ctx context.Context, incomingErr error, actionOpts ActionOpts) (outgoingErr error) {
 	outgoingErr = incomingErr
 
 	if incomingErr == nil {
@@ -206,6 +207,16 @@ func restoreSnapshotAction(ctx context.Context, e *Engine, opts map[string]strin
 }
 
 func deleteRandomSnapshotAction(ctx context.Context, e *Engine, opts map[string]string, l *LogEntry) (out map[string]string, err error) {
+	// Do not delete snapshot when it is the only available snapshot.
+	// This will ensure that the repository under test in robustness tests
+	// grows over long term.
+	snapIDList := e.Checker.GetLiveSnapIDs()
+	if len(snapIDList) <= 1 {
+		log.Println("No snapshots available for deletion")
+
+		return nil, robustness.ErrNoOp
+	}
+
 	snapID, err := e.getSnapIDOptOrRandLive(opts)
 	if err != nil {
 		return nil, err
@@ -226,21 +237,21 @@ func writeRandomFilesAction(ctx context.Context, e *Engine, opts map[string]stri
 	out, err = e.FileWriter.WriteRandomFiles(ctx, opts)
 	setLogEntryCmdOpts(l, out)
 
-	return
+	return out, err
 }
 
 func deleteRandomSubdirectoryAction(ctx context.Context, e *Engine, opts map[string]string, l *LogEntry) (out map[string]string, err error) {
 	out, err = e.FileWriter.DeleteRandomSubdirectory(ctx, opts)
 	setLogEntryCmdOpts(l, out)
 
-	return
+	return out, err
 }
 
 func deleteDirectoryContentsAction(ctx context.Context, e *Engine, opts map[string]string, l *LogEntry) (out map[string]string, err error) {
 	out, err = e.FileWriter.DeleteDirectoryContents(ctx, opts)
 	setLogEntryCmdOpts(l, out)
 
-	return
+	return out, err
 }
 
 func restoreIntoDataDirectoryAction(ctx context.Context, e *Engine, opts map[string]string, l *LogEntry) (out map[string]string, err error) {
@@ -325,6 +336,8 @@ func (e *Engine) getSnapIDOptOrRandLive(opts map[string]string) (snapID string, 
 
 	snapIDList := e.Checker.GetLiveSnapIDs()
 	if len(snapIDList) == 0 {
+		log.Println("No snapshots available for deletion")
+
 		return "", robustness.ErrNoOp
 	}
 

@@ -1,5 +1,4 @@
 //go:build windows
-// +build windows
 
 package mount
 
@@ -17,7 +16,7 @@ import (
 // Directory mounts a given directory under a provided drive letter.
 func Directory(ctx context.Context, entry fs.Directory, driveLetter string, _ Options) (Controller, error) {
 	if !isValidWindowsDriveOrAsterisk(driveLetter) {
-		return nil, errors.Errorf("must be a valid drive letter or asteris")
+		return nil, errors.New("must be a valid drive letter or asterisk")
 	}
 
 	c, err := DirectoryWebDAV(ctx, entry)
@@ -62,7 +61,7 @@ func netUseMount(ctx context.Context, driveLetter, webdavURL string) (string, er
 	// colon.
 	s := bufio.NewScanner(strings.NewReader(out))
 	for s.Scan() {
-		for _, word := range strings.Split(s.Text(), " ") {
+		for word := range strings.SplitSeq(s.Text(), " ") {
 			if isWindowsDrive(word) {
 				return word, nil
 			}
@@ -78,7 +77,7 @@ func netUseUnmount(ctx context.Context, driveLetter string) error {
 }
 
 func isWindowsDrive(s string) bool {
-	if len(s) != 2 { //nolint:gomnd
+	if len(s) != 2 { //nolint:mnd
 		return false
 	}
 

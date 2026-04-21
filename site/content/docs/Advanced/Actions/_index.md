@@ -1,8 +1,10 @@
 ---
 title: "Actions"
 linkTitle: "Actions"
-weight: 15
+weight: 45
 ---
+
+## Actions
 
 Starting with v0.8 Kopia supports running custom user-provided commands or scripts before and after snapshot root and also before/after individual folders as they get snapshotted. This supports scenarios such as:
 
@@ -99,7 +101,7 @@ snapshotted (either `KOPIA_SOURCE_PATH` or `KOPIA_SNAPSHOT_PATH` if returned by 
 
 ## Examples
 
-#### Dumping SQL databases before snapshotting:
+### Dumping SQL databases before snapshotting:
 
 This script invokes `mysqldump` to create a file called `dump.sql` in the directory
 that's being snapshotted. This can be used to automate database backups.
@@ -110,7 +112,7 @@ set -e
 mysqldump SomeDatabase --result-file=$KOPIA_SOURCE_PATH/dump.sql
 ```
 
-#### ZFS point-in-time snapshotting:
+### ZFS point-in-time snapshotting:
 
 When snapshotting ZFS pools, we must first create a snapshot using `zfs snapshot`, mount it somewhere
 and tell `kopia` to snapshot the mounted directory instead of the current one.
@@ -139,8 +141,40 @@ rmdir /mnt/$KOPIA_SNAPSHOT_ID
 zfs destroy $ZPOOL_NAME@$KOPIA_SNAPSHOT_ID
 ```
 
+### LVM Snapshots:
 
-#### Windows shadow copy
+When snapshotting filesystems using LVM snapshots, we must first create a LVM snapshot using `lvcreate` and mount the filesystem inside the LVM snapshot somewhere.
+Then we tell `kopia` to snapshot the mounted directory instead of the current one.
+Make sure to match the snapshot size with your requirements. The snapshot grows with the delta to the origin logical volume.
+You also need to make sure to have enough free space in your volume group, otherwise the snapshot creation will fail.
+
+After snapshotting, we need to unmount and remove the temporary logical volume using `lvremove` command:
+
+Before:
+
+```shell
+#!/bin/sh
+set -e
+VG_NAME=vg0
+LV_NAME=lv-root
+SNAPSHOT_SIZE=10G
+lvcreate -L ${SNAPSHOT_SIZE} -s -n $KOPIA_SNAPSHOT_ID $VG_NAME/$LV_NAME
+mkdir -p /mnt/$KOPIA_SNAPSHOT_ID
+mount /dev/$VG_NAME/$KOPIA_SNAPSHOT_ID /mnt/$KOPIA_SNAPSHOT_ID
+echo KOPIA_SNAPSHOT_PATH=/mnt/$KOPIA_SNAPSHOT_ID
+```
+
+After:
+
+```shell
+#!/bin/sh
+VG_NAME=vg0
+umount /mnt/$KOPIA_SNAPSHOT_ID
+rmdir /mnt/$KOPIA_SNAPSHOT_ID
+lvremove -f $VG_NAME/$KOPIA_SNAPSHOT_ID
+```
+
+### Windows shadow copy
 
 When backing up files opened with exclusive lock in Windows, Kopia would fail the snapshot task because it can't read the file content.
 One of the popular solutions is taking a [shadow copy](https://en.wikipedia.org/wiki/Shadow_Copy) of the storage volume and ask Kopia to backup that instead.
@@ -211,15 +245,15 @@ if (([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::
 To install the actions:
 
 ```shell
-kopia policy set <target_dir> --before-folder-action "powershell -WindowStyle Hidden <path_to_script>\before.ps1"
-kopia policy set <target_dir> --after-folder-action  "powershell -WindowStyle Hidden <path_to_script>\after.ps1"
+kopia policy set <target_dir> --before-folder-action "powershell -WindowStyle Hidden -File <path_to_script>\before.ps1"
+kopia policy set <target_dir> --after-folder-action  "powershell -WindowStyle Hidden -File <path_to_script>\after.ps1"
 ```
 
-#### Contributions Welcome
+### Contributions Welcome
 
 Those are just some initial ideas, we're certain more interesting types of actions will be developed using this mechanism, including LVM snapshots, BTRFS Snapshots, notifications and more.
 
-If you have ideas for extending this mechanism, definitely [file an Issue on Github](https://github.com/kopia/kopia/issues).
+If you have ideas for extending this mechanism, please [file an Issue on Github](https://github.com/kopia/kopia/issues).
 
 If you develop a useful action script that you'd like to share with the community, we encourage you
 to do so by sending us a pull request to add to this web page or you can put them in your own repository and we'll be happy to link it from here.

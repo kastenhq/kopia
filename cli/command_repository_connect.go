@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/passwordpersist"
@@ -31,14 +31,12 @@ func (c *commandRepositoryConnect) setup(svc advancedAppServices, parent command
 		cc := cmd.Command(prov.Name, "Connect to repository in "+prov.Description)
 		f.Setup(svc, cc)
 		cc.Action(func(kpc *kingpin.ParseContext) error {
-			//nolint:wrapcheck
 			return svc.runAppWithContext(kpc.SelectedCommand, func(ctx context.Context) error {
 				st, err := f.Connect(ctx, false, 0)
 				if err != nil {
 					return errors.Wrap(err, "can't connect to storage")
 				}
 
-				//nolint:wrapcheck
 				return svc.runConnectCommandWithStorage(ctx, &c.co, st)
 			})
 		})
@@ -46,14 +44,15 @@ func (c *commandRepositoryConnect) setup(svc advancedAppServices, parent command
 }
 
 type connectOptions struct {
-	connectCacheDirectory         string
-	connectMaxCacheSizeMB         int64
-	connectMaxMetadataCacheSizeMB int64
-	connectMaxListCacheDuration   time.Duration
+	connectCacheDirectory string
+
+	cacheSizeFlags
+
 	connectHostname               string
 	connectUsername               string
 	connectCheckForUpdates        bool
 	connectReadonly               bool
+	connectPermissiveCacheLoading bool
 	connectDescription            string
 	connectEnableActions          bool
 
@@ -65,13 +64,17 @@ func (c *connectOptions) setup(svc appServices, cmd *kingpin.CmdClause) {
 	// Set up flags shared between 'create' and 'connect'. Note that because those flags are used by both command
 	// we must use *Var() methods, otherwise one of the commands would always get default flag values.
 	cmd.Flag("cache-directory", "Cache directory").PlaceHolder("PATH").Envar(svc.EnvName("KOPIA_CACHE_DIRECTORY")).StringVar(&c.connectCacheDirectory)
-	cmd.Flag("content-cache-size-mb", "Size of local content cache").PlaceHolder("MB").Default("5000").Int64Var(&c.connectMaxCacheSizeMB)
-	cmd.Flag("metadata-cache-size-mb", "Size of local metadata cache").PlaceHolder("MB").Default("5000").Int64Var(&c.connectMaxMetadataCacheSizeMB)
-	cmd.Flag("max-list-cache-duration", "Duration of index cache").Default("30s").Hidden().DurationVar(&c.connectMaxListCacheDuration)
+
+	c.maxListCacheDuration = 30 * time.Second //nolint:mnd
+	c.contentCacheSizeMB = 5000
+	c.metadataCacheSizeMB = 5000
+	c.cacheSizeFlags.setup(cmd)
+
 	cmd.Flag("override-hostname", "Override hostname used by this repository connection").Hidden().StringVar(&c.connectHostname)
 	cmd.Flag("override-username", "Override username used by this repository connection").Hidden().StringVar(&c.connectUsername)
 	cmd.Flag("check-for-updates", "Periodically check for Kopia updates on GitHub").Default("true").Envar(svc.EnvName(checkForUpdatesEnvar)).BoolVar(&c.connectCheckForUpdates)
 	cmd.Flag("readonly", "Make repository read-only to avoid accidental changes").BoolVar(&c.connectReadonly)
+	cmd.Flag("permissive-cache-loading", "Do not fail when loading bad cache index entries.  Repository must be opened in read-only mode").Hidden().BoolVar(&c.connectPermissiveCacheLoading)
 	cmd.Flag("description", "Human-readable description of the repository").StringVar(&c.connectDescription)
 	cmd.Flag("enable-actions", "Allow snapshot actions").BoolVar(&c.connectEnableActions)
 	cmd.Flag("repository-format-cache-duration", "Duration of kopia.repository format blob cache").Hidden().DurationVar(&c.formatBlobCacheDuration)
@@ -89,15 +92,21 @@ func (c *connectOptions) getFormatBlobCacheDuration() time.Duration {
 func (c *connectOptions) toRepoConnectOptions() *repo.ConnectOptions {
 	return &repo.ConnectOptions{
 		CachingOptions: content.CachingOptions{
-			CacheDirectory:            c.connectCacheDirectory,
-			MaxCacheSizeBytes:         c.connectMaxCacheSizeMB << 20,         //nolint:gomnd
-			MaxMetadataCacheSizeBytes: c.connectMaxMetadataCacheSizeMB << 20, //nolint:gomnd
-			MaxListCacheDuration:      content.DurationSeconds(c.connectMaxListCacheDuration.Seconds()),
+			CacheDirectory:              c.connectCacheDirectory,
+			ContentCacheSizeBytes:       c.contentCacheSizeMB << 20,       //nolint:mnd
+			ContentCacheSizeLimitBytes:  c.contentCacheSizeLimitMB << 20,  //nolint:mnd
+			MetadataCacheSizeBytes:      c.metadataCacheSizeMB << 20,      //nolint:mnd
+			MetadataCacheSizeLimitBytes: c.metadataCacheSizeLimitMB << 20, //nolint:mnd
+			MaxListCacheDuration:        content.DurationSeconds(c.maxListCacheDuration.Seconds()),
+			MinContentSweepAge:          content.DurationSeconds(c.contentMinSweepAge.Seconds()),
+			MinMetadataSweepAge:         content.DurationSeconds(c.metadataMinSweepAge.Seconds()),
+			MinIndexSweepAge:            content.DurationSeconds(c.indexMinSweepAge.Seconds()),
 		},
 		ClientOptions: repo.ClientOptions{
 			Hostname:                c.connectHostname,
 			Username:                c.connectUsername,
 			ReadOnly:                c.connectReadonly,
+			PermissiveCacheLoading:  c.connectPermissiveCacheLoading,
 			Description:             c.connectDescription,
 			EnableActions:           c.connectEnableActions,
 			FormatBlobCacheDuration: c.getFormatBlobCacheDuration(),
@@ -122,7 +131,7 @@ func (c *App) runConnectCommandWithStorageAndPassword(ctx context.Context, co *c
 		return errors.Wrap(err, "error connecting to repository")
 	}
 
-	log(ctx).Infof("Connected to repository.")
+	log(ctx).Info("Connected to repository.")
 	c.maybeInitializeUpdateCheck(ctx, co)
 
 	return nil

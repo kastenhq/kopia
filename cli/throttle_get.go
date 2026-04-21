@@ -3,7 +3,7 @@ package cli
 import (
 	"strconv"
 
-	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/kingpin/v2"
 
 	"github.com/kopia/kopia/internal/units"
 	"github.com/kopia/kopia/repo/blob/throttling"
@@ -45,5 +45,5 @@ func (c *commonThrottleGet) printValueOrUnlimited(label string, v float64, conve
 }
 
 func (c *commonThrottleGet) floatToString(v float64) string {
-	return strconv.FormatFloat(v, 'f', 0, 64) //nolint:gomnd
+	return strconv.FormatFloat(v, 'f', 0, 64)
 }

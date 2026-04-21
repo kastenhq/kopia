@@ -44,13 +44,13 @@ func newReedSolomonCrcECC(opts *Options) (*ReedSolomonCrcECC, error) {
 		case opts.OverheadPercent == 1:
 			result.MaxShardSize = 1024
 
-		case opts.OverheadPercent == 2: //nolint:gomnd
+		case opts.OverheadPercent == 2: //nolint:mnd
 			result.MaxShardSize = 512
 
-		case opts.OverheadPercent == 3: //nolint:gomnd
+		case opts.OverheadPercent == 3: //nolint:mnd
 			result.MaxShardSize = 256
 
-		case opts.OverheadPercent <= 6: //nolint:gomnd
+		case opts.OverheadPercent <= 6: //nolint:mnd
 			result.MaxShardSize = 128
 
 		default:
@@ -60,11 +60,11 @@ func newReedSolomonCrcECC(opts *Options) (*ReedSolomonCrcECC, error) {
 
 	// Remove the space used for the crc from the allowed space overhead, if possible
 	freeSpaceOverhead := float32(opts.OverheadPercent) - 100*crcSize/float32(result.MaxShardSize)
-	freeSpaceOverhead = maxFloat32(freeSpaceOverhead, 0.01) //nolint:gomnd
+	freeSpaceOverhead = maxFloat32(freeSpaceOverhead, 0.01) //nolint:mnd
 	result.DataShards, result.ParityShards = computeShards(freeSpaceOverhead)
 
 	// Bellow this threshold the data will be split in less shards
-	result.ThresholdParityInput = 2 * crcSize * (result.DataShards + result.ParityShards) //nolint:gomnd
+	result.ThresholdParityInput = 2 * crcSize * (result.DataShards + result.ParityShards) //nolint:mnd
 	result.ThresholdParityOutput = computeFinalFileSizeWithPadding(smallFilesDataShards, smallFilesParityShards, ceilInt(result.ThresholdParityInput, smallFilesDataShards), 1)
 
 	// Bellow this threshold the shard size will shrink to the smallest possible
@@ -163,7 +163,7 @@ func (r *ReedSolomonCrcECC) computeSizesFromStored(length int) sizesInfo {
 // The parity data comes first so we can avoid storing the padding needed for the
 // data shards, and instead compute the padded size based on the input length.
 // All parity shards are always stored.
-func (r *ReedSolomonCrcECC) Encrypt(input gather.Bytes, contentID []byte, output *gather.WriteBuffer) error {
+func (r *ReedSolomonCrcECC) Encrypt(input gather.Bytes, _ []byte, output *gather.WriteBuffer) error {
 	sizes := r.computeSizesFromOriginal(input.Length())
 	inputPlusLengthSize := lengthSize + input.Length()
 	dataSizeInBlock := sizes.DataShards * sizes.ShardSize
@@ -172,39 +172,43 @@ func (r *ReedSolomonCrcECC) Encrypt(input gather.Bytes, contentID []byte, output
 	// Allocate space for the input + padding
 	var inputBuffer gather.WriteBuffer
 	defer inputBuffer.Close()
+
 	inputBytes := inputBuffer.MakeContiguous(dataSizeInBlock * sizes.Blocks)
 
-	binary.BigEndian.PutUint32(inputBytes[:lengthSize], uint32(input.Length()))
+	binary.BigEndian.PutUint32(inputBytes[:lengthSize], uint32(input.Length())) //nolint:gosec
 	copied := input.AppendToSlice(inputBytes[lengthSize:lengthSize])
 
 	// WriteBuffer does not clear the data, so we must clear the padding
 	if lengthSize+len(copied) < len(inputBytes) {
-		clear(inputBytes[lengthSize+len(copied):])
+		fillWithZeros(inputBytes[lengthSize+len(copied):])
 	}
 
 	// Compute and store ECC + checksum
 
 	var crcBuffer [crcSize]byte
+
 	crcBytes := crcBuffer[:]
 
 	var eccBuffer gather.WriteBuffer
 	defer eccBuffer.Close()
+
 	eccBytes := eccBuffer.MakeContiguous(paritySizeInBlock)
 
 	var maxShards [256][]byte
+
 	shards := maxShards[:sizes.DataShards+sizes.ParityShards]
 
 	inputPos := 0
 
-	for b := 0; b < sizes.Blocks; b++ {
+	for range sizes.Blocks {
 		eccPos := 0
 
-		for i := 0; i < sizes.DataShards; i++ {
+		for i := range sizes.DataShards {
 			shards[i] = inputBytes[inputPos : inputPos+sizes.ShardSize]
 			inputPos += sizes.ShardSize
 		}
 
-		for i := 0; i < sizes.ParityShards; i++ {
+		for i := range sizes.ParityShards {
 			shards[sizes.DataShards+i] = eccBytes[eccPos : eccPos+sizes.ShardSize]
 			eccPos += sizes.ShardSize
 		}
@@ -214,7 +218,7 @@ func (r *ReedSolomonCrcECC) Encrypt(input gather.Bytes, contentID []byte, output
 			return errors.Wrap(err, "Error computing ECC")
 		}
 
-		for i := 0; i < sizes.ParityShards; i++ {
+		for i := range sizes.ParityShards {
 			s := sizes.DataShards + i
 
 			binary.BigEndian.PutUint32(crcBytes, crc32.ChecksumIEEE(shards[s]))
@@ -247,7 +251,7 @@ func (r *ReedSolomonCrcECC) Encrypt(input gather.Bytes, contentID []byte, output
 
 // Decrypt corrects the data from input based on the ECC data.
 // See Encrypt comments for a description of the layout.
-func (r *ReedSolomonCrcECC) Decrypt(input gather.Bytes, contentID []byte, output *gather.WriteBuffer) error {
+func (r *ReedSolomonCrcECC) Decrypt(input gather.Bytes, _ []byte, output *gather.WriteBuffer) error {
 	sizes := r.computeSizesFromStored(input.Length())
 	dataPlusCrcSizeInBlock := sizes.DataShards * (crcSize + sizes.ShardSize)
 	parityPlusCrcSizeInBlock := sizes.ParityShards * (crcSize + sizes.ShardSize)
@@ -255,19 +259,21 @@ func (r *ReedSolomonCrcECC) Decrypt(input gather.Bytes, contentID []byte, output
 	// Allocate space for the input + padding
 	var inputBuffer gather.WriteBuffer
 	defer inputBuffer.Close()
+
 	inputBytes := inputBuffer.MakeContiguous((dataPlusCrcSizeInBlock + parityPlusCrcSizeInBlock) * sizes.Blocks)
 
 	copied := input.AppendToSlice(inputBytes[:0])
 
 	// WriteBuffer does not clear the data, so we must clear the padding
 	if len(copied) < len(inputBytes) {
-		clear(inputBytes[len(copied):])
+		fillWithZeros(inputBytes[len(copied):])
 	}
 
 	eccBytes := inputBytes[:parityPlusCrcSizeInBlock*sizes.Blocks]
 	dataBytes := inputBytes[parityPlusCrcSizeInBlock*sizes.Blocks:]
 
 	var maxShards [256][]byte
+
 	shards := maxShards[:sizes.DataShards+sizes.ParityShards]
 
 	dataPos := 0
@@ -278,8 +284,8 @@ func (r *ReedSolomonCrcECC) Decrypt(input gather.Bytes, contentID []byte, output
 	writeOriginalPos := 0
 	paddingStartPos := len(copied) - parityPlusCrcSizeInBlock*sizes.Blocks
 
-	for b := 0; b < sizes.Blocks; b++ {
-		for i := 0; i < sizes.DataShards; i++ {
+	for b := range sizes.Blocks {
+		for i := range sizes.DataShards {
 			initialDataPos := dataPos
 
 			crc := binary.BigEndian.Uint32(dataBytes[dataPos : dataPos+crcSize])
@@ -297,7 +303,7 @@ func (r *ReedSolomonCrcECC) Decrypt(input gather.Bytes, contentID []byte, output
 			}
 		}
 
-		for i := 0; i < sizes.ParityShards; i++ {
+		for i := range sizes.ParityShards {
 			s := sizes.DataShards + i
 
 			crc := binary.BigEndian.Uint32(eccBytes[eccPos : eccPos+crcSize])
@@ -312,7 +318,7 @@ func (r *ReedSolomonCrcECC) Decrypt(input gather.Bytes, contentID []byte, output
 			}
 		}
 
-		if r.Options.DeleteFirstShardForTests {
+		if r.DeleteFirstShardForTests {
 			shards[0] = nil
 		}
 
@@ -351,25 +357,25 @@ func readLength(shards [][]byte, sizes *sizesInfo) (originalSize, startShard, st
 		startShard = 4
 		startByte = 0
 
-		for i := 0; i < 4; i++ {
+		for i := range lengthBuffer {
 			lengthBuffer[i] = shards[i][0]
 		}
 
-	case 2: //nolint:gomnd
+	case 2: //nolint:mnd
 		startShard = 2
 		startByte = 0
 
 		copy(lengthBuffer[0:2], shards[0])
 		copy(lengthBuffer[2:4], shards[1])
 
-	case 3: //nolint:gomnd
+	case 3: //nolint:mnd
 		startShard = 1
 		startByte = 1
 
 		copy(lengthBuffer[0:3], shards[0])
 		copy(lengthBuffer[3:4], shards[1])
 
-	case 4: //nolint:gomnd
+	case 4: //nolint:mnd
 		startShard = 1
 		startByte = 0
 
@@ -384,8 +390,7 @@ func readLength(shards [][]byte, sizes *sizesInfo) (originalSize, startShard, st
 
 	originalSize = int(binary.BigEndian.Uint32(lengthBuffer[:]))
 
-	//nolint:nakedret
-	return
+	return originalSize, startShard, startByte
 }
 
 // Overhead should not be called. It's just implemented because it is in the interface.
@@ -402,23 +407,8 @@ type sizesInfo struct {
 	enc          reedsolomon.Encoder
 }
 
-//nolint:unused // Used in tests
-func (s *sizesInfo) computeFinalFileSize(size int) int {
-	if s.StorePadding {
-		return computeFinalFileSizeWithPadding(s.DataShards, s.ParityShards, s.ShardSize, s.Blocks)
-	}
-
-	return computeFinalFileSizeWithoutPadding(size, s.ParityShards, s.ShardSize, s.Blocks)
-}
-
 func computeFinalFileSizeWithPadding(dataShards, parityShards, shardSize, blocks int) int {
 	return (parityShards + dataShards) * (crcSize + shardSize) * blocks
-}
-
-//nolint:unused // Used in tests
-func computeFinalFileSizeWithoutPadding(inputSize, parityShards, shardSize, blocks int) int {
-	sizePlusLength := lengthSize + inputSize
-	return parityShards*(crcSize+shardSize)*blocks + sizePlusLength + ceilInt(sizePlusLength, shardSize)*crcSize
 }
 
 func init() {

@@ -2,18 +2,28 @@ package endtoend_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/kopia/kopia/internal/apiclient"
 	"github.com/kopia/kopia/internal/serverapi"
+	"github.com/kopia/kopia/internal/servertesting"
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/internal/timetrack"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/repo/content"
+	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/tests/clitestutil"
 	"github.com/kopia/kopia/tests/testdirtree"
 	"github.com/kopia/kopia/tests/testenv"
@@ -30,44 +40,37 @@ const (
 	controlPassword = "control-password"
 )
 
-func TestAPIServerRepository_GRPC_htpasswd(t *testing.T) {
+func TestAPIServerRepository_htpasswd(t *testing.T) {
 	t.Parallel()
 
-	testAPIServerRepository(t, []string{"--no-legacy-api"}, true, false)
+	testAPIServerRepository(t, false)
 }
 
-func TestAPIServerRepository_GRPC_RepositoryUsers(t *testing.T) {
+func TestAPIServerRepository_RepositoryUsers(t *testing.T) {
 	t.Parallel()
 
-	testAPIServerRepository(t, []string{"--no-legacy-api"}, true, true)
-}
-
-func TestAPIServerRepository_DisableGRPC_htpasswd(t *testing.T) {
-	t.Parallel()
-
-	testAPIServerRepository(t, []string{"--no-grpc"}, false, false)
+	testAPIServerRepository(t, true)
 }
 
 //nolint:thelper
-func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, allowRepositoryUsers bool) {
+func testAPIServerRepository(t *testing.T, allowRepositoryUsers bool) {
 	ctx := testlogging.Context(t)
 
-	var connectArgs []string
-
-	if !useGRPC {
-		connectArgs = []string{"--no-grpc"}
-	}
-
-	runner := testenv.NewExeRunner(t)
+	runner := testenv.NewInProcRunner(t)
 	e := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, runner)
 
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
 
-	// create one snapshot as foo@bar
+	// create 5 snapshots as foo@bar
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir, "--override-username", "foo", "--override-hostname", "bar")
+	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
+	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
+	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
+	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
 	e.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir1)
 
 	e1 := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, runner)
+
 	defer e1.RunAndExpectSuccess(t, "repo", "disconnect")
 
 	// create one snapshot as not-foo@bar
@@ -85,6 +88,8 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 	tlsCert := filepath.Join(e.ConfigDir, "tls.cert")
 	tlsKey := filepath.Join(e.ConfigDir, "tls.key")
 
+	var serverStartArgs []string
+
 	if allowRepositoryUsers {
 		e.RunAndExpectSuccess(t, "server", "users", "add", "foo@bar", "--user-password", "baz")
 	} else {
@@ -95,7 +100,11 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 
 	var sp testutil.ServerParameters
 
-	e.RunAndProcessStderr(t, sp.ProcessOutput,
+	e.SetLogOutput(true, "<first> ")
+
+	t.Logf("******** first server startup ********")
+
+	wait, _ := e.RunAndProcessStderr(t, sp.ProcessOutput,
 		append([]string{
 			"server", "start",
 			"--address=localhost:0",
@@ -106,7 +115,9 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 			"--server-password", uiPassword,
 			"--server-control-username", controlUsername,
 			"--server-control-password", controlPassword,
+			"--shutdown-grace-period", "100ms",
 		}, serverStartArgs...)...)
+
 	t.Logf("detected server parameters %#v", sp)
 
 	controlClient, err := apiclient.NewKopiaAPIClient(apiclient.Options{
@@ -116,48 +127,48 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 		TrustedServerCertificateFingerprint: sp.SHA256Fingerprint,
 		LogRequests:                         true,
 	})
-	if err != nil {
-		t.Fatalf("unable to create API apiclient")
-	}
+	require.NoError(t, err)
 
 	waitUntilServerStarted(ctx, t, controlClient)
 
+	t.Logf("******** first server completed startup ********")
+
 	// open repository client.
 	ctx2, cancel := context.WithCancel(ctx)
-	rep, err := repo.OpenAPIServer(ctx2, &repo.APIServerInfo{
+	rep, err := servertesting.ConnectAndOpenAPIServer(t, ctx2, &repo.APIServerInfo{
 		BaseURL:                             sp.BaseURL,
 		TrustedServerCertificateFingerprint: sp.SHA256Fingerprint,
-		DisableGRPC:                         !useGRPC,
 	}, repo.ClientOptions{
 		Username: "foo",
 		Hostname: "bar",
-	}, nil, "baz")
+	}, content.CachingOptions{}, "baz", &repo.Options{})
 
 	// cancel immediately to ensure we did not spawn goroutines that depend on ctx inside
 	// repo.OpenAPIServer()
 	cancel()
 
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// open new write session in repository client
 
 	_, writeSess, err := rep.NewWriter(ctx, repo.WriteSessionOptions{Purpose: "some writer"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	logErrorAndIgnore(t, serverapi.Shutdown(ctx, controlClient))
+	defer writeSess.Close(ctx)
 
-	// give the server a moment to wind down.
-	time.Sleep(1 * time.Second)
+	t.Logf("******** server shutdown ********")
+	require.NoError(t, serverapi.Shutdown(ctx, controlClient))
+	// wait for the server to wind down.
+	wait()
+	t.Logf("******** finished server shutdown ********")
 
 	defer rep.Close(ctx)
 
+	e.SetLogOutput(true, "<second> ")
+
 	// start the server again, using the same address & TLS key+cert, so existing connection
 	// should be re-established.
-	e.RunAndProcessStderr(t, sp.ProcessOutput,
+	wait2, _ := e.RunAndProcessStderr(t, sp.ProcessOutput,
 		append([]string{
 			"server", "start",
 			"--address=" + sp.BaseURL,
@@ -168,11 +179,10 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 			"--server-control-username", controlUsername,
 			"--server-control-password", controlPassword,
 		}, serverStartArgs...)...)
+
 	t.Logf("detected server parameters %#v", sp)
 
 	waitUntilServerStarted(ctx, t, controlClient)
-
-	defer serverapi.Shutdown(ctx, controlClient)
 
 	someLabels := map[string]string{
 		"type":     "snapshot",
@@ -181,32 +191,29 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 	}
 
 	// invoke some read method, the repository will automatically reconnect to the server.
-	verifyFindManifestCount(ctx, t, rep, someLabels, 1)
-
-	if useGRPC {
-		// the same method on a GRPC write session should fail because the stream was broken.
-		if _, err := writeSess.FindManifests(ctx, someLabels); err == nil {
-			t.Fatalf("expected failure on write session method, got success.")
-		}
-	} else {
-		// invoke some method on write session, this will succeed because legacy API is stateless
-		// (also incorrect in this case).
-		verifyFindManifestCount(ctx, t, writeSess, someLabels, 1)
+	// verify different page sizes (only works with GRPC).
+	for _, pageSize := range []int32{0, 1, 3, 5, 6} {
+		verifyFindManifestCount(ctx, t, rep, pageSize, someLabels, 5)
 	}
 
-	runner2 := testenv.NewExeRunner(t)
+	// the same method on a GRPC write session should fail because the stream was broken.
+	_, err = writeSess.FindManifests(ctx, someLabels)
+	require.Error(t, err)
+
+	runner2 := testenv.NewInProcRunner(t)
 	e2 := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, runner2)
+	e2.SetLogOutput(true, "<client2>")
 
 	defer e2.RunAndExpectSuccess(t, "repo", "disconnect")
 
-	e2.RunAndExpectSuccess(t, append([]string{
+	e2.RunAndExpectSuccess(t,
 		"repo", "connect", "server",
-		"--url", sp.BaseURL + "/",
+		"--url", sp.BaseURL+"/",
 		"--server-cert-fingerprint", sp.SHA256Fingerprint,
 		"--override-username", "foo",
 		"--override-hostname", "bar",
 		"--password", "baz",
-	}, connectArgs...)...)
+	)
 
 	// we are providing custom password to connect, make sure we won't be providing
 	// (different) default password via environment variable, as command-line password
@@ -215,9 +222,7 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 
 	// should see one snapshot
 	snapshots := clitestutil.ListSnapshotsAndExpectSuccess(t, e2)
-	if got, want := len(snapshots), 1; got != want {
-		t.Errorf("invalid number of snapshots for foo@bar")
-	}
+	require.Len(t, snapshots, 1)
 
 	// create very small directory
 	smallDataDir := filepath.Join(sharedTestDataDirBase, "dir-small")
@@ -234,61 +239,172 @@ func testAPIServerRepository(t *testing.T, serverStartArgs []string, useGRPC, al
 
 	// make sure snapshot created by the client resulted in blobs being created by the server
 	// as opposed to buffering it in memory
-	if got, want := len(e.RunAndExpectSuccess(t, "blob", "list", "--prefix=p")), originalPBlobCount; got <= want {
-		t.Errorf("unexpected number of P blobs on the server: %v, wanted > %v", got, want)
-	}
-
-	if got, want := len(e.RunAndExpectSuccess(t, "blob", "list", "--prefix=q")), originalQBlobCount; got <= want {
-		t.Errorf("unexpected number of Q blobs on the server: %v, wanted > %v", got, want)
-	}
+	require.Greater(t, len(e.RunAndExpectSuccess(t, "blob", "list", "--prefix=p")), originalPBlobCount)
+	require.Greater(t, len(e.RunAndExpectSuccess(t, "blob", "list", "--prefix=q")), originalQBlobCount)
 
 	// create snapshot using remote repository client
 	e2.RunAndExpectSuccess(t, "snapshot", "create", sharedTestDataDir2)
 
 	// now should see two snapshots
 	snapshots = clitestutil.ListSnapshotsAndExpectSuccess(t, e2)
-	if got, want := len(snapshots), 3; got != want {
-		t.Errorf("invalid number of snapshots for foo@bar")
-	}
+	require.Len(t, snapshots, 3)
 
 	// shutdown the server
-	logErrorAndIgnore(t, serverapi.Shutdown(ctx, controlClient))
+	require.NoError(t, serverapi.Shutdown(ctx, controlClient))
+
+	wait2()
+
+	// wait for the logs to be uploaded
+	verifyServerJSONLogs(t, e.RunAndExpectSuccess(t, "logs", "show", "--younger-than=2h"))
 
 	// open repository client to a dead server, this should fail quickly instead of retrying forever.
 	timer := timetrack.StartTimer()
 
-	repo.OpenAPIServer(ctx, &repo.APIServerInfo{
+	servertesting.ConnectAndOpenAPIServer(t, ctx, &repo.APIServerInfo{
 		BaseURL:                             sp.BaseURL,
 		TrustedServerCertificateFingerprint: sp.SHA256Fingerprint,
-		DisableGRPC:                         !useGRPC,
 	}, repo.ClientOptions{
 		Username: "foo",
 		Hostname: "bar",
-	}, nil, "baz")
+	}, content.CachingOptions{}, "baz", &repo.Options{})
 
 	//nolint:forbidigo
-	if dur := timer.Elapsed(); dur > 15*time.Second {
-		t.Fatalf("failed connection took %v", dur)
-	}
+	require.Less(t, timer.Elapsed(), 15*time.Second)
 }
 
-func verifyFindManifestCount(ctx context.Context, t *testing.T, rep repo.Repository, labels map[string]string, wantCount int) {
+func verifyServerJSONLogs(t require.TestingT, s []string) {
+	clientSpans := make(map[string]int)
+	remoteSessionSpans := make(map[string]int)
+
+	for _, l := range s {
+		var logLine map[string]any
+
+		json.Unmarshal([]byte(l), &logLine)
+
+		if s, ok := logLine["span:client"].(string); ok {
+			clientSpans[s]++
+		}
+
+		if s, ok := logLine["span:server-session"].(string); ok {
+			remoteSessionSpans[s]++
+		}
+	}
+
+	// there should be 2 client session (initial setup + server),
+	// at least 3 remote sessions (GRPC clients) - may be more due to transparent retries
+	assert.Len(t, clientSpans, 2)
+	assert.GreaterOrEqual(t, len(remoteSessionSpans), 3)
+}
+
+func verifyFindManifestCount(ctx context.Context, t *testing.T, rep repo.Repository, pageSize int32, labels map[string]string, wantCount int) {
 	t.Helper()
+
+	// use test hook to set requested page size (GRPC only, ignored for legacy API)
+	th, ok := rep.(interface {
+		SetFindManifestPageSizeForTesting(v int32)
+	})
+	require.True(t, ok)
+
+	th.SetFindManifestPageSizeForTesting(pageSize)
 
 	man, err := rep.FindManifests(ctx, labels)
-	if err != nil {
-		t.Fatalf("unable to list manifests using repository %v", err)
-	}
-
-	if got, want := len(man), wantCount; got != want {
-		t.Fatalf("invalid number of manifests: %v, want %v", got, want)
-	}
+	require.NoError(t, err)
+	require.Len(t, man, wantCount)
 }
 
-func logErrorAndIgnore(t *testing.T, err error) {
-	t.Helper()
+func TestFindManifestsPaginationOverGRPC(t *testing.T) {
+	ctx := testlogging.Context(t)
 
-	if err != nil {
-		t.Log(err)
+	runner := testenv.NewInProcRunner(t)
+	e := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, runner)
+
+	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
+
+	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir, "--override-username", "foo", "--override-hostname", "bar")
+	e.RunAndExpectSuccess(t, "server", "users", "add", "foo@bar", "--user-password", "baz")
+
+	tlsCert := filepath.Join(e.ConfigDir, "tls.cert")
+	tlsKey := filepath.Join(e.ConfigDir, "tls.key")
+
+	var sp testutil.ServerParameters
+
+	wait, kill := e.RunAndProcessStderr(t, sp.ProcessOutput,
+		"server", "start",
+		"--address=localhost:0",
+		"--grpc",
+		"--tls-key-file", tlsKey,
+		"--tls-cert-file", tlsCert,
+		"--tls-generate-cert",
+		"--server-username", uiUsername,
+		"--server-password", uiPassword,
+		"--server-control-username", controlUsername,
+		"--server-control-password", controlPassword)
+
+	defer wait()
+	defer kill()
+
+	controlClient, err := apiclient.NewKopiaAPIClient(apiclient.Options{
+		BaseURL:                             sp.BaseURL,
+		Username:                            controlUsername,
+		Password:                            controlPassword,
+		TrustedServerCertificateFingerprint: sp.SHA256Fingerprint,
+		LogRequests:                         true,
+	})
+	require.NoError(t, err)
+
+	waitUntilServerStarted(ctx, t, controlClient)
+
+	rep, err := servertesting.ConnectAndOpenAPIServer(t, ctx, &repo.APIServerInfo{
+		BaseURL:                             sp.BaseURL,
+		TrustedServerCertificateFingerprint: sp.SHA256Fingerprint,
+	}, repo.ClientOptions{
+		Username: "foo",
+		Hostname: "bar",
+	}, content.CachingOptions{}, "baz", &repo.Options{})
+
+	require.NoError(t, err)
+
+	defer rep.Close(ctx)
+
+	numManifests := 10000
+	uniqueIDs := map[string]struct{}{}
+
+	// add about 36 MB worth of manifests
+	require.NoError(t, repo.WriteSession(ctx, rep, repo.WriteSessionOptions{}, func(ctx context.Context, w repo.RepositoryWriter) error {
+		for range numManifests {
+			uniqueID := strings.Repeat(uuid.NewString(), 100)
+			require.Len(t, uniqueID, 3600)
+
+			uniqueIDs[uniqueID] = struct{}{}
+
+			if _, err := w.PutManifest(ctx, map[string]string{
+				"type":          "snapshot",
+				"username":      "foo",
+				"hostname":      "bar",
+				"verylonglabel": uniqueID,
+			}, &snapshot.Manifest{}); err != nil {
+				return errors.Wrap(err, "error writing manifest")
+			}
+		}
+
+		return nil
+	}))
+
+	manifests, ferr := rep.FindManifests(ctx, map[string]string{
+		"type":     "snapshot",
+		"username": "foo",
+		"hostname": "bar",
+	})
+
+	require.NoError(t, ferr)
+	require.Len(t, manifests, numManifests)
+
+	// make sure every manifest is unique and in the uniqueIDs map
+	for _, m := range manifests {
+		require.Contains(t, uniqueIDs, m.Labels["verylonglabel"])
+		delete(uniqueIDs, m.Labels["verylonglabel"])
 	}
+
+	// make sure we got them all
+	require.Empty(t, uniqueIDs)
 }

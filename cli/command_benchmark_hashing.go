@@ -15,9 +15,9 @@ import (
 
 type commandBenchmarkHashing struct {
 	blockSize   atunits.Base2Bytes
-	repeat      int
+	repeat      uint
 	optionPrint bool
-	parallel    int
+	parallel    uint
 
 	out textOutput
 }
@@ -25,8 +25,8 @@ type commandBenchmarkHashing struct {
 func (c *commandBenchmarkHashing) setup(svc appServices, parent commandParent) {
 	cmd := parent.Command("hashing", "Run hashing function benchmarks").Alias("hash")
 	cmd.Flag("block-size", "Size of a block to hash").Default("1MB").BytesVar(&c.blockSize)
-	cmd.Flag("repeat", "Number of repetitions").Default("100").IntVar(&c.repeat)
-	cmd.Flag("parallel", "Number of parallel goroutines").Default("1").IntVar(&c.parallel)
+	cmd.Flag("repeat", "Number of repetitions").Default("100").UintVar(&c.repeat)
+	cmd.Flag("parallel", "Number of parallel goroutines").Default("1").UintVar(&c.parallel)
 	cmd.Flag("print-options", "Print out options usable for repository creation").BoolVar(&c.optionPrint)
 	cmd.Action(svc.noRepositoryAction(c.run))
 	c.out.setup(svc)
@@ -42,7 +42,7 @@ func (c *commandBenchmarkHashing) run(ctx context.Context) error {
 	c.out.printStdout("-----------------------------------------------------------------\n")
 
 	for ndx, r := range results {
-		c.out.printStdout("%3d. %-20v %v / second", ndx, r.hash, units.BytesStringBase2(int64(r.throughput)))
+		c.out.printStdout("%3d. %-20v %v / second", ndx, r.hash, units.BytesString(r.throughput))
 
 		if c.optionPrint {
 			c.out.printStdout(",   --block-hash=%s", r.hash)
@@ -65,7 +65,7 @@ func (c *commandBenchmarkHashing) runBenchmark(ctx context.Context) []cryptoBenc
 	for _, ha := range hashing.SupportedAlgorithms() {
 		hf, err := hashing.CreateHashFunc(&format.ContentFormat{
 			Hash:       ha,
-			HMACSecret: make([]byte, 32), //nolint:gomnd
+			HMACSecret: make([]byte, 32), //nolint:mnd
 		})
 		if err != nil {
 			continue
@@ -78,14 +78,12 @@ func (c *commandBenchmarkHashing) runBenchmark(ctx context.Context) []cryptoBenc
 
 		hashCount := c.repeat
 
-		runInParallel(c.parallel, func() interface{} {
+		runInParallelNoInputNoResult(c.parallel, func() {
 			var hashOutput [hashing.MaxHashSize]byte
 
-			for i := 0; i < hashCount; i++ {
+			for range hashCount {
 				hf(hashOutput[:0], input)
 			}
-
-			return nil
 		})
 
 		_, bytesPerSecond := tt.Completed(float64(c.parallel) * float64(len(data)) * float64(hashCount))

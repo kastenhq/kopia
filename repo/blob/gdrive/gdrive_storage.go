@@ -45,6 +45,7 @@ var log = logging.Module("gdrive")
 
 type gdriveStorage struct {
 	Options
+	blob.DefaultProviderImplementation
 
 	client      *drive.FilesService
 	about       *drive.AboutService
@@ -67,8 +68,8 @@ func (gdrive *gdriveStorage) GetCapacity(ctx context.Context) (blob.Capacity, er
 	}
 
 	return blob.Capacity{
-		SizeB: uint64(q.Limit),
-		FreeB: uint64(q.Limit) - uint64(q.Usage),
+		SizeB: uint64(q.Limit),                   //nolint:gosec
+		FreeB: uint64(q.Limit) - uint64(q.Usage), //nolint:gosec
 	}, nil
 }
 
@@ -101,7 +102,7 @@ func (gdrive *gdriveStorage) GetBlob(ctx context.Context, b blob.ID, offset, len
 }
 
 func (gdrive *gdriveStorage) GetMetadata(ctx context.Context, blobID blob.ID) (blob.Metadata, error) {
-	f, err := gdrive.fileIDCache.Lookup(blobID, func(entry *cacheEntry) (interface{}, error) {
+	f, err := gdrive.fileIDCache.Lookup(blobID, func(entry *cacheEntry) (any, error) {
 		if entry.FileID != "" {
 			return &drive.File{
 				Id: entry.FileID,
@@ -114,6 +115,7 @@ func (gdrive *gdriveStorage) GetMetadata(ctx context.Context, blobID blob.ID) (b
 		}
 
 		entry.FileID = file.Id
+
 		return file, err
 	})
 	if err != nil {
@@ -142,7 +144,7 @@ func (gdrive *gdriveStorage) PutBlob(ctx context.Context, blobID blob.ID, data b
 		return errors.Wrap(blob.ErrUnsupportedPutBlobOption, "blob-retention")
 	}
 
-	_, err := gdrive.fileIDCache.Lookup(blobID, func(entry *cacheEntry) (interface{}, error) {
+	_, err := gdrive.fileIDCache.Lookup(blobID, func(entry *cacheEntry) (any, error) {
 		fileID, err := gdrive.getFileIDWithCache(ctx, entry)
 		existingFile := true
 
@@ -157,6 +159,7 @@ func (gdrive *gdriveStorage) PutBlob(ctx context.Context, blobID blob.ID, data b
 		}
 
 		var file *drive.File
+
 		mtime := ""
 
 		if !opts.SetModTime.IsZero() {
@@ -197,7 +200,6 @@ func (gdrive *gdriveStorage) PutBlob(ctx context.Context, blobID blob.ID, data b
 				).
 				Context(ctx).
 				Do()
-
 			if err != nil {
 				return nil, errors.Wrapf(translateError(err), "Update in PutBlob(%s)", blobID)
 			}
@@ -216,15 +218,20 @@ func (gdrive *gdriveStorage) PutBlob(ctx context.Context, blobID blob.ID, data b
 }
 
 func (gdrive *gdriveStorage) DeleteBlob(ctx context.Context, blobID blob.ID) error {
-	_, err := gdrive.fileIDCache.Lookup(blobID, func(entry *cacheEntry) (interface{}, error) {
+	_, err := gdrive.fileIDCache.Lookup(blobID, func(entry *cacheEntry) (any, error) {
 		handleError := func(err error) error {
 			if errors.Is(err, blob.ErrBlobNotFound) {
 				log(ctx).Warnf("Trying to non-existent DeleteBlob(%s)", blobID)
+
 				entry.FileID = ""
+
 				return nil
-			} else if err != nil {
+			}
+
+			if err != nil {
 				return errors.Wrapf(err, "DeleteBlob(%s)", blobID)
 			}
+
 			return nil
 		}
 
@@ -239,7 +246,9 @@ func (gdrive *gdriveStorage) DeleteBlob(ctx context.Context, blobID blob.ID) err
 		}
 
 		entry.FileID = ""
+
 		gdrive.fileIDCache.RecordBlobChange(blobID, "")
+
 		return nil, nil
 	})
 
@@ -248,7 +257,7 @@ func (gdrive *gdriveStorage) DeleteBlob(ctx context.Context, blobID blob.ID) err
 
 func (gdrive *gdriveStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback func(blob.Metadata) error) error {
 	// Tracks blob matches in cache but not returned by API.
-	unvisitedIds := make(map[blob.ID]bool)
+	unvisitedIDs := make(map[blob.ID]bool)
 
 	consumer := func(files *drive.FileList) error {
 		for _, file := range files.Files {
@@ -260,7 +269,7 @@ func (gdrive *gdriveStorage) ListBlobs(ctx context.Context, prefix blob.ID, call
 			}
 
 			// Mark blob as visited.
-			delete(unvisitedIds, blobID)
+			delete(unvisitedIDs, blobID)
 
 			bm, err := parseBlobMetadata(file, blobID)
 			if err != nil {
@@ -284,9 +293,9 @@ func (gdrive *gdriveStorage) ListBlobs(ctx context.Context, prefix blob.ID, call
 		gdrive.fileIDCache.VisitBlobChanges(func(blobID blob.ID, fileID string) {
 			if matchesPrefix(blobID, prefix) {
 				if fileID != "" {
-					unvisitedIds[blobID] = true
+					unvisitedIDs[blobID] = true
 				} else {
-					delete(unvisitedIds, blobID)
+					delete(unvisitedIDs, blobID)
 				}
 			}
 		})
@@ -298,8 +307,8 @@ func (gdrive *gdriveStorage) ListBlobs(ctx context.Context, prefix blob.ID, call
 	}
 
 	// Catch any blobs that the API didn't return.
-	if len(unvisitedIds) != 0 {
-		for blobID := range unvisitedIds {
+	if len(unvisitedIDs) != 0 {
+		for blobID := range unvisitedIDs {
 			bm, err := gdrive.GetMetadata(ctx, blobID)
 			if err != nil {
 				return errors.Wrapf(translateError(err), "GetMetadata in ListBlobs(%s)", prefix)
@@ -325,17 +334,13 @@ func (gdrive *gdriveStorage) DisplayName() string {
 	return fmt.Sprintf("Google Drive: %v", gdrive.folderID)
 }
 
-func (gdrive *gdriveStorage) Close(ctx context.Context) error {
-	return nil
-}
-
-func (gdrive *gdriveStorage) FlushCaches(ctx context.Context) error {
+func (gdrive *gdriveStorage) FlushCaches(_ context.Context) error {
 	gdrive.fileIDCache.Clear()
 	return nil
 }
 
 func (gdrive *gdriveStorage) getFileID(ctx context.Context, blobID blob.ID) (string, error) {
-	fileID, err := gdrive.fileIDCache.Lookup(blobID, func(entry *cacheEntry) (interface{}, error) {
+	fileID, err := gdrive.fileIDCache.Lookup(blobID, func(entry *cacheEntry) (any, error) {
 		fileID, err := gdrive.getFileIDWithCache(ctx, entry)
 		return fileID, err
 	})
@@ -362,14 +367,9 @@ func (gdrive *gdriveStorage) getFileIDWithCache(ctx context.Context, entry *cach
 
 // Try getFileByBlobID with periodic backoff.
 func (gdrive *gdriveStorage) tryGetFileByBlobID(ctx context.Context, blobID blob.ID, fields googleapi.Field) (*drive.File, error) {
-	f, err := retry.Periodically(ctx, queryRetryDelay, queryRetryMax, fmt.Sprintf("getFileIDByblobID(%v)", blobID), func() (interface{}, error) {
+	return retry.Periodically(ctx, queryRetryDelay, queryRetryMax, fmt.Sprintf("getFileIDByblobID(%v)", blobID), func() (*drive.File, error) {
 		return gdrive.getFileByBlobID(ctx, blobID, fields)
 	}, retryNotFound)
-	if err != nil {
-		return nil, err //nolint:wrapcheck
-	}
-
-	return f.(*drive.File), nil //nolint:forcetypeassert
 }
 
 func (gdrive *gdriveStorage) getFileByFileID(ctx context.Context, fileID string, fields googleapi.Field) (*drive.File, error) {
@@ -384,7 +384,7 @@ func (gdrive *gdriveStorage) getFileByBlobID(ctx context.Context, blobID blob.ID
 		IncludeItemsFromAllDrives(true).
 		Q(fmt.Sprintf("'%s' in parents and name = '%s' and mimeType = '%s' and trashed = false", gdrive.folderID, toFileName(blobID), blobMimeType)).
 		Fields(fields).
-		PageSize(2). //nolint:gomnd
+		PageSize(2). //nolint:mnd
 		Context(ctx).
 		Do()
 
@@ -473,12 +473,11 @@ func translateError(err error) error {
 		}
 	}
 
-	switch {
-	case err == nil:
-		return nil
-	default:
+	if err != nil {
 		return errors.Wrap(err, "unexpected Google Drive error")
 	}
+
+	return nil
 }
 
 func tokenSourceFromCredentialsFile(ctx context.Context, fn string, scopes ...string) (oauth2.TokenSource, error) {
@@ -545,7 +544,11 @@ func CreateDriveService(ctx context.Context, opt *Options) (*drive.Service, erro
 //
 // By default the connection reuses credentials managed by (https://cloud.google.com/sdk/),
 // but this can be disabled by setting IgnoreDefaultCredentials to true.
-func New(ctx context.Context, opt *Options) (blob.Storage, error) {
+func New(ctx context.Context, opt *Options, isCreate bool) (blob.Storage, error) {
+	_ = isCreate
+
+	log(ctx).Warn("The GDrive storage provider is not actively tested, it may cause data loss, use at your own risk")
+
 	if opt.FolderID == "" {
 		return nil, errors.New("folder-id must be specified")
 	}
@@ -566,10 +569,10 @@ func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 	// verify Drive connection is functional by listing blobs in a bucket, which will fail if the bucket
 	// does not exist. We list with a prefix that will not exist, to avoid iterating through any objects.
 	nonExistentPrefix := fmt.Sprintf("kopia-gdrive-storage-initializing-%v", clock.Now().UnixNano())
-	err = gdrive.ListBlobs(ctx, blob.ID(nonExistentPrefix), func(md blob.Metadata) error {
+
+	err = gdrive.ListBlobs(ctx, blob.ID(nonExistentPrefix), func(_ blob.Metadata) error {
 		return nil
 	})
-
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to list from the folder")
 	}
@@ -578,12 +581,5 @@ func New(ctx context.Context, opt *Options) (blob.Storage, error) {
 }
 
 func init() {
-	blob.AddSupportedStorage(
-		gdriveStorageType,
-		func() interface{} {
-			return &Options{}
-		},
-		func(ctx context.Context, o interface{}, isCreate bool) (blob.Storage, error) {
-			return New(ctx, o.(*Options)) //nolint:forcetypeassert
-		})
+	blob.AddSupportedStorage(gdriveStorageType, Options{}, New)
 }

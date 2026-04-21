@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,14 +15,19 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kopia/kopia/internal/cache"
+	"github.com/kopia/kopia/internal/crypto"
 	"github.com/kopia/kopia/internal/epoch"
 	"github.com/kopia/kopia/internal/gather"
+	"github.com/kopia/kopia/internal/metricid"
 	"github.com/kopia/kopia/internal/repotesting"
+	"github.com/kopia/kopia/internal/servertesting"
 	"github.com/kopia/kopia/internal/testlogging"
+	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/beforeop"
 	"github.com/kopia/kopia/repo/content"
+	"github.com/kopia/kopia/repo/content/indexblob"
 	"github.com/kopia/kopia/repo/format"
 	"github.com/kopia/kopia/repo/object"
 )
@@ -33,15 +39,15 @@ func (s *formatSpecificTestSuite) TestWriters(t *testing.T) {
 	}{
 		{
 			[]byte("the quick brown fox jumps over the lazy dog"),
-			mustParseObjectID(t, "345acef0bcf82f1daf8e49fab7b7fac7ec296c518501eabea3645b99345a4e08"),
+			mustParseObjectID(t, "f65fc4107863281faaeb7087197c05ad59457362607330c665c86c852c5e5906"),
 		},
-		{make([]byte, 100), mustParseObjectID(t, "1d804f1f69df08f3f59070bf962de69433e3d61ac18522a805a84d8c92741340")}, // 100 zero bytes
+		{make([]byte, 100), mustParseObjectID(t, "bfa2b4b9421671ab2b5bfa8c90ee33607784a27e452b08556509ef9bd47a37c6")}, // 100 zero bytes
 	}
 
 	for _, c := range cases {
 		ctx, env := repotesting.NewEnvironment(t, s.formatVersion)
 
-		writer := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{})
+		writer := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{MetadataCompressor: "zstd-fastest"})
 		if _, err := writer.Write(c.data); err != nil {
 			t.Fatalf("write error: %v", err)
 		}
@@ -68,12 +74,12 @@ func (s *formatSpecificTestSuite) TestWriterCompleteChunkInTwoWrites(t *testing.
 	ctx, env := repotesting.NewEnvironment(t, s.formatVersion)
 
 	b := make([]byte, 100)
-	writer := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{})
+	writer := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{MetadataCompressor: "zstd-fastest"})
 	writer.Write(b[0:50])
 	writer.Write(b[0:50])
 	result, err := writer.Result()
 
-	if result != mustParseObjectID(t, "1d804f1f69df08f3f59070bf962de69433e3d61ac18522a805a84d8c92741340") {
+	if result != mustParseObjectID(t, "bfa2b4b9421671ab2b5bfa8c90ee33607784a27e452b08556509ef9bd47a37c6") {
 		t.Errorf("unexpected result: %v err: %v", result, err)
 	}
 }
@@ -127,7 +133,7 @@ func (s *formatSpecificTestSuite) TestPackingSimple(t *testing.T) {
 	verify(ctx, t, env.RepositoryWriter, oid2a, []byte(content2), "packed-object-2")
 	verify(ctx, t, env.RepositoryWriter, oid3a, []byte(content3), "packed-object-3")
 
-	if err := env.RepositoryWriter.ContentManager().CompactIndexes(ctx, content.CompactOptions{MaxSmallBlobs: 1}); err != nil {
+	if _, err := env.RepositoryWriter.ContentManager().CompactIndexes(ctx, indexblob.CompactOptions{MaxSmallBlobs: 1}); err != nil {
 		t.Errorf("optimize error: %v", err)
 	}
 
@@ -137,7 +143,7 @@ func (s *formatSpecificTestSuite) TestPackingSimple(t *testing.T) {
 	verify(ctx, t, env.RepositoryWriter, oid2a, []byte(content2), "packed-object-2")
 	verify(ctx, t, env.RepositoryWriter, oid3a, []byte(content3), "packed-object-3")
 
-	if err := env.RepositoryWriter.ContentManager().CompactIndexes(ctx, content.CompactOptions{MaxSmallBlobs: 1}); err != nil {
+	if _, err := env.RepositoryWriter.ContentManager().CompactIndexes(ctx, indexblob.CompactOptions{MaxSmallBlobs: 1}); err != nil {
 		t.Errorf("optimize error: %v", err)
 	}
 
@@ -153,11 +159,11 @@ func (s *formatSpecificTestSuite) TestHMAC(t *testing.T) {
 
 	c := bytes.Repeat([]byte{0xcd}, 50)
 
-	w := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{})
+	w := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{MetadataCompressor: "zstd-fastest"})
 	w.Write(c)
 	result, err := w.Result()
 
-	if result.String() != "367352007ee6ca9fa755ce8352347d092c17a24077fd33c62f655574a8cf906d" {
+	if result.String() != "e37e93ba74e074ad1366ee2f032ee9c3a5b81ec82c140b053c1a4e6673d5d9d9" {
 		t.Errorf("unexpected result: %v err: %v", result.String(), err)
 	}
 }
@@ -179,7 +185,7 @@ func (s *formatSpecificTestSuite) TestReaderStoredBlockNotFound(t *testing.T) {
 func writeObject(ctx context.Context, t *testing.T, rep repo.RepositoryWriter, data []byte, testCaseID string) object.ID {
 	t.Helper()
 
-	w := rep.NewObjectWriter(ctx, object.WriterOptions{})
+	w := rep.NewObjectWriter(ctx, object.WriterOptions{MetadataCompressor: "zstd-fastest"})
 	if _, err := w.Write(data); err != nil {
 		t.Fatalf("can't write object %q - write failed: %v", testCaseID, err)
 	}
@@ -201,7 +207,7 @@ func verify(ctx context.Context, t *testing.T, rep repo.Repository, objectID obj
 		return
 	}
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		sampleSize := int(rand.Int31n(300))
 		seekOffset := int(rand.Int31n(int32(len(expectedData))))
 
@@ -246,8 +252,8 @@ func TestFormats(t *testing.T) {
 			format: func(n *repo.NewRepositoryOptions) {
 			},
 			oids: map[string]object.ID{
-				"": mustParseObjectID(t, "b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad"),
-				"The quick brown fox jumps over the lazy dog": mustParseObjectID(t, "fb011e6154a19b9a4c767373c305275a5a69e8b68b0b4c9200c383dced19a416"),
+				"": mustParseObjectID(t, "0c2d44dc80de21b71d4219623082f5dc253fe9bb54e48b0fc90e118f8e6cf419"),
+				"The quick brown fox jumps over the lazy dog": mustParseObjectID(t, "6bbb74fef0699e516fb96252d8280c1c7f3492e12de9ec6d79c3c9c39b7b0063"),
 			},
 		},
 		{
@@ -269,7 +275,7 @@ func TestFormats(t *testing.T) {
 
 		for k, v := range c.oids {
 			bytesToWrite := []byte(k)
-			w := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{})
+			w := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{MetadataCompressor: "zstd-fastest"})
 			w.Write(bytesToWrite)
 
 			oid, err := w.Result()
@@ -304,9 +310,9 @@ func TestWriterScope(t *testing.T) {
 
 	rep := env.Repository // read-only
 
-	lw := rep.(repo.RepositoryWriter)
+	lw := testutil.EnsureType[repo.DirectRepositoryWriter](t, rep)
 
-	// w1, w2, w3 are indepdendent sessions.
+	// w1, w2, w3 are independent sessions.
 	_, w1, err := rep.NewWriter(ctx, repo.WriteSessionOptions{Purpose: "writer1"})
 	require.NoError(t, err)
 
@@ -446,6 +452,7 @@ func TestInitializeWithBlobCfgRetentionBlob(t *testing.T) {
 					if id == format.KopiaRepositoryBlobID {
 						return blob.ErrBlobNotFound
 					}
+
 					return nil
 				}, nil, nil, nil,
 			),
@@ -467,9 +474,11 @@ func TestInitializeWithBlobCfgRetentionBlob(t *testing.T) {
 					if id == format.KopiaBlobCfgBlobID {
 						return nil
 					}
+
 					if id == format.KopiaRepositoryBlobID {
 						return blob.ErrBlobNotFound
 					}
+
 					return nil
 				}, nil, nil, nil,
 			),
@@ -490,6 +499,7 @@ func TestInitializeWithBlobCfgRetentionBlob(t *testing.T) {
 					if id == format.KopiaBlobCfgBlobID || id == format.KopiaRepositoryBlobID {
 						return blob.ErrBlobNotFound
 					}
+
 					return nil
 				},
 				nil, nil,
@@ -498,6 +508,7 @@ func TestInitializeWithBlobCfgRetentionBlob(t *testing.T) {
 					if id == format.KopiaBlobCfgBlobID {
 						return errors.New("unexpected error")
 					}
+
 					return nil
 				},
 			),
@@ -521,6 +532,7 @@ func TestInitializeWithBlobCfgRetentionBlob(t *testing.T) {
 					if id == format.KopiaRepositoryBlobID {
 						return errors.New("unexpected error")
 					}
+
 					return nil
 				},
 				nil, nil, nil,
@@ -538,6 +550,7 @@ func TestInitializeWithNoRetention(t *testing.T) {
 	// are not supplied.
 	var b gather.WriteBuffer
 	defer b.Close()
+
 	require.NoError(t, env.RepositoryWriter.BlobStorage().GetBlob(ctx, format.KopiaBlobCfgBlobID, 0, -1, &b))
 }
 
@@ -549,7 +562,7 @@ func TestObjectWritesWithRetention(t *testing.T) {
 		},
 	})
 
-	writer := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{})
+	writer := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{MetadataCompressor: "zstd-fastest"})
 	_, err := writer.Write([]byte("the quick brown fox jumps over the lazy dog"))
 	require.NoError(t, err)
 
@@ -560,13 +573,13 @@ func TestObjectWritesWithRetention(t *testing.T) {
 
 	var prefixesWithRetention []string
 
-	versionedMap := env.RootStorage().(cache.Storage)
+	versionedMap := testutil.EnsureType[cache.Storage](t, env.RootStorage())
 
 	for _, prefix := range content.PackBlobIDPrefixes {
 		prefixesWithRetention = append(prefixesWithRetention, string(prefix))
 	}
 
-	prefixesWithRetention = append(prefixesWithRetention, content.LegacyIndexBlobPrefix, epoch.EpochManagerIndexUberPrefix,
+	prefixesWithRetention = append(prefixesWithRetention, indexblob.V0IndexBlobPrefix, epoch.EpochManagerIndexUberPrefix,
 		format.KopiaRepositoryBlobID, format.KopiaBlobCfgBlobID)
 
 	// make sure that we cannot set mtime on the kopia objects created due to the
@@ -574,17 +587,36 @@ func TestObjectWritesWithRetention(t *testing.T) {
 	require.NoError(t, versionedMap.ListBlobs(ctx, "", func(it blob.Metadata) error {
 		for _, prefix := range prefixesWithRetention {
 			if strings.HasPrefix(string(it.BlobID), prefix) {
-				require.Error(t, versionedMap.TouchBlob(ctx, it.BlobID, 0), "expected error while touching blob %s", it.BlobID)
+				_, err = versionedMap.TouchBlob(ctx, it.BlobID, 0)
+				require.Error(t, err, "expected error while touching blob %s", it.BlobID)
+
 				return nil
 			}
 		}
-		require.NoError(t, versionedMap.TouchBlob(ctx, it.BlobID, 0), "unexpected error while touching blob %s", it.BlobID)
+
+		_, err = versionedMap.TouchBlob(ctx, it.BlobID, 0)
+		require.NoError(t, err, "unexpected error while touching blob %s", it.BlobID)
+
 		return nil
 	}))
 }
 
-func (s *formatSpecificTestSuite) TestWriteSessionFlushOnSuccess(t *testing.T) {
-	ctx, env := repotesting.NewEnvironment(t, s.formatVersion)
+func TestWriteSessionFlushOnSuccess(t *testing.T) {
+	var beforeFlushCount, afterFlushCount atomic.Int32
+
+	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant, repotesting.Options{
+		OpenOptions: func(o *repo.Options) {
+			o.BeforeFlush = append(o.BeforeFlush, func(ctx context.Context, w repo.RepositoryWriter) error {
+				beforeFlushCount.Add(1)
+				w.OnSuccessfulFlush(func(ctx context.Context, w repo.RepositoryWriter) error {
+					afterFlushCount.Add(1)
+					return nil
+				})
+
+				return nil
+			})
+		},
+	})
 
 	var oid object.ID
 
@@ -593,7 +625,98 @@ func (s *formatSpecificTestSuite) TestWriteSessionFlushOnSuccess(t *testing.T) {
 		return nil
 	}))
 
+	require.EqualValues(t, 1, beforeFlushCount.Load())
+	require.EqualValues(t, 1, afterFlushCount.Load())
+
 	verify(ctx, t, env.Repository, oid, []byte{1, 2, 3}, "test-1")
+
+	someErr := errors.New("some error")
+
+	require.ErrorIs(t, repo.WriteSession(ctx, env.Repository, repo.WriteSessionOptions{}, func(ctx context.Context, w repo.RepositoryWriter) error {
+		oid = writeObject(ctx, t, w, []byte{1, 2, 3, 4}, "test-2")
+		return someErr
+	}), someErr)
+
+	require.EqualValues(t, 1, beforeFlushCount.Load())
+	require.EqualValues(t, 1, afterFlushCount.Load())
+
+	require.ErrorIs(t, repo.WriteSession(ctx, env.Repository, repo.WriteSessionOptions{
+		FlushOnFailure: true,
+	}, func(ctx context.Context, w repo.RepositoryWriter) error {
+		oid = writeObject(ctx, t, w, []byte{1, 2, 3, 4, 5}, "test-3")
+		return someErr
+	}), someErr)
+
+	require.EqualValues(t, 2, beforeFlushCount.Load())
+	require.EqualValues(t, 2, afterFlushCount.Load())
+}
+
+func TestWriteSessionFlushOnSuccessClient(t *testing.T) {
+	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant, repotesting.Options{})
+
+	apiServerInfo := servertesting.StartServer(t, env, true)
+
+	var beforeFlushCount, afterFlushCount atomic.Int32
+
+	ctx2, cancel := context.WithCancel(testlogging.Context(t))
+	defer cancel()
+
+	rep, err := servertesting.ConnectAndOpenAPIServer(t, ctx2, apiServerInfo, repo.ClientOptions{
+		Username: servertesting.TestUsername,
+		Hostname: servertesting.TestHostname,
+	}, content.CachingOptions{
+		CacheDirectory: testutil.TempDirectory(t),
+	}, servertesting.TestPassword, &repo.Options{
+		BeforeFlush: []repo.RepositoryWriterCallback{
+			func(ctx context.Context, w repo.RepositoryWriter) error {
+				beforeFlushCount.Add(1)
+				w.OnSuccessfulFlush(func(ctx context.Context, w repo.RepositoryWriter) error {
+					afterFlushCount.Add(1)
+					return nil
+				})
+
+				return nil
+			},
+		},
+	})
+
+	require.NoError(t, err)
+
+	defer rep.Close(ctx) //nolint:errcheck,staticcheck
+
+	var oid object.ID
+
+	require.NoError(t, repo.WriteSession(ctx, rep, repo.WriteSessionOptions{}, func(ctx context.Context, w repo.RepositoryWriter) error {
+		oid = writeObject(ctx, t, w, []byte{1, 2, 3}, "test-1")
+		return nil
+	}))
+
+	require.EqualValues(t, 1, beforeFlushCount.Load())
+	require.EqualValues(t, 1, afterFlushCount.Load())
+
+	verify(ctx, t, rep, oid, []byte{1, 2, 3}, "test-1")
+
+	someErr := errors.New("some error")
+
+	require.ErrorIs(t, repo.WriteSession(ctx, rep, repo.WriteSessionOptions{}, func(ctx context.Context, w repo.RepositoryWriter) error {
+		oid = writeObject(ctx, t, w, []byte{1, 2, 3, 4}, "test-2")
+		return someErr
+	}), someErr)
+
+	require.EqualValues(t, 1, beforeFlushCount.Load())
+	require.EqualValues(t, 1, afterFlushCount.Load())
+
+	require.ErrorIs(t, repo.WriteSession(ctx, rep, repo.WriteSessionOptions{
+		FlushOnFailure: true,
+	}, func(ctx context.Context, w repo.RepositoryWriter) error {
+		oid = writeObject(ctx, t, w, []byte{1, 2, 3, 4, 5}, "test-3")
+		return someErr
+	}), someErr)
+
+	t.Logf("-----")
+
+	require.EqualValues(t, 2, beforeFlushCount.Load())
+	require.EqualValues(t, 2, afterFlushCount.Load())
 }
 
 func (s *formatSpecificTestSuite) TestWriteSessionNoFlushOnFailure(t *testing.T) {
@@ -647,8 +770,95 @@ func (s *formatSpecificTestSuite) TestChangePassword(t *testing.T) {
 	}
 }
 
+func TestMetrics_CompressibleData(t *testing.T) {
+	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant)
+	_ = ctx
+
+	ms := env.RepositoryMetrics().Snapshot(false)
+
+	require.EqualValues(t, 0, ensureMapEntry(t, ms.Counters, "content_write_bytes"))
+
+	var (
+		inputData = bytes.Repeat([]byte{1, 2, 3, 4}, 100)
+		count     = 0
+		oid       object.ID
+	)
+
+	for ensureMapEntry(t, env.RepositoryMetrics().Snapshot(false).Counters, "content_write_duration_nanos") < 5e6 {
+		w := env.RepositoryWriter.NewObjectWriter(ctx, object.WriterOptions{
+			Compressor:         "gzip",
+			MetadataCompressor: "zstd-fastest",
+		})
+		w.Write(inputData)
+
+		var err error
+
+		oid, err = w.Result()
+		require.NoError(t, err)
+
+		count++
+	}
+
+	ms = env.RepositoryMetrics().Snapshot(false)
+	require.EqualValues(t, count*len(inputData), ensureMapEntry(t, ms.Counters, "content_write_bytes"))
+	require.EqualValues(t, count*len(inputData), ensureMapEntry(t, ms.Counters, "content_hashed_bytes"))
+	require.EqualValues(t, len(inputData), ensureMapEntry(t, ms.Counters, "content_compression_attempted_bytes"))
+
+	// this is what 100x{1,2,3,4} compresses down to using gzip, it's also
+	// the number of bytes that go into encryption.
+	const compressedByteCount = 36
+
+	const encryptionOverhead = 28
+
+	require.EqualValues(t, compressedByteCount, ensureMapEntry(t, ms.Counters, "content_after_compression_bytes"))
+	require.EqualValues(t, len(inputData), ensureMapEntry(t, ms.Counters, "content_compressible_bytes"))
+	require.EqualValues(t, 0, ensureMapEntry(t, ms.Counters, "content_non_compressible_bytes"))
+	require.EqualValues(t, len(inputData)-compressedByteCount, ensureMapEntry(t, ms.Counters, "content_compression_savings_bytes"))
+	require.EqualValues(t, compressedByteCount+encryptionOverhead, ensureMapEntry(t, ms.Counters, "content_encrypted_bytes"))
+
+	r, err := env.RepositoryWriter.OpenObject(ctx, oid)
+	require.NoError(t, err)
+
+	data, err := io.ReadAll(r)
+	require.NoError(t, err)
+	require.Equal(t, inputData, data)
+
+	ms = env.RepositoryMetrics().Snapshot(false)
+	require.EqualValues(t, len(inputData), ensureMapEntry(t, ms.Counters, "content_read_bytes"))
+	require.EqualValues(t, compressedByteCount, ensureMapEntry(t, ms.Counters, "content_decompressed_bytes"))
+	require.EqualValues(t, compressedByteCount+encryptionOverhead, ensureMapEntry(t, ms.Counters, "content_decrypted_bytes"))
+}
+
+func ensureMapEntry[T any](t *testing.T, m map[string]T, key string) T {
+	t.Helper()
+
+	actual, got := m[key]
+	require.True(t, got, key)
+
+	return actual
+}
+
+func TestAllRegistryMetricsAreMapped(t *testing.T) {
+	_, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant)
+
+	snap := env.RepositoryMetrics().Snapshot(false)
+
+	for s := range snap.Counters {
+		require.Contains(t, metricid.Counters.NameToIndex, s)
+	}
+
+	for s := range snap.DurationDistributions {
+		require.Contains(t, metricid.DurationDistributions.NameToIndex, s)
+	}
+
+	for s := range snap.SizeDistributions {
+		require.Contains(t, metricid.SizeDistributions.NameToIndex, s)
+	}
+}
+
 func TestDeriveKey(t *testing.T) {
-	testPurpose := []byte{0, 0, 0, 0}
+	const testPurpose = "test purpose"
+
 	testKeyLength := 8
 	masterKey := []byte("01234567890123456789012345678901")
 	uniqueID := []byte("a5ba5d2da4b14b518b9501b64b5d87ca")
@@ -661,8 +871,11 @@ func TestDeriveKey(t *testing.T) {
 	formatEncryptionKeyFromPassword, err := j.DeriveFormatEncryptionKeyFromPassword(repotesting.DefaultPasswordForTesting)
 	require.NoError(t, err)
 
-	validV1KeyDerivedFromPassword := format.DeriveKeyFromMasterKey(formatEncryptionKeyFromPassword, uniqueID, testPurpose, testKeyLength)
-	validV2KeyDerivedFromMasterKey := format.DeriveKeyFromMasterKey(masterKey, uniqueID, testPurpose, testKeyLength)
+	validV1KeyDerivedFromPassword, err := crypto.DeriveKeyFromMasterKey(formatEncryptionKeyFromPassword, uniqueID, testPurpose, testKeyLength)
+	require.NoError(t, err)
+
+	validV2KeyDerivedFromMasterKey, err := crypto.DeriveKeyFromMasterKey(masterKey, uniqueID, testPurpose, testKeyLength)
+	require.NoError(t, err)
 
 	setup := func(v format.Version) repo.DirectRepositoryWriter {
 		_, env := repotesting.NewEnvironment(t, v, repotesting.Options{
@@ -680,28 +893,29 @@ func TestDeriveKey(t *testing.T) {
 			NewRepositoryOptions: func(nro *repo.NewRepositoryOptions) {
 				// do not set nro.BlockFormat.MasterKey
 				nro.UniqueID = uniqueID
+				nro.FormatBlockKeyDerivationAlgorithm = format.DefaultKeyDerivationAlgorithm
 			},
 		})
 
 		// prepare upgrade
-		dw1Upgraded := env.Repository.(repo.DirectRepositoryWriter)
+		dw1Upgraded := testutil.EnsureType[repo.DirectRepositoryWriter](t, env.Repository)
 		cf := dw1Upgraded.ContentReader().ContentFormat()
 
-		mp, mperr := cf.GetMutableParameters()
+		mp, mperr := cf.GetMutableParameters(ctx)
 		require.NoError(t, mperr)
 
-		feat, err := dw1Upgraded.FormatManager().RequiredFeatures()
+		feat, err := dw1Upgraded.FormatManager().RequiredFeatures(ctx)
 		require.NoError(t, err)
 
 		// perform upgrade
 		mp.Version = v2
 
-		blobCfg, err := dw1Upgraded.FormatManager().BlobCfgBlob()
+		blobCfg, err := dw1Upgraded.FormatManager().BlobCfgBlob(ctx)
 		require.NoError(t, err)
 
 		require.NoError(t, dw1Upgraded.FormatManager().SetParameters(ctx, mp, blobCfg, feat))
 
-		return env.MustConnectOpenAnother(t).(repo.DirectRepositoryWriter)
+		return testutil.EnsureType[repo.DirectRepositoryWriter](t, env.MustConnectOpenAnother(t))
 	}
 
 	// we verify that repositories started on V1 will continue to derive keys from
@@ -721,11 +935,13 @@ func TestDeriveKey(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.desc, func(t *testing.T) {
-			mp, err := tc.dw.FormatManager().GetMutableParameters()
+			mp, err := tc.dw.FormatManager().GetMutableParameters(testlogging.Context(t))
 			require.NoError(t, err)
-
 			require.Equal(t, tc.wantFormat, mp.Version)
-			require.Equal(t, tc.wantKey, tc.dw.DeriveKey(testPurpose, testKeyLength))
+
+			k, err := tc.dw.DeriveKey(testPurpose, testKeyLength)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantKey, k)
 		})
 	}
 }

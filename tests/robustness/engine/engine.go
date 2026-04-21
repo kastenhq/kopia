@@ -1,5 +1,4 @@
 //go:build darwin || (linux && amd64)
-// +build darwin linux,amd64
 
 // Package engine provides the framework for a snapshot repository testing engine
 package engine
@@ -119,7 +118,8 @@ func (e *Engine) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	cleanupSummaryBuilder := new(strings.Builder)
+	var cleanupSummaryBuilder strings.Builder
+
 	cleanupSummaryBuilder.WriteString("\n================\n")
 	cleanupSummaryBuilder.WriteString("Cleanup Summary:\n\n")
 	cleanupSummaryBuilder.WriteString(e.Stats())

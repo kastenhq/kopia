@@ -15,7 +15,7 @@ import (
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
 	"github.com/kopia/kopia/snapshot/restore"
-	"github.com/kopia/kopia/snapshot/snapshotfs"
+	"github.com/kopia/kopia/snapshot/upload"
 )
 
 // StatusResponse is the response of 'status' HTTP API command.
@@ -52,13 +52,13 @@ type SourcesResponse struct {
 
 // SourceStatus describes the status of a single source.
 type SourceStatus struct {
-	Source           snapshot.SourceInfo        `json:"source"`
-	Status           string                     `json:"status"`
-	SchedulingPolicy policy.SchedulingPolicy    `json:"schedule"`
-	LastSnapshot     *snapshot.Manifest         `json:"lastSnapshot,omitempty"`
-	NextSnapshotTime *time.Time                 `json:"nextSnapshotTime,omitempty"`
-	UploadCounters   *snapshotfs.UploadCounters `json:"upload,omitempty"`
-	CurrentTask      string                     `json:"currentTask,omitempty"`
+	Source           snapshot.SourceInfo     `json:"source"`
+	Status           string                  `json:"status"`
+	SchedulingPolicy policy.SchedulingPolicy `json:"schedule"`
+	LastSnapshot     *snapshot.Manifest      `json:"lastSnapshot,omitempty"`
+	NextSnapshotTime *time.Time              `json:"nextSnapshotTime,omitempty"`
+	UploadCounters   *upload.Counters        `json:"upload,omitempty"`
+	CurrentTask      string                  `json:"currentTask,omitempty"`
 }
 
 // PolicyListEntry describes single policy.
@@ -269,6 +269,7 @@ type ResolvePolicyResponse struct {
 	Definition            *policy.Definition `json:"definition"`
 	Defined               *policy.Policy     `json:"defined"`
 	UpcomingSnapshotTimes []time.Time        `json:"upcomingSnapshotTimes"`
+	SchedulingError       string             `json:"schedulingError,omitempty"`
 }
 
 // ResolvePathRequest contains request to resolve a particular path to ResolvePathResponse.
@@ -288,6 +289,11 @@ type CLIInfo struct {
 
 // UIPreferences represents JSON object storing UI preferences.
 type UIPreferences struct {
-	Theme    string `json:"theme"`    // 'dark', 'light' or ''
-	PageSize int    `json:"pageSize"` // A page size; the actual possible values will only be provided by the frontend
+	BytesStringBase2       bool   `json:"bytesStringBase2"`       // If `true`, display storage values in base-2 (default is base-10)
+	DefaultSnapshotViewAll bool   `json:"defaultSnapshotViewAll"` // If `true` default to showing all snapshots (default is local snapshots)
+	Theme                  string `json:"theme"`                  // Specifies the theme used by the UI
+	FontSize               string `json:"fontSize"`               // Specifies the font size used by the UI
+	PageSize               int    `json:"pageSize"`               // A page size; the actual possible values will only be provided by the frontend
+	Language               string `json:"language"`               // Specifies the language used by the UI
+	Locale                 string `json:"locale"`                 // Specifies the locale used by the UI for formatting numbers and dates
 }

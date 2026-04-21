@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/repo"
@@ -178,13 +178,13 @@ func (c *commandSnapshotCopyMoveHistory) getCopySourceAndDestination(rep repo.Re
 	if di.Path != "" && si.Path == "" {
 		// it is illegal to specify source without path, but destination with a path
 		// as it would result in multiple individual paths being squished together.
-		return si, di, errors.Errorf("path specified on destination but not source")
+		return si, di, errors.New("path specified on destination but not source")
 	}
 
 	if di.UserName != "" && si.UserName == "" {
 		// it is illegal to specify source without username, but destination with a username
 		// as it would result in multiple individual paths being squished together.
-		return si, di, errors.Errorf("username specified on destination but not source")
+		return si, di, errors.New("username specified on destination but not source")
 	}
 
 	return si, di, nil

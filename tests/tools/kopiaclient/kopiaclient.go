@@ -1,5 +1,4 @@
 //go:build darwin || (linux && amd64)
-// +build darwin linux,amd64
 
 // Package kopiaclient provides a client to interact with a Kopia repo.
 package kopiaclient
@@ -22,9 +21,11 @@ import (
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/filesystem"
 	"github.com/kopia/kopia/repo/blob/s3"
+	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
+	"github.com/kopia/kopia/snapshot/upload"
 	"github.com/kopia/kopia/tests/robustness"
 )
 
@@ -70,7 +71,25 @@ func (kc *KopiaClient) CreateOrConnectRepo(ctx context.Context, repoDir, bucketN
 		return errors.Wrap(iErr, "error connecting to repository")
 	}
 
-	return errors.Wrap(err, "unable to open repository")
+	return nil
+}
+
+// SetCacheLimits sets cache size limits to the already connected repository.
+func (kc *KopiaClient) SetCacheLimits(ctx context.Context, repoDir, bucketName string, cacheOpts *content.CachingOptions) error {
+	err := repo.SetCachingOptions(ctx, kc.configPath, cacheOpts)
+	if err != nil {
+		return err
+	}
+
+	cacheOptsObtained, err := repo.GetCachingOptions(ctx, kc.configPath)
+	if err != nil {
+		return err
+	}
+
+	log.Println("content cache size:", cacheOptsObtained.ContentCacheSizeLimitBytes)
+	log.Println("metadata cache size:", cacheOptsObtained.MetadataCacheSizeLimitBytes)
+
+	return nil
 }
 
 // SnapshotCreate creates a snapshot for the given path.
@@ -93,14 +112,14 @@ func (kc *KopiaClient) SnapshotCreate(ctx context.Context, key string, val []byt
 	}
 
 	source := kc.getSourceForKeyVal(key, val)
-	u := snapshotfs.NewUploader(rw)
+	u := upload.NewUploader(rw)
 
 	man, err := u.Upload(ctx, source, policyTree, si)
 	if err != nil {
 		return errors.Wrap(err, "cannot get manifest")
 	}
 
-	log.Printf("snapshotting %v", units.BytesStringBase10(atomic.LoadInt64(&man.Stats.TotalFileSize)))
+	log.Printf("snapshotting %v", units.BytesString(atomic.LoadInt64(&man.Stats.TotalFileSize)))
 
 	if _, err := snapshot.SaveSnapshot(ctx, rw, man); err != nil {
 		return errors.Wrap(err, "cannot save snapshot")
@@ -143,7 +162,7 @@ func (kc *KopiaClient) SnapshotRestore(ctx context.Context, key string) ([]byte,
 		return nil, err
 	}
 
-	log.Printf("restored %v", units.BytesStringBase10(int64(len(val))))
+	log.Printf("restored %v", units.BytesString(len(val)))
 
 	if err := r.Close(ctx); err != nil {
 		return nil, err
@@ -191,7 +210,7 @@ func (kc *KopiaClient) getStorage(ctx context.Context, repoDir, bucketName strin
 			AccessKeyID:     os.Getenv(awsAccessKeyIDEnvKey),
 			SecretAccessKey: os.Getenv(awsSecretAccessKeyEnvKey),
 		}
-		st, err = s3.New(ctx, s3Opts)
+		st, err = s3.New(ctx, s3Opts, false)
 	} else {
 		if iErr := os.MkdirAll(repoDir, 0o700); iErr != nil {
 			return nil, errors.Wrap(iErr, "cannot create directory")
@@ -210,7 +229,7 @@ func (kc *KopiaClient) getStorage(ctx context.Context, repoDir, bucketName strin
 // reads its contents from `val`.
 func (kc *KopiaClient) getSourceForKeyVal(key string, val []byte) fs.Entry {
 	return virtualfs.NewStaticDirectory(key, []fs.Entry{
-		virtualfs.StreamingFileFromReader(dataFileName, bytes.NewReader(val)),
+		virtualfs.StreamingFileFromReader(dataFileName, io.NopCloser(bytes.NewReader(val))),
 	})
 }
 

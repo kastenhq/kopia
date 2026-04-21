@@ -5,15 +5,14 @@ import (
 	"container/heap"
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/cacheprot"
 	"github.com/kopia/kopia/internal/clock"
-	"github.com/kopia/kopia/internal/ctxutil"
 	"github.com/kopia/kopia/internal/gather"
+	"github.com/kopia/kopia/internal/metrics"
 	"github.com/kopia/kopia/internal/releasable"
 	"github.com/kopia/kopia/internal/timetrack"
 	"github.com/kopia/kopia/repo/blob"
@@ -23,61 +22,37 @@ import (
 var log = logging.Module("cache")
 
 const (
-	// DefaultSweepFrequency is how frequently the contents of cache are sweeped to remove excess data.
-	DefaultSweepFrequency = 1 * time.Minute
-
 	// DefaultTouchThreshold specifies the resolution of timestamps used to determine which cache items
 	// to expire. This helps cache storage writes on frequently accessed items.
 	DefaultTouchThreshold = 10 * time.Minute
-
-	// Size of the mutex cache LRU.
-	// In case a mutex is evicted of the cache, the impact will be some redundant read,
-	// which given the size should be extremely rare.
-	mutexCacheSize = 10000
 )
 
 // PersistentCache provides persistent on-disk cache.
 type PersistentCache struct {
-	// +checkatomic
-	anyChange int32
+	fetchMutexes mutexMap
+
+	listCacheMutex sync.Mutex
+	// +checklocks:listCacheMutex
+	listCache contentMetadataHeap
+	// +checklocks:listCacheMutex
+	pendingWriteBytes int64
 
 	cacheStorage      Storage
-	storageProtection StorageProtection
+	storageProtection cacheprot.StorageProtection
 	sweep             SweepSettings
+	timeNow           func() time.Time
+
+	// +checklocks:listCacheMutex
+	lastCacheWarning time.Time
 
 	description string
 
-	periodicSweepRunning sync.WaitGroup
-	periodicSweepClosed  chan struct{}
-
-	mutexCache *lru.Cache
+	metricsStruct
 }
 
 // CacheStorage returns cache storage.
 func (c *PersistentCache) CacheStorage() Storage {
 	return c.cacheStorage
-}
-
-// GetFetchingMutex returns a RWMutex used to lock a blob or content during loading.
-func (c *PersistentCache) GetFetchingMutex(key string) *sync.RWMutex {
-	if c == nil {
-		// special case - also works on non-initialized cache pointer.
-		return &sync.RWMutex{}
-	}
-
-	if v, ok := c.mutexCache.Get(key); ok {
-		//nolint:forcetypeassert
-		return v.(*sync.RWMutex)
-	}
-
-	newVal := &sync.RWMutex{}
-
-	if prevVal, ok, _ := c.mutexCache.PeekOrAdd(key, newVal); ok {
-		//nolint:forcetypeassert
-		return prevVal.(*sync.RWMutex)
-	}
-
-	return newVal
 }
 
 // GetOrLoad is utility function gets the provided item from the cache or invokes the provided fetch function.
@@ -88,42 +63,73 @@ func (c *PersistentCache) GetOrLoad(ctx context.Context, key string, fetch func(
 		return fetch(output)
 	}
 
-	if c.GetFull(ctx, key, output) {
+	if c.getFull(ctx, key, output) {
 		return nil
 	}
 
 	output.Reset()
 
-	mut := c.GetFetchingMutex(key)
-	mut.Lock()
-	defer mut.Unlock()
+	c.exclusiveLock(key)
+	defer c.exclusiveUnlock(key)
 
 	// check again while holding the mutex
-	if c.GetFull(ctx, key, output) {
+	if c.getFull(ctx, key, output) {
 		return nil
 	}
 
 	if err := fetch(output); err != nil {
-		reportMissError()
+		c.reportMissError()
 
 		return err
 	}
 
-	reportMissBytes(int64(output.Length()))
+	c.reportMissBytes(int64(output.Length()))
 
 	c.Put(ctx, key, output.Bytes())
 
 	return nil
 }
 
-// GetFull fetches the contents of a full blob. Returns false if not found.
-func (c *PersistentCache) GetFull(ctx context.Context, key string, output *gather.WriteBuffer) bool {
-	return c.GetPartial(ctx, key, 0, -1, output)
+// getFull fetches the contents of a full blob. Returns false if not found.
+func (c *PersistentCache) getFull(ctx context.Context, key string, output *gather.WriteBuffer) bool {
+	return c.getPartial(ctx, key, 0, -1, output)
 }
 
-// GetPartial fetches the contents of a cached blob when (length < 0) or a subset of it (when length >= 0).
-// returns false if not found.
-func (c *PersistentCache) GetPartial(ctx context.Context, key string, offset, length int64, output *gather.WriteBuffer) bool {
+func (c *PersistentCache) getPartialCacheHit(ctx context.Context, key string, length int64, output *gather.WriteBuffer) {
+	// cache hit
+	c.reportHitBytes(int64(output.Length()))
+
+	mtime, err := c.cacheStorage.TouchBlob(ctx, blob.ID(key), c.sweep.TouchThreshold)
+
+	c.listCacheMutex.Lock()
+	defer c.listCacheMutex.Unlock()
+
+	if err == nil {
+		c.listCache.AddOrUpdate(blob.Metadata{
+			BlobID:    blob.ID(key),
+			Length:    length,
+			Timestamp: mtime,
+		})
+	}
+}
+
+func (c *PersistentCache) deleteInvalidBlob(ctx context.Context, key string) {
+	if err := c.cacheStorage.DeleteBlob(ctx, blob.ID(key)); err != nil && !errors.Is(err, blob.ErrBlobNotFound) {
+		log(ctx).Errorf("unable to delete %v entry %v: %v", c.description, key, err)
+		return
+	}
+
+	c.listCacheMutex.Lock()
+	defer c.listCacheMutex.Unlock()
+
+	if i, ok := c.listCache.index[blob.ID(key)]; ok {
+		heap.Remove(&c.listCache, i)
+	}
+}
+
+// getPartial fetches the contents of a cached blob when (length < 0) or a subset
+// of it (when length >= 0) and returns true if it is found.
+func (c *PersistentCache) getPartial(ctx context.Context, key string, offset, length int64, output *gather.WriteBuffer) bool {
 	if c == nil {
 		return false
 	}
@@ -132,37 +138,25 @@ func (c *PersistentCache) GetPartial(ctx context.Context, key string, offset, le
 	defer tmp.Close()
 
 	if err := c.cacheStorage.GetBlob(ctx, blob.ID(key), offset, length, &tmp); err == nil {
-		prot := c.storageProtection
+		sp := c.storageProtection
+
 		if length >= 0 {
-			// only full items have protection.
-			prot = nullStorageProtection{}
+			// do not perform integrity check on partial reads
+			sp = cacheprot.NoProtection()
 		}
 
-		if err := prot.Verify(key, tmp.Bytes(), output); err == nil {
-			// cache hit
-			reportHitBytes(int64(output.Length()))
-
-			// cache hit
-			c.cacheStorage.TouchBlob(ctx, blob.ID(key), c.sweep.TouchThreshold) //nolint:errcheck
+		if err := sp.Verify(key, tmp.Bytes(), output); err == nil {
+			c.getPartialCacheHit(ctx, key, length, output)
 
 			return true
 		}
 
-		// delete invalid blob
-		reportMalformedData()
-
-		if err := c.cacheStorage.DeleteBlob(ctx, blob.ID(key)); err != nil && !errors.Is(err, blob.ErrBlobNotFound) {
-			log(ctx).Errorf("unable to delete %v entry %v: %v", c.description, key, err)
-		}
+		c.reportMalformedData()
+		c.deleteInvalidBlob(ctx, key)
 	}
 
 	// cache miss
-	l := length
-	if l < 0 {
-		l = 0
-	}
-
-	reportMissBytes(l)
+	c.reportMissBytes(max(length, 0))
 
 	return false
 }
@@ -173,118 +167,193 @@ func (c *PersistentCache) Put(ctx context.Context, key string, data gather.Bytes
 		return
 	}
 
-	atomic.StoreInt32(&c.anyChange, 1)
+	c.listCacheMutex.Lock()
+	defer c.listCacheMutex.Unlock()
+
+	// make sure the cache has enough room for the new item including any protection overhead.
+	l := data.Length() + c.storageProtection.OverheadBytes()
+	c.pendingWriteBytes += int64(l)
+	c.sweepLocked(ctx)
+
+	// LOCK RELEASED for expensive operations
+	c.listCacheMutex.Unlock()
 
 	var protected gather.WriteBuffer
 	defer protected.Close()
 
 	c.storageProtection.Protect(key, data, &protected)
 
-	if err := c.cacheStorage.PutBlob(ctx, blob.ID(key), protected.Bytes(), blob.PutOptions{}); err != nil {
-		reportStoreError()
+	if protected.Length() != l {
+		log(ctx).Panicf("protection overhead mismatch, assumed %v got %v", l, protected.Length())
+	}
+
+	var mtime time.Time
+
+	if err := c.cacheStorage.PutBlob(ctx, blob.ID(key), protected.Bytes(), blob.PutOptions{GetModTime: &mtime}); err != nil {
+		c.reportStoreError()
 
 		log(ctx).Errorf("unable to add %v to %v: %v", key, c.description, err)
 	}
+
+	c.listCacheMutex.Lock()
+	// LOCK RE-ACQUIRED
+
+	c.pendingWriteBytes -= int64(protected.Length())
+	c.listCache.AddOrUpdate(blob.Metadata{
+		BlobID:    blob.ID(key),
+		Length:    int64(protected.Bytes().Length()),
+		Timestamp: mtime,
+	})
 }
 
 // Close closes the instance of persistent cache possibly waiting for at least one sweep to complete.
-func (c *PersistentCache) Close(ctx context.Context) {
+func (c *PersistentCache) Close(_ context.Context) {
 	if c == nil {
 		return
-	}
-
-	close(c.periodicSweepClosed)
-	c.periodicSweepRunning.Wait()
-
-	// if we added anything to the cache in this sesion, run one last sweep before shutting down.
-	if atomic.LoadInt32(&c.anyChange) == 1 {
-		if err := c.sweepDirectory(ctx); err != nil {
-			log(ctx).Errorf("error during final sweep of the %v: %v", c.description, err)
-		}
 	}
 
 	releasable.Released("persistent-cache", c)
 }
 
-func (c *PersistentCache) sweepDirectoryPeriodically(ctx context.Context) {
-	defer c.periodicSweepRunning.Done()
-
-	for {
-		select {
-		case <-c.periodicSweepClosed:
-			return
-
-		case <-time.After(c.sweep.SweepFrequency):
-			if err := c.sweepDirectory(ctx); err != nil {
-				log(ctx).Errorf("error during periodic sweep of %v: %v", c.description, err)
-			}
-		}
-	}
+// A contentMetadataHeap implements heap.Interface and holds blob.Metadata.
+//
+//nolint:recvcheck
+type contentMetadataHeap struct {
+	data           []blob.Metadata
+	index          map[blob.ID]int
+	totalDataBytes int64
 }
 
-// A contentMetadataHeap implements heap.Interface and holds blob.Metadata.
-type contentMetadataHeap []blob.Metadata
+func newContentMetadataHeap() contentMetadataHeap {
+	return contentMetadataHeap{index: make(map[blob.ID]int)}
+}
 
-func (h contentMetadataHeap) Len() int { return len(h) }
+func (h contentMetadataHeap) Len() int { return len(h.data) }
 
 func (h contentMetadataHeap) Less(i, j int) bool {
-	return h[i].Timestamp.Before(h[j].Timestamp)
+	return h.data[i].Timestamp.Before(h.data[j].Timestamp)
 }
 
 func (h contentMetadataHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
+	iBlobID := h.data[i].BlobID
+	jBlobID := h.data[j].BlobID
+
+	h.index[iBlobID], h.index[jBlobID] = h.index[jBlobID], h.index[iBlobID]
+	h.data[i], h.data[j] = h.data[j], h.data[i]
 }
 
-func (h *contentMetadataHeap) Push(x interface{}) {
-	*h = append(*h, x.(blob.Metadata)) //nolint:forcetypeassert
+func (h *contentMetadataHeap) Push(x any) {
+	bm := x.(blob.Metadata) //nolint:forcetypeassert
+
+	h.index[bm.BlobID] = len(h.data)
+	h.data = append(h.data, bm)
+	h.totalDataBytes += bm.Length
 }
 
-func (h *contentMetadataHeap) Pop() interface{} {
-	old := *h
+func (h *contentMetadataHeap) AddOrUpdate(bm blob.Metadata) {
+	if i, exists := h.index[bm.BlobID]; exists {
+		// only accept newer timestamps
+		if bm.Timestamp.After(h.data[i].Timestamp) {
+			h.totalDataBytes += bm.Length - h.data[i].Length
+			h.data[i] = bm
+			heap.Fix(h, i)
+		}
+	} else {
+		heap.Push(h, bm)
+	}
+}
+
+func (h *contentMetadataHeap) Pop() any {
+	old := h.data
 	n := len(old)
 	item := old[n-1]
-	*h = old[0 : n-1]
+	h.data = old[0 : n-1]
+	h.totalDataBytes -= item.Length
+	delete(h.index, item.BlobID)
 
 	return item
 }
 
-func (c *PersistentCache) sweepDirectory(ctx context.Context) (err error) {
-	timer := timetrack.StartTimer()
+// +checklocks:c.listCacheMutex
+func (c *PersistentCache) aboveSoftLimit(extraBytes int64) bool {
+	return c.listCache.totalDataBytes+extraBytes+c.pendingWriteBytes > c.sweep.MaxSizeBytes
+}
 
-	var h contentMetadataHeap
+// +checklocks:c.listCacheMutex
+func (c *PersistentCache) aboveHardLimit(extraBytes int64) bool {
+	if c.sweep.LimitBytes <= 0 {
+		return false
+	}
 
+	return c.listCache.totalDataBytes+extraBytes+c.pendingWriteBytes > c.sweep.LimitBytes
+}
+
+// +checklocks:c.listCacheMutex
+func (c *PersistentCache) sweepLocked(ctx context.Context) {
 	var (
-		totalRetainedSize int64
-		tooRecentBytes    int64
-		tooRecentCount    int
+		unsuccessfulDeletes     []blob.Metadata
+		unsuccessfulDeleteBytes int64
+		now                     = c.timeNow()
 	)
 
-	err = c.cacheStorage.ListBlobs(ctx, "", func(it blob.Metadata) error {
-		// ignore items below minimal age.
-		if age := clock.Now().Sub(it.Timestamp); age < c.sweep.MinSweepAge {
+	for len(c.listCache.data) > 0 && (c.aboveSoftLimit(unsuccessfulDeleteBytes) || c.aboveHardLimit(unsuccessfulDeleteBytes)) {
+		// examine the oldest cache item without removing it from the heap.
+		oldest := c.listCache.data[0]
+
+		if age := now.Sub(oldest.Timestamp); age < c.sweep.MinSweepAge && !c.aboveHardLimit(unsuccessfulDeleteBytes) {
+			// the oldest item is below the specified minimal sweep age and we're below the hard limit, stop here
+			break
+		}
+
+		heap.Pop(&c.listCache)
+
+		if delerr := c.cacheStorage.DeleteBlob(ctx, oldest.BlobID); delerr != nil {
+			log(ctx).Warnw("unable to remove cache item", "cache", c.description, "item", oldest.BlobID, "err", delerr)
+
+			// accumulate unsuccessful deletes to be pushed back into the heap
+			// later so we do not attempt deleting the same blob multiple times
+			//
+			// after this we keep draining from the heap until we bring down
+			// c.listCache.DataSize() to zero
+			unsuccessfulDeletes = append(unsuccessfulDeletes, oldest)
+			unsuccessfulDeleteBytes += oldest.Length
+		}
+	}
+
+	// put all unsuccessful deletes back into the heap
+	for _, m := range unsuccessfulDeletes {
+		heap.Push(&c.listCache, m)
+	}
+}
+
+func (c *PersistentCache) initialScan(ctx context.Context) error {
+	timer := timetrack.StartTimer()
+
+	var (
+		tooRecentBytes int64
+		tooRecentCount int
+		now            = c.timeNow()
+	)
+
+	c.listCacheMutex.Lock()
+	defer c.listCacheMutex.Unlock()
+
+	err := c.cacheStorage.ListBlobs(ctx, "", func(it blob.Metadata) error {
+		// count items below minimal age.
+		if age := now.Sub(it.Timestamp); age < c.sweep.MinSweepAge {
 			tooRecentCount++
 			tooRecentBytes += it.Length
-
-			return nil
 		}
 
-		heap.Push(&h, it)
-		totalRetainedSize += it.Length
-
-		if totalRetainedSize > c.sweep.MaxSizeBytes {
-			oldest := heap.Pop(&h).(blob.Metadata) //nolint:forcetypeassert
-			if delerr := c.cacheStorage.DeleteBlob(ctx, oldest.BlobID); delerr != nil {
-				log(ctx).Errorf("unable to remove %v: %v", oldest.BlobID, delerr)
-			} else {
-				totalRetainedSize -= oldest.Length
-			}
-		}
+		heap.Push(&c.listCache, it) // +checklocksignore
 
 		return nil
 	})
 	if err != nil {
 		return errors.Wrapf(err, "error listing %v", c.description)
 	}
+
+	c.sweepLocked(ctx)
 
 	dur := timer.Elapsed()
 
@@ -293,28 +362,61 @@ func (c *PersistentCache) sweepDirectory(ctx context.Context) (err error) {
 	inUsePercent := int64(hundredPercent)
 
 	if c.sweep.MaxSizeBytes != 0 {
-		inUsePercent = hundredPercent * totalRetainedSize / c.sweep.MaxSizeBytes
+		inUsePercent = hundredPercent * c.listCache.totalDataBytes / c.sweep.MaxSizeBytes
 	}
 
 	log(ctx).Debugw(
-		"finished sweeping",
+		"finished initial cache scan",
 		"cache", c.description,
 		"duration", dur,
-		"totalRetainedSize", totalRetainedSize,
+		"totalRetainedSize", c.listCache.totalDataBytes,
 		"tooRecentBytes", tooRecentBytes,
 		"tooRecentCount", tooRecentCount,
 		"maxSizeBytes", c.sweep.MaxSizeBytes,
+		"limitBytes", c.sweep.LimitBytes,
 		"inUsePercent", inUsePercent,
 	)
 
 	return nil
 }
 
+func (c *PersistentCache) exclusiveLock(key string) {
+	if c != nil {
+		c.fetchMutexes.exclusiveLock(key)
+	}
+}
+
+func (c *PersistentCache) exclusiveUnlock(key string) {
+	if c != nil {
+		c.fetchMutexes.exclusiveUnlock(key)
+	}
+}
+
+func (c *PersistentCache) sharedLock(key string) {
+	if c != nil {
+		c.fetchMutexes.sharedLock(key)
+	}
+}
+
+func (c *PersistentCache) sharedUnlock(key string) {
+	if c != nil {
+		c.fetchMutexes.sharedUnlock(key)
+	}
+}
+
 // SweepSettings encapsulates settings that impact cache item sweep/expiration.
 type SweepSettings struct {
-	MaxSizeBytes   int64
-	SweepFrequency time.Duration
-	MinSweepAge    time.Duration
+	// soft limit, the cache will be limited to this size, except for items newer than MinSweepAge.
+	MaxSizeBytes int64
+
+	// hard limit, if non-zero the cache will be limited to this size, regardless of MinSweepAge.
+	LimitBytes int64
+
+	// items older than this will never be removed from the cache except when the cache is above
+	// HardMaxSizeBytes.
+	MinSweepAge time.Duration
+
+	// on each use, items will be touched if they have not been touched in this long.
 	TouchThreshold time.Duration
 }
 
@@ -323,15 +425,11 @@ func (s SweepSettings) applyDefaults() SweepSettings {
 		s.TouchThreshold = DefaultTouchThreshold
 	}
 
-	if s.SweepFrequency == 0 {
-		s.SweepFrequency = DefaultSweepFrequency
-	}
-
 	return s
 }
 
 // NewPersistentCache creates the persistent cache in the provided storage.
-func NewPersistentCache(ctx context.Context, description string, cacheStorage Storage, storageProtection StorageProtection, sweep SweepSettings) (*PersistentCache, error) {
+func NewPersistentCache(ctx context.Context, description string, cacheStorage Storage, storageProtection cacheprot.StorageProtection, sweep SweepSettings, mr *metrics.Registry, timeNow func() time.Time) (*PersistentCache, error) {
 	if cacheStorage == nil {
 		return nil, nil
 	}
@@ -339,18 +437,23 @@ func NewPersistentCache(ctx context.Context, description string, cacheStorage St
 	sweep = sweep.applyDefaults()
 
 	if storageProtection == nil {
-		storageProtection = NoProtection()
+		storageProtection = cacheprot.NoProtection()
 	}
 
 	c := &PersistentCache{
-		cacheStorage:        cacheStorage,
-		sweep:               sweep,
-		periodicSweepClosed: make(chan struct{}),
-		description:         description,
-		storageProtection:   storageProtection,
+		cacheStorage:      cacheStorage,
+		sweep:             sweep,
+		description:       description,
+		storageProtection: storageProtection,
+		metricsStruct:     initMetricsStruct(mr, description),
+		listCache:         newContentMetadataHeap(),
+		timeNow:           timeNow,
+		lastCacheWarning:  time.Time{},
 	}
 
-	c.mutexCache, _ = lru.New(mutexCacheSize)
+	if c.timeNow == nil {
+		c.timeNow = clock.Now
+	}
 
 	// verify that cache storage is functional by listing from it
 	if _, err := c.cacheStorage.GetMetadata(ctx, "test-blob"); err != nil && !errors.Is(err, blob.ErrBlobNotFound) {
@@ -359,9 +462,9 @@ func NewPersistentCache(ctx context.Context, description string, cacheStorage St
 
 	releasable.Created("persistent-cache", c)
 
-	c.periodicSweepRunning.Add(1)
-
-	go c.sweepDirectoryPeriodically(ctxutil.Detach(ctx))
+	if err := c.initialScan(ctx); err != nil {
+		return nil, errors.Wrapf(err, "error during initial scan of %s", c.description)
+	}
 
 	return c, nil
 }

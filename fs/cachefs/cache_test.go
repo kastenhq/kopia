@@ -3,6 +3,7 @@ package cachefs
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -46,7 +47,7 @@ func (cs *cacheSource) setEntryCount(id string, cnt int) {
 
 	var fakeEntry fs.Entry
 
-	for i := 0; i < cnt; i++ {
+	for range cnt {
 		fakeEntries = append(fakeEntries, fakeEntry)
 	}
 
@@ -134,32 +135,29 @@ func errorPrefix() string {
 }
 
 func (cv *cacheVerifier) reset() {
-	cv.lastCallCounter = make(map[string]int)
-	for k, v := range cv.cacheSource.callCounter {
-		cv.lastCallCounter[k] = v
-	}
+	cv.lastCallCounter = maps.Clone(cv.cacheSource.callCounter)
 }
 
 type lockState struct {
-	l sync.Locker
-	// +checkatomic
-	locked int32
+	l      sync.Locker
+	locked atomic.Int32
 }
 
 // +checklocksacquire:ls.l
 func (ls *lockState) Lock() {
 	ls.l.Lock()
-	atomic.AddInt32(&ls.locked, 1)
+
+	ls.locked.Add(1)
 }
 
 // +checklocksrelease:ls.l
 func (ls *lockState) Unlock() {
-	atomic.AddInt32(&ls.locked, -1)
+	ls.locked.Add(-1)
 	ls.l.Unlock()
 }
 
 func (ls *lockState) Unlocked() bool {
-	return atomic.LoadInt32(&ls.locked) == 0
+	return ls.locked.Load() == 0
 }
 
 func TestCache(t *testing.T) {

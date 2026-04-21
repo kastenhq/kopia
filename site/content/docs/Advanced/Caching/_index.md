@@ -1,8 +1,10 @@
 ---
 title: "Caching"
 linkTitle: "Caching"
-weight: 20
+weight: 50
 ---
+
+## Caching
 
 To optimize performance Kopia maintains local cache of contents, metadata, indexes and more. This document provides more insight into this process.
 
@@ -54,6 +56,14 @@ $ kopia cache set --max-list-cache-duration=300s
 
 Note the cache sizes are not hard limits: cache is swept periodically (every few minutes) to bring
 the total usage below the defined limit by removing least-recently used cache items.
+
+A hard limit can be set if required via the corresponding `limit` flag:
+```
+# set the maximum content cache size to 30GB
+$ kopia cache set --content-cache-size-limit-mb=30000
+# set the maximum metadata cache size to 20GB
+$ kopia cache set --metadata-cache-size-limit-mb=20000
+```
 
 ### Clearing Cache
 

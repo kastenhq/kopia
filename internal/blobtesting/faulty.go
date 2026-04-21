@@ -1,4 +1,3 @@
-// Package blobtesting implements storage with fault injection.
 package blobtesting
 
 import (
@@ -25,14 +24,19 @@ const (
 type FaultyStorage struct {
 	base blob.Storage
 
-	fault.Set
+	*fault.Set
 }
 
 // NewFaultyStorage creates new Storage with fault injection.
 func NewFaultyStorage(base blob.Storage) *FaultyStorage {
 	return &FaultyStorage{
 		base: base,
+		Set:  fault.NewSet(),
 	}
+}
+
+func (s *FaultyStorage) IsReadOnly() bool {
+	return s.base.IsReadOnly()
 }
 
 // GetCapacity implements blob.Volume.
@@ -90,6 +94,7 @@ func (s *FaultyStorage) ListBlobs(ctx context.Context, prefix blob.ID, callback 
 		if ok, err := s.GetNextFault(ctx, MethodListBlobsItem, prefix); ok {
 			return err
 		}
+
 		return callback(bm)
 	})
 }
@@ -120,6 +125,11 @@ func (s *FaultyStorage) FlushCaches(ctx context.Context) error {
 	}
 
 	return s.base.FlushCaches(ctx)
+}
+
+// ExtendBlobRetention implements blob.Storage.
+func (s *FaultyStorage) ExtendBlobRetention(ctx context.Context, b blob.ID, opts blob.ExtendOptions) error {
+	return s.base.ExtendBlobRetention(ctx, b, opts)
 }
 
 var _ blob.Storage = (*FaultyStorage)(nil)

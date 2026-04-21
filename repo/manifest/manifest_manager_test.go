@@ -3,8 +3,9 @@ package manifest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/kopia/kopia/internal/blobtesting"
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/internal/testutil"
+	"github.com/kopia/kopia/repo/blob/readonly"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/content/index"
 	"github.com/kopia/kopia/repo/encryption"
@@ -27,19 +29,22 @@ func TestMain(m *testing.M) { testutil.MyTestMain(m) }
 func TestManifest(t *testing.T) {
 	ctx := testlogging.Context(t)
 	data := blobtesting.DataMap{}
-	mgr := newManagerForTesting(ctx, t, data)
+	mgr := newManagerForTesting(ctx, t, data, ManagerOptions{})
 
 	item1 := map[string]int{"foo": 1, "bar": 2}
 	item2 := map[string]int{"foo": 2, "bar": 3}
 	item3 := map[string]int{"foo": 3, "bar": 4}
+	item4 := map[string]int{"foo": 4, "bar": 5}
 
 	labels1 := map[string]string{"type": "item", "color": "red"}
 	labels2 := map[string]string{"type": "item", "color": "blue", "shape": "square"}
 	labels3 := map[string]string{"type": "item", "shape": "square", "color": "red"}
+	labels4 := map[string]string{"type": "item", "rounded": ""}
 
 	id1 := addAndVerify(ctx, t, mgr, labels1, item1)
 	id2 := addAndVerify(ctx, t, mgr, labels2, item2)
 	id3 := addAndVerify(ctx, t, mgr, labels3, item3)
+	id4 := addAndVerify(ctx, t, mgr, labels4, item4)
 
 	cases := []struct {
 		criteria map[string]string
@@ -51,6 +56,7 @@ func TestManifest(t *testing.T) {
 		{map[string]string{"color": "red", "shape": "square"}, []ID{id3}},
 		{map[string]string{"color": "blue", "shape": "square"}, []ID{id2}},
 		{map[string]string{"color": "red", "shape": "circle"}, nil},
+		{map[string]string{"rounded": ""}, []ID{id4}},
 	}
 
 	// verify before flush
@@ -61,6 +67,7 @@ func TestManifest(t *testing.T) {
 	verifyItem(ctx, t, mgr, id1, labels1, item1)
 	verifyItem(ctx, t, mgr, id2, labels2, item2)
 	verifyItem(ctx, t, mgr, id3, labels3, item3)
+	verifyItem(ctx, t, mgr, id4, labels4, item4)
 
 	if err := mgr.Flush(ctx); err != nil {
 		t.Errorf("flush error: %v", err)
@@ -78,10 +85,11 @@ func TestManifest(t *testing.T) {
 	verifyItem(ctx, t, mgr, id1, labels1, item1)
 	verifyItem(ctx, t, mgr, id2, labels2, item2)
 	verifyItem(ctx, t, mgr, id3, labels3, item3)
+	verifyItem(ctx, t, mgr, id4, labels4, item4)
 
 	// flush underlying content manager and verify in new manifest manager.
 	mgr.b.Flush(ctx)
-	mgr2 := newManagerForTesting(ctx, t, data)
+	mgr2 := newManagerForTesting(ctx, t, data, ManagerOptions{})
 
 	for _, tc := range cases {
 		verifyMatches(ctx, t, mgr2, tc.criteria, tc.expected)
@@ -90,6 +98,7 @@ func TestManifest(t *testing.T) {
 	verifyItem(ctx, t, mgr2, id1, labels1, item1)
 	verifyItem(ctx, t, mgr2, id2, labels2, item2)
 	verifyItem(ctx, t, mgr2, id3, labels3, item3)
+	verifyItem(ctx, t, mgr2, id4, labels4, item4)
 
 	if err := mgr2.Flush(ctx); err != nil {
 		t.Errorf("flush error: %v", err)
@@ -131,11 +140,12 @@ func TestManifest(t *testing.T) {
 
 	mgr.b.Flush(ctx)
 
-	mgr3 := newManagerForTesting(ctx, t, data)
+	mgr3 := newManagerForTesting(ctx, t, data, ManagerOptions{})
 
 	verifyItem(ctx, t, mgr3, id1, labels1, item1)
 	verifyItem(ctx, t, mgr3, id2, labels2, item2)
 	verifyItemNotFound(ctx, t, mgr3, id3)
+	verifyItem(ctx, t, mgr3, id4, labels4, item4)
 }
 
 func TestManifestInitCorruptedBlock(t *testing.T) {
@@ -159,9 +169,9 @@ func TestManifestInitCorruptedBlock(t *testing.T) {
 
 	bm0 := bm
 
-	t.Cleanup(func() { bm0.Close(ctx) })
+	t.Cleanup(func() { bm0.CloseShared(ctx) })
 
-	mgr, err := NewManager(ctx, bm, ManagerOptions{})
+	mgr, err := NewManager(ctx, bm, ManagerOptions{}, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -174,7 +184,7 @@ func TestManifestInitCorruptedBlock(t *testing.T) {
 	for blobID, v := range data {
 		for _, prefix := range content.PackBlobIDPrefixes {
 			if strings.HasPrefix(string(blobID), string(prefix)) {
-				for i := 0; i < len(v); i++ {
+				for i := range len(v) { // nolint:intrange
 					v[i] ^= 1
 				}
 			}
@@ -185,9 +195,9 @@ func TestManifestInitCorruptedBlock(t *testing.T) {
 	bm, err = content.NewManagerForTesting(ctx, st, fop, nil, nil)
 	require.NoError(t, err)
 
-	t.Cleanup(func() { bm.Close(ctx) })
+	t.Cleanup(func() { bm.CloseShared(ctx) })
 
-	mgr, err = NewManager(ctx, bm, ManagerOptions{})
+	mgr, err = NewManager(ctx, bm, ManagerOptions{}, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -198,7 +208,9 @@ func TestManifestInitCorruptedBlock(t *testing.T) {
 	}{
 		{"GetRaw", func() error {
 			var raw json.RawMessage
+
 			_, err := mgr.Get(ctx, "anything", &raw)
+
 			return err
 		}},
 		{"GetMetadata", func() error { _, err := mgr.GetMetadata(ctx, "anything"); return err }},
@@ -212,7 +224,6 @@ func TestManifestInitCorruptedBlock(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.desc, func(t *testing.T) {
 			err := tc.f()
 			if err == nil || !strings.Contains(err.Error(), "invalid checksum") {
@@ -293,15 +304,21 @@ func verifyMatches(ctx context.Context, t *testing.T, mgr *Manager, labels map[s
 }
 
 func sortIDs(s []ID) {
-	sort.Slice(s, func(i, j int) bool {
-		return s[i] < s[j]
-	})
+	slices.Sort(s)
 }
 
-func newManagerForTesting(ctx context.Context, t *testing.T, data blobtesting.DataMap) *Manager {
-	t.Helper()
+type contentManagerOpts struct {
+	readOnly bool
+}
+
+func newContentManagerForTesting(ctx context.Context, tb testing.TB, data blobtesting.DataMap, opts contentManagerOpts) contentManager {
+	tb.Helper()
 
 	st := blobtesting.NewMapStorage(data, nil, nil)
+
+	if opts.readOnly {
+		st = readonly.NewWrapper(st)
+	}
 
 	fop, err := format.NewFormattingOptionsProvider(&format.ContentFormat{
 		Hash:       hashing.DefaultAlgorithm,
@@ -312,14 +329,22 @@ func newManagerForTesting(ctx context.Context, t *testing.T, data blobtesting.Da
 		},
 	}, nil)
 
-	require.NoError(t, err)
+	require.NoError(tb, err)
 
 	bm, err := content.NewManagerForTesting(ctx, st, fop, nil, nil)
-	require.NoError(t, err)
+	require.NoError(tb, err)
 
-	t.Cleanup(func() { bm.Close(ctx) })
+	tb.Cleanup(func() { bm.CloseShared(ctx) })
 
-	mm, err := NewManager(ctx, bm, ManagerOptions{})
+	return bm
+}
+
+func newManagerForTesting(ctx context.Context, t *testing.T, data blobtesting.DataMap, options ManagerOptions) *Manager {
+	t.Helper()
+
+	bm := newContentManagerForTesting(ctx, t, data, contentManagerOpts{})
+
+	mm, err := NewManager(ctx, bm, options, nil)
 	require.NoError(t, err)
 
 	return mm
@@ -328,11 +353,11 @@ func newManagerForTesting(ctx context.Context, t *testing.T, data blobtesting.Da
 func TestManifestInvalidPut(t *testing.T) {
 	ctx := testlogging.Context(t)
 	data := blobtesting.DataMap{}
-	mgr := newManagerForTesting(ctx, t, data)
+	mgr := newManagerForTesting(ctx, t, data, ManagerOptions{})
 
 	cases := []struct {
 		labels        map[string]string
-		payload       interface{}
+		payload       any
 		expectedError string
 	}{
 		{map[string]string{"": ""}, "xxx", "'type' label is required"},
@@ -351,9 +376,9 @@ func TestManifestAutoCompaction(t *testing.T) {
 	ctx := testlogging.Context(t)
 	data := blobtesting.DataMap{}
 
-	mgr := newManagerForTesting(ctx, t, data)
+	mgr := newManagerForTesting(ctx, t, data, ManagerOptions{})
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		item1 := map[string]int{"foo": 1, "bar": 2}
 		labels1 := map[string]string{"type": "item", "color": "red"}
 		found, err := mgr.Find(ctx, labels1)
@@ -371,5 +396,143 @@ func TestManifestAutoCompaction(t *testing.T) {
 
 		require.NoError(t, mgr.Flush(ctx))
 		require.NoError(t, mgr.b.Flush(ctx))
+	}
+}
+
+func TestManifestConfigureAutoCompaction(t *testing.T) {
+	ctx := testlogging.Context(t)
+	data := blobtesting.DataMap{}
+	item1 := map[string]int{"foo": 1, "bar": 2}
+	labels1 := map[string]string{"type": "item", "color": "red"}
+	compactionCount := 99
+
+	mgr := newManagerForTesting(ctx, t, data, ManagerOptions{AutoCompactionThreshold: compactionCount})
+
+	for range compactionCount - 1 {
+		addAndVerify(ctx, t, mgr, labels1, item1)
+		require.NoError(t, mgr.Flush(ctx))
+		require.NoError(t, mgr.b.Flush(ctx))
+	}
+
+	// Should not trigger compaction
+	_, err := mgr.Find(ctx, labels1)
+	require.NoError(t, err)
+
+	foundContents := getManifestContentCount(ctx, t, mgr)
+
+	if got, want := foundContents, compactionCount-1; got != want {
+		t.Errorf("unexpected number of blocks: %v, want %v", got, want)
+	}
+
+	// Add another manifest
+	addAndVerify(ctx, t, mgr, labels1, item1)
+
+	require.NoError(t, mgr.Flush(ctx))
+	require.NoError(t, mgr.b.Flush(ctx))
+
+	// *Should* trigger compaction
+	_, err = mgr.Find(ctx, labels1)
+	require.NoError(t, err)
+
+	foundContents = getManifestContentCount(ctx, t, mgr)
+
+	if got, want := foundContents, 1; got != want {
+		t.Errorf("unexpected number of blocks: %v, want %v", got, want)
+	}
+}
+
+func getManifestContentCount(ctx context.Context, t *testing.T, mgr *Manager) int {
+	t.Helper()
+
+	foundContents := 0
+
+	if err := mgr.b.IterateContents(
+		ctx,
+		content.IterateOptions{Range: index.PrefixRange(ContentPrefix)},
+		func(ci content.Info) error {
+			foundContents++
+			return nil
+		}); err != nil {
+		t.Errorf("unable to list manifest content: %v", err)
+	}
+
+	return foundContents
+}
+
+func TestManifestAutoCompactionWithReadOnly(t *testing.T) {
+	ctx := testlogging.Context(t)
+	data := blobtesting.DataMap{}
+
+	bm := newContentManagerForTesting(ctx, t, data, contentManagerOpts{})
+
+	mgr, err := NewManager(ctx, bm, ManagerOptions{}, nil)
+	require.NoError(t, err, "getting initial manifest manager")
+
+	for range 100 {
+		item1 := map[string]int{"foo": 1, "bar": 2}
+		labels1 := map[string]string{"type": "item", "color": "red"}
+
+		_, err = mgr.Put(ctx, labels1, item1)
+		require.NoError(t, err, "adding item to manifest manager")
+
+		require.NoError(t, mgr.Flush(ctx))
+		require.NoError(t, mgr.b.Flush(ctx))
+	}
+
+	// Opening another instance of the manager should cause the manifest manager
+	// to attempt to compact things.
+	bm = newContentManagerForTesting(ctx, t, data, contentManagerOpts{readOnly: true})
+
+	mgr, err = NewManager(ctx, bm, ManagerOptions{}, nil)
+	require.NoError(t, err, "getting other instance of manifest manager")
+
+	_, err = mgr.Find(ctx, map[string]string{"color": "red"})
+	require.NoError(t, err, "forcing reload of manifest manager")
+}
+
+func BenchmarkLargeCompaction(b *testing.B) {
+	item1 := map[string]int{"foo": 1, "bar": 2}
+	labels1 := map[string]string{"type": "item", "color": "red"}
+
+	table := []int{10000, 100000, 1000000}
+
+	for _, numItems := range table {
+		b.Run(fmt.Sprintf("%dItems", numItems), func(b *testing.B) {
+			for b.Loop() {
+				b.StopTimer()
+				// Use default context to avoid lots of log output during benchmark.
+				ctx := context.Background()
+				data := blobtesting.DataMap{}
+
+				bm := newContentManagerForTesting(ctx, b, data, contentManagerOpts{})
+
+				mgr, err := NewManager(
+					ctx,
+					bm,
+					ManagerOptions{AutoCompactionThreshold: 2},
+					nil,
+				)
+				require.NoError(b, err, "getting initial manifest manager")
+
+				for range numItems - 1 {
+					_, err = mgr.Put(ctx, labels1, item1)
+					require.NoError(b, err, "adding item to manifest manager")
+				}
+
+				require.NoError(b, mgr.Flush(ctx))
+				require.NoError(b, mgr.b.Flush(ctx))
+
+				_, err = mgr.Put(ctx, labels1, item1)
+				require.NoError(b, err, "adding item to manifest manager")
+
+				require.NoError(b, mgr.Flush(ctx))
+				require.NoError(b, mgr.b.Flush(ctx))
+
+				b.StartTimer()
+
+				err = mgr.Compact(ctx)
+				require.NoError(b, err, "forcing reload of manifest manager")
+			}
+		})
 	}
 }

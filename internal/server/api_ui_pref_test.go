@@ -8,17 +8,18 @@ import (
 	"github.com/kopia/kopia/internal/apiclient"
 	"github.com/kopia/kopia/internal/repotesting"
 	"github.com/kopia/kopia/internal/serverapi"
+	"github.com/kopia/kopia/internal/servertesting"
 )
 
 func TestUIPreferences(t *testing.T) {
 	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant)
-	srvInfo := startServer(t, env, false)
+	srvInfo := servertesting.StartServer(t, env, false)
 
 	cli, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             srvInfo.BaseURL,
 		TrustedServerCertificateFingerprint: srvInfo.TrustedServerCertificateFingerprint,
-		Username:                            testUIUsername,
-		Password:                            testUIPassword,
+		Username:                            servertesting.TestUIUsername,
+		Password:                            servertesting.TestUIPassword,
 	})
 
 	require.NoError(t, err)
@@ -28,7 +29,7 @@ func TestUIPreferences(t *testing.T) {
 	var p, p2 serverapi.UIPreferences
 
 	require.NoError(t, cli.Get(ctx, "ui-preferences", nil, &p))
-	require.Equal(t, "", p.Theme)
+	require.Empty(t, p.Theme)
 	p.Theme = "dark"
 
 	require.NoError(t, cli.Put(ctx, "ui-preferences", &p, &serverapi.Empty{}))

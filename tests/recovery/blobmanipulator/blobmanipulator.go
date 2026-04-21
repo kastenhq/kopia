@@ -1,5 +1,4 @@
 //go:build darwin || (linux && amd64)
-// +build darwin linux,amd64
 
 // Package blobmanipulator provides the framework for snapshot fix testing.
 package blobmanipulator
@@ -30,7 +29,7 @@ var (
 // BlobManipulator provides a way to run a kopia command.
 type BlobManipulator struct {
 	KopiaCommandRunner *kopiarunner.KopiaSnapshotter
-	DirCreater         *snapmeta.KopiaSnapshotter
+	DirCreator         *snapmeta.KopiaSnapshotter
 	fileWriter         *fiofilewriter.FileWriter
 
 	DataRepoPath       string
@@ -52,7 +51,7 @@ func NewBlobManipulator(baseDirPath, dataRepoPath string) (*BlobManipulator, err
 
 	return &BlobManipulator{
 		KopiaCommandRunner: runner,
-		DirCreater:         ks,
+		DirCreator:         ks,
 	}, nil
 }
 
@@ -84,7 +83,7 @@ func (bm *BlobManipulator) ConnectOrCreateRepo(dataRepoPath string) error {
 		return errKopiaRepoNotFound
 	}
 
-	return bm.DirCreater.ConnectOrCreateRepo(bm.DataRepoPath)
+	return bm.DirCreator.ConnectOrCreateRepo(bm.DataRepoPath)
 }
 
 // DeleteBlob deletes the provided blob or a random blob, in kopia repo.
@@ -100,7 +99,7 @@ func (bm *BlobManipulator) DeleteBlob(blobID string) error {
 
 	log.Printf("Deleting BLOB %s", blobID)
 
-	_, _, err := bm.KopiaCommandRunner.Run("blob", "delete", blobID, "--advanced-commands=enabled")
+	_, _, err := bm.KopiaCommandRunner.Run("blob", "delete", blobID, "--dangerous-commands=enabled")
 	if err != nil {
 		return err
 	}
@@ -192,7 +191,7 @@ func (bm *BlobManipulator) RestoreGivenOrRandomSnapshot(snapID, restoreDir strin
 	}
 
 	if snapID == "" {
-		// list available snaphsots
+		// list available snapshots
 		stdout, _, snapshotListErr := bm.KopiaCommandRunner.Run("snapshot", "list", "--json")
 		if snapshotListErr != nil {
 			return stdout, snapshotListErr
@@ -272,6 +271,54 @@ func (bm *BlobManipulator) SetUpSystemUnderTest() error {
 	}
 
 	return nil
+}
+
+// SetUpSystemWithOneSnapshot connects or creates a kopia repo, writes random data in source directory,
+// creates snapshots of the source directory.
+func (bm *BlobManipulator) SetUpSystemWithOneSnapshot() (string, error) {
+	fileSize := 1 * 1024 * 1024
+	numFiles := 50
+	ctx := context.Background()
+
+	err := bm.writeRandomFiles(ctx, fileSize, numFiles)
+	if err != nil {
+		return "", err
+	}
+
+	// create snapshot of the data
+	bm.PathToTakeSnapshot = bm.fileWriter.DataDirectory(ctx)
+
+	// create snapshot of the data
+	log.Printf("Creating snapshot of directory %s", bm.PathToTakeSnapshot)
+
+	snapshotID, _, err := bm.TakeSnapshot(bm.PathToTakeSnapshot)
+	if err != nil {
+		return "", err
+	}
+
+	log.Printf("Created snapshot of snapshot ID %s", snapshotID)
+
+	return snapshotID, nil
+}
+
+// GenerateRandomFiles connects or creates a Kopia repository that writes random data in source directory.
+// Tests can later create snapshots from the source directory.
+func (bm *BlobManipulator) GenerateRandomFiles(fileSize, numFiles int) error {
+	ctx := context.Background()
+
+	err := bm.writeRandomFiles(ctx, fileSize, numFiles)
+	if err != nil {
+		return err
+	}
+
+	bm.PathToTakeSnapshot = bm.fileWriter.DataDirectory(ctx)
+
+	return nil
+}
+
+// VerifySnapshot implements the Snapshotter interface to verify a kopia snapshot corruption.
+func (bm *BlobManipulator) VerifySnapshot() error {
+	return bm.KopiaCommandRunner.VerifySnapshot("--verify-files-percent=100")
 }
 
 // TakeSnapshot creates snapshot of the provided directory.

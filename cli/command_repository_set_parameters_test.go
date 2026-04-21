@@ -3,11 +3,9 @@ package cli_test
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/kopia/kopia/cli"
 	"github.com/kopia/kopia/internal/blobtesting"
 	"github.com/kopia/kopia/internal/repotesting"
 	"github.com/kopia/kopia/internal/testutil"
@@ -22,9 +20,9 @@ func (s *formatSpecificTestSuite) setupInMemoryRepo(t *testing.T) *testenv.CLITe
 	runner := testenv.NewInProcRunner(t)
 	env := testenv.NewCLITest(t, s.formatFlags, runner)
 	st := repotesting.NewReconnectableStorage(t, blobtesting.NewVersionedMapStorage(nil))
+	o := testutil.EnsureType[*repotesting.ReconnectableStorageOptions](t, st.ConnectionInfo().Config)
 
-	env.RunAndExpectSuccess(t, "repo", "create", "in-memory", "--uuid",
-		st.ConnectionInfo().Config.(*repotesting.ReconnectableStorageOptions).UUID)
+	env.RunAndExpectSuccess(t, "repo", "create", "in-memory", "--uuid", o.UUID)
 
 	return env
 }
@@ -34,22 +32,24 @@ func (s *formatSpecificTestSuite) TestRepositorySetParameters(t *testing.T) {
 	out := env.RunAndExpectSuccess(t, "repository", "status")
 
 	// default values
-	require.Contains(t, out, "Max pack length:     20 MiB")
+	require.Contains(t, out, "Max pack length:     21 MB")
 	require.Contains(t, out, fmt.Sprintf("Format version:      %d", s.formatVersion))
 
+	_, out = env.RunAndExpectSuccessWithErrOut(t, "repository", "set-parameters")
+	require.Contains(t, out, "no changes")
+
 	// failure cases
-	env.RunAndExpectFailure(t, "repository", "set-parameters")
 	env.RunAndExpectFailure(t, "repository", "set-parameters", "--index-version=33")
 	env.RunAndExpectFailure(t, "repository", "set-parameters", "--max-pack-size-mb=9")
 	env.RunAndExpectFailure(t, "repository", "set-parameters", "--max-pack-size-mb=121")
 
 	env.RunAndExpectSuccess(t, "repository", "set-parameters", "--index-version=2", "--max-pack-size-mb=33")
 	out = env.RunAndExpectSuccess(t, "repository", "status")
-	require.Contains(t, out, "Max pack length:     33 MiB")
+	require.Contains(t, out, "Max pack length:     34.6 MB")
 
 	env.RunAndExpectSuccess(t, "repository", "set-parameters", "--max-pack-size-mb=44")
 	out = env.RunAndExpectSuccess(t, "repository", "status")
-	require.Contains(t, out, "Max pack length:     44 MiB")
+	require.Contains(t, out, "Max pack length:     46.1 MB")
 }
 
 func (s *formatSpecificTestSuite) TestRepositorySetParametersRetention(t *testing.T) {
@@ -74,6 +74,10 @@ func (s *formatSpecificTestSuite) TestRepositorySetParametersRetention(t *testin
 	// clear retention settings
 	_, out = env.RunAndExpectSuccessWithErrOut(t, "repository", "set-parameters", "--retention-mode", "none")
 	require.Contains(t, out, "disabling blob retention")
+
+	// 2nd time also succeeds but disabling is skipped due to already being disabled. !anyChanges returns no error.
+	_, out = env.RunAndExpectSuccessWithErrOut(t, "repository", "set-parameters", "--retention-mode", "none")
+	require.Contains(t, out, "no changes")
 
 	out = env.RunAndExpectSuccess(t, "repository", "status")
 	require.NotContains(t, out, "Blob retention mode")
@@ -124,7 +128,7 @@ func (s *formatSpecificTestSuite) TestRepositorySetParametersUpgrade(t *testing.
 	out := env.RunAndExpectSuccess(t, "repository", "status")
 
 	// default values
-	require.Contains(t, out, "Max pack length:     20 MiB")
+	require.Contains(t, out, "Max pack length:     21 MB")
 
 	switch s.formatVersion {
 	case format.FormatVersion1:
@@ -145,19 +149,19 @@ func (s *formatSpecificTestSuite) TestRepositorySetParametersUpgrade(t *testing.
 
 	{
 		cmd := []string{
-			"repository", "upgrade",
+			"repository", "upgrade", "begin",
 			"--upgrade-owner-id", "owner",
 			"--io-drain-timeout", "1s", "--allow-unsafe-upgrade",
 			"--status-poll-interval", "1s",
+			"--max-permitted-clock-drift", "1s",
 		}
-
-		cli.MaxPermittedClockDrift = func() time.Duration { return time.Second }
 
 		// You can only upgrade when you are not already upgraded
 		if s.formatVersion < format.MaxFormatVersion {
 			env.RunAndExpectSuccess(t, cmd...)
 		} else {
-			env.RunAndExpectFailure(t, cmd...)
+			_, stderr := env.RunAndExpectSuccessWithErrOut(t, cmd...)
+			require.Contains(t, stderr, "Repository format is already upto date.")
 		}
 	}
 
@@ -179,10 +183,58 @@ func (s *formatSpecificTestSuite) TestRepositorySetParametersUpgrade(t *testing.
 	require.Contains(t, out, "Index Format:        v2")
 	require.Contains(t, out, "Format version:      3")
 	require.Contains(t, out, "Epoch cleanup margin:    23h0m0s")
-	require.Contains(t, out, "Epoch advance on:        22 blobs or 77 MiB, minimum 3h0m0s")
-	require.Contains(t, out, "Epoch checkpoint every:  9 epochs")
+	require.Contains(t, out, "Epoch advance on:        22 blobs or 80.7 MB, minimum 3h0m0s")
+	require.Contains(t, out, "Epoch range-compaction every: 9 epochs")
 
 	env.RunAndExpectSuccess(t, "index", "epoch", "list")
+}
+
+// TestRepositorySetParametersDowngrade test that a repository cannot be downgraded by using `set-parameters`.
+func (s *formatSpecificTestSuite) TestRepositorySetParametersDowngrade(t *testing.T) {
+	env := s.setupInMemoryRepo(t)
+
+	// checkStatusForVersion is a function with stanzas to check that the repository has the expected version.
+	// 	its saved into a variable to prevent repetition and enforce that nothing has changed between invocations
+	//  if `set-parameters`
+	checkStatusForVersion := func() {
+		out := env.RunAndExpectSuccess(t, "repository", "status")
+
+		// default values
+		require.Contains(t, out, "Max pack length:     21 MB")
+
+		switch s.formatVersion {
+		case format.FormatVersion1:
+			require.Contains(t, out, "Format version:      1")
+			require.Contains(t, out, "Epoch Manager:       disabled")
+			env.RunAndExpectFailure(t, "index", "epoch", "list")
+			// setting the current version again is ok
+			_, out = env.RunAndExpectSuccessWithErrOut(t, "repository", "set-parameters", "--index-version=1")
+			require.Contains(t, out, "no changes")
+		case format.FormatVersion2:
+			require.Contains(t, out, "Format version:      2")
+			require.Contains(t, out, "Epoch Manager:       enabled")
+			env.RunAndExpectSuccess(t, "index", "epoch", "list")
+			_, out = env.RunAndExpectFailure(t, "repository", "set-parameters", "--index-version=1")
+			require.Contains(t, out, "index format version can only be upgraded")
+		default:
+			require.Contains(t, out, "Format version:      3")
+			require.Contains(t, out, "Epoch Manager:       enabled")
+			env.RunAndExpectSuccess(t, "index", "epoch", "list")
+			_, out = env.RunAndExpectFailure(t, "repository", "set-parameters", "--index-version=1")
+			require.Contains(t, out, "index format version can only be upgraded")
+		}
+	}
+
+	checkStatusForVersion()
+
+	checkStatusForVersion()
+
+	// run basic check to ensure that an upgrade can still be performed as expected
+	env.RunAndExpectSuccess(t, "repository", "set-parameters", "--upgrade")
+
+	out := env.RunAndExpectSuccess(t, "repository", "status")
+	require.Contains(t, out, "Epoch Manager:       enabled")
+	require.Contains(t, out, "Index Format:        v2")
 }
 
 func (s *formatSpecificTestSuite) TestRepositorySetParametersRequiredFeatures(t *testing.T) {

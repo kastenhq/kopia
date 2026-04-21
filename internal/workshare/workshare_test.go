@@ -22,7 +22,7 @@ func buildTree(level int) *treeNode {
 		return n
 	}
 
-	for i := 0; i < level; i++ {
+	for range level {
 		n.children = append(n.children, buildTree(level-1))
 	}
 
@@ -36,9 +36,7 @@ type computeTreeSumRequest struct {
 	err    error
 }
 
-func dispatchComputeTreeSumRequest(w *workshare.Pool, input interface{}) {
-	req := input.(*computeTreeSumRequest)
-
+func dispatchComputeTreeSumRequest(w *workshare.Pool[*computeTreeSumRequest], req *computeTreeSumRequest) {
 	if w.ActiveWorkers() == 0 {
 		panic("unexpected worker count")
 	}
@@ -52,10 +50,10 @@ func dispatchComputeTreeSumRequest(w *workshare.Pool, input interface{}) {
 	req.result = res
 }
 
-func computeTreeSum(workPool *workshare.Pool, n *treeNode) (int, error) {
+func computeTreeSum(workPool *workshare.Pool[*computeTreeSumRequest], n *treeNode) (int, error) {
 	total := n.value
 
-	var cs workshare.AsyncGroup
+	var cs workshare.AsyncGroup[*computeTreeSumRequest]
 
 	for _, child := range n.children {
 		if cs.CanShareWork(workPool) {
@@ -73,9 +71,7 @@ func computeTreeSum(workPool *workshare.Pool, n *treeNode) (int, error) {
 		}
 	}
 
-	for _, req := range cs.Wait() {
-		twr := req.(*computeTreeSumRequest)
-
+	for _, twr := range cs.Wait() {
 		if twr.err != nil {
 			return 0, twr.err
 		}
@@ -103,7 +99,7 @@ func TestComputeTreeSumNegative(t *testing.T) {
 }
 
 func TestDisallowed_DoubleWait(t *testing.T) {
-	var ag workshare.AsyncGroup
+	var ag workshare.AsyncGroup[int]
 
 	ag.Wait()
 	require.Panics(t, func() {
@@ -112,7 +108,7 @@ func TestDisallowed_DoubleWait(t *testing.T) {
 }
 
 func TestDisallowed_WaitAfterClose(t *testing.T) {
-	var ag workshare.AsyncGroup
+	var ag workshare.AsyncGroup[int]
 
 	ag.Close()
 	require.Panics(t, func() {
@@ -123,9 +119,9 @@ func TestDisallowed_WaitAfterClose(t *testing.T) {
 }
 
 func TestDisallowed_UseAfterPoolClose(t *testing.T) {
-	w := workshare.NewPool(1)
+	w := workshare.NewPool[int](1)
 
-	var ag workshare.AsyncGroup
+	var ag workshare.AsyncGroup[int]
 
 	w.Close()
 
@@ -134,15 +130,15 @@ func TestDisallowed_UseAfterPoolClose(t *testing.T) {
 	})
 
 	require.Panics(t, func() {
-		ag.RunAsync(w, func(c *workshare.Pool, request interface{}) {
+		ag.RunAsync(w, func(c *workshare.Pool[int], request int) {
 			t.Fatal("should not be called")
-		}, nil)
+		}, 33)
 	})
 }
 
 //nolint:thelper
 func testComputeTreeSum(t *testing.T, numWorkers int) {
-	w := workshare.NewPool(numWorkers)
+	w := workshare.NewPool[*computeTreeSumRequest](numWorkers)
 	defer w.Close()
 
 	n := buildTree(6)
@@ -155,12 +151,10 @@ func testComputeTreeSum(t *testing.T, numWorkers int) {
 var treeToWalk = buildTree(6)
 
 func BenchmarkComputeTreeSum(b *testing.B) {
-	w := workshare.NewPool(10)
+	w := workshare.NewPool[*computeTreeSumRequest](10)
 	defer w.Close()
 
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		computeTreeSum(w, treeToWalk)
 	}
 }

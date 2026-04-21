@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/gather"
+	"github.com/kopia/kopia/internal/metrics"
 	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/logging"
@@ -31,8 +33,8 @@ var ErrNotFound = errors.New("not found")
 
 // ContentPrefix is the prefix of the content id for manifests.
 const (
-	ContentPrefix              = "m"
-	autoCompactionContentCount = 16
+	ContentPrefix                     = "m"
+	autoCompactionContentCountDefault = 16
 )
 
 // TypeLabelKey is the label key for manifest type.
@@ -47,6 +49,7 @@ type contentManager interface {
 	DisableIndexFlush(ctx context.Context)
 	EnableIndexFlush(ctx context.Context)
 	Flush(ctx context.Context) error
+	IsReadOnly() bool
 }
 
 // ID is a unique identifier of a single manifest.
@@ -66,9 +69,9 @@ type Manager struct {
 }
 
 // Put serializes the provided payload to JSON and persists it. Returns unique identifier that represents the manifest.
-func (m *Manager) Put(ctx context.Context, labels map[string]string, payload interface{}) (ID, error) {
+func (m *Manager) Put(_ context.Context, labels map[string]string, payload any) (ID, error) {
 	if labels[TypeLabelKey] == "" {
-		return "", errors.Errorf("'type' label is required")
+		return "", errors.New("'type' label is required")
 	}
 
 	random := make([]byte, manifestIDLength)
@@ -84,7 +87,7 @@ func (m *Manager) Put(ctx context.Context, labels map[string]string, payload int
 	e := &manifestEntry{
 		ID:      ID(hex.EncodeToString(random)),
 		ModTime: m.timeNow().UTC(),
-		Labels:  copyLabels(labels),
+		Labels:  maps.Clone(labels),
 		Content: b,
 	}
 
@@ -107,7 +110,7 @@ func (m *Manager) GetMetadata(ctx context.Context, id ID) (*EntryMetadata, error
 
 // Get retrieves the contents of the provided manifest item by deserializing it as JSON to provided object.
 // If the manifest is not found, returns ErrNotFound.
-func (m *Manager) Get(ctx context.Context, id ID, data interface{}) (*EntryMetadata, error) {
+func (m *Manager) Get(ctx context.Context, id ID, data any) (*EntryMetadata, error) {
 	e, err := m.getPendingOrCommitted(ctx, id)
 	if err != nil {
 		return nil, err
@@ -115,7 +118,7 @@ func (m *Manager) Get(ctx context.Context, id ID, data interface{}) (*EntryMetad
 
 	if data != nil {
 		if err := json.Unmarshal([]byte(e.Content), data); err != nil {
-			return nil, errors.Wrapf(err, "unable to unmashal %q", id)
+			return nil, errors.Wrapf(err, "unable to unmarshal %q", id)
 		}
 	}
 
@@ -190,7 +193,7 @@ func (m *Manager) Find(ctx context.Context, labels map[string]string) ([]*EntryM
 func cloneEntryMetadata(e *manifestEntry) *EntryMetadata {
 	return &EntryMetadata{
 		ID:      e.ID,
-		Labels:  copyLabels(e.Labels),
+		Labels:  maps.Clone(e.Labels),
 		Length:  len(e.Content),
 		ModTime: e.ModTime,
 	}
@@ -199,7 +202,7 @@ func cloneEntryMetadata(e *manifestEntry) *EntryMetadata {
 // matchesLabels returns true when all entries in 'b' are found in the 'a'.
 func matchesLabels(a, b map[string]string) bool {
 	for k, v := range b {
-		if a[k] != v {
+		if av, ok := a[k]; !ok || av != v {
 			return false
 		}
 	}
@@ -213,14 +216,11 @@ func (m *Manager) Flush(ctx context.Context) error {
 	defer m.mu.Unlock()
 
 	_, err := m.committed.commitEntries(ctx, m.pendingEntries)
+	if err == nil {
+		m.pendingEntries = map[ID]*manifestEntry{}
+	}
 
 	return err
-}
-
-func mustSucceed(e error) {
-	if e != nil {
-		panic("unexpected failure: " + e.Error())
-	}
 }
 
 // Delete marks the specified manifest ID for deletion.
@@ -251,32 +251,53 @@ func (m *Manager) Compact(ctx context.Context) error {
 	return m.committed.compact(ctx)
 }
 
-func copyLabels(m map[string]string) map[string]string {
-	r := map[string]string{}
-	for k, v := range m {
-		r[k] = v
+// IDsToStrings converts the IDs to strings.
+func IDsToStrings(input []ID) []string {
+	var result []string
+
+	for _, v := range input {
+		result = append(result, string(v))
 	}
 
-	return r
+	return result
+}
+
+// IDsFromStrings converts the IDs to strings.
+func IDsFromStrings(input []string) []ID {
+	var result []ID
+
+	for _, v := range input {
+		result = append(result, ID(v))
+	}
+
+	return result
 }
 
 // ManagerOptions are optional parameters for Manager creation.
 type ManagerOptions struct {
-	TimeNow func() time.Time // Time provider
+	TimeNow                 func() time.Time // Time provider
+	AutoCompactionThreshold int
 }
 
 // NewManager returns new manifest manager for the provided content manager.
-func NewManager(ctx context.Context, b contentManager, options ManagerOptions) (*Manager, error) {
+func NewManager(_ context.Context, b contentManager, options ManagerOptions, mr *metrics.Registry) (*Manager, error) {
+	_ = mr
+
 	timeNow := options.TimeNow
 	if timeNow == nil {
 		timeNow = clock.Now
+	}
+
+	autoCompactionThreshold := options.AutoCompactionThreshold
+	if autoCompactionThreshold == 0 {
+		autoCompactionThreshold = autoCompactionContentCountDefault
 	}
 
 	m := &Manager{
 		b:              b,
 		pendingEntries: map[ID]*manifestEntry{},
 		timeNow:        timeNow,
-		committed:      newCommittedManager(b),
+		committed:      newCommittedManager(b, autoCompactionThreshold),
 	}
 
 	return m, nil

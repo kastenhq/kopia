@@ -3,14 +3,15 @@
   "version": "1.0.0",
   "repository": "github:kopia/kopia",
   "dependencies": {
-    "auto-launch": "^5.0.5",
-    "electron-first-run": "^3.0.0",
-    "electron-is-dev": "^2.0.0",
-    "electron-log": "^4.4.8",
-    "electron-updater": "^5.2.1",
-    "minimist": "^1.2.6",
-    "uuid": "^8.3.2"
+    "auto-launch": "^5.0.6",
+    "electron-log": "^5.4.3",
+    "electron-store": "^11.0.2",
+    "electron-updater": "^6.8.3",
+    "minimist": "^1.2.8",
+    "semver": "^7.7.2",
+    "uuid": "^13.0.0"
   },
+  "type": "module",
   "author": {
     "email": "kopia-pmc@googlegroups.com",
     "name": "Kopia Authors"
@@ -70,10 +71,12 @@
           ]
         }
       ],
-      "sign": "./sign.js",
-      "signingHashAlgorithms": [
-        "sha256"
-      ]
+      "signtoolOptions": {
+        "sign": "./sign.mjs",
+        "signingHashAlgorithms": [
+          "sha256"
+        ]
+      }
     },
     "mac": {
       "hardenedRuntime": true,
@@ -107,15 +110,28 @@
         }
       ]
     },
-    "afterSign": "notarize.js"
+    "afterSign": "notarize.mjs"
+  },
+  "deb": {
+    "appArmorProfile": "kopia-ui.apparmor"
+  },
+  "rpm": {
+    "appArmorProfile": "kopia-ui.apparmor"
+  },
+  "AppImage": {
+    "appArmorProfile": "kopia-ui.apparmor"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
+    "@playwright/test": "^1.59.1",
     "asar": "^3.2.0",
-    "concurrently": "^7.3.0",
-    "dotenv": "^16.0.2",
-    "electron": "^20.1.3",
-    "electron-builder": "^23.3.3",
-    "electron-notarize": "^1.2.1"
+    "concurrently": "^9.2.1",
+    "dotenv": "^17.4.1",
+    "electron": "^41.2.0",
+    "electron-builder": "^26.8.1",
+    "playwright": "^1.37.1",
+    "playwright-core": "^1.35.1",
+    "prettier": "^3.8.2"
   },
   "homepage": "./",
   "description": "Fast and secure open source backup.",
@@ -124,14 +140,16 @@
   "scripts": {
     "start": "react-scripts start",
     "build-html": "react-scripts build",
-    "test": "react-scripts test",
+    "e2e": "playwright test",
     "eject": "react-scripts eject",
     "start-electron": "electron .",
     "build-electron": "electron-builder",
-    "build-electron-windows": "electron-builder -w",
+    "build-electron-windows": "electron-builder -w --x64",
     "build-electron-linux": "electron-builder -l",
     "build-electron-dir": "electron-builder --dir",
     "start-electron-prebuilt": "ELECTRON_IS_DEV=0 electron .",
+    "prettier": "prettier --write .",
+    "prettier:check": "prettier --check .",
     "dev": "electron ."
   },
   "eslintConfig": {

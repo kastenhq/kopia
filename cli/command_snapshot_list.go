@@ -29,7 +29,7 @@ type commandSnapshotList struct {
 	snapshotListShowItemID           bool
 	snapshotListShowRetentionReasons bool
 	snapshotListShowModTime          bool
-	shapshotListShowOwner            bool
+	snapshotListShowOwner            bool
 	snapshotListShowIdentical        bool
 	snapshotListShowAll              bool
 	maxResultsPerPath                int
@@ -50,7 +50,7 @@ func (c *commandSnapshotList) setup(svc appServices, parent commandParent) {
 	cmd.Flag("manifest-id", "Include manifest item ID.").Short('m').BoolVar(&c.snapshotListShowItemID)
 	cmd.Flag("retention", "Include retention reasons.").Default("true").BoolVar(&c.snapshotListShowRetentionReasons)
 	cmd.Flag("mtime", "Include file mod time").BoolVar(&c.snapshotListShowModTime)
-	cmd.Flag("owner", "Include owner").BoolVar(&c.shapshotListShowOwner)
+	cmd.Flag("owner", "Include owner").BoolVar(&c.snapshotListShowOwner)
 	cmd.Flag("show-identical", "Show identical snapshots").Short('l').BoolVar(&c.snapshotListShowIdentical)
 	cmd.Flag("storage-stats", "Compute and show storage statistics").BoolVar(&c.storageStats)
 	cmd.Flag("reverse", "Reverse sort order").BoolVar(&c.reverseSort)
@@ -65,7 +65,7 @@ func (c *commandSnapshotList) setup(svc appServices, parent commandParent) {
 func findSnapshotsForSource(ctx context.Context, rep repo.Repository, sourceInfo snapshot.SourceInfo, tags map[string]string) (manifestIDs []manifest.ID, err error) {
 	var result []manifest.ID
 
-	for len(sourceInfo.Path) > 0 {
+	for sourceInfo.Path != "" {
 		list, err := snapshot.ListSnapshotManifests(ctx, rep, &sourceInfo, tags)
 		if err != nil {
 			return nil, errors.Wrapf(err, "error listing manifests for %v", sourceInfo)
@@ -233,7 +233,7 @@ func (c *commandSnapshotList) outputManifestGroups(ctx context.Context, rep repo
 	}
 
 	if !anyOutput && !c.snapshotListShowAll && len(manifests) > 0 {
-		log(ctx).Infof("No snapshots found. Pass --all to show snapshots from all users/hosts.\n")
+		log(ctx).Info("No snapshots found. Pass --all to show snapshots from all users/hosts.\n")
 	}
 
 	return nil
@@ -290,7 +290,7 @@ func (c *commandSnapshotList) outputManifestFromSingleSource(ctx context.Context
 
 		ohid, ok := ent.(object.HasObjectID)
 		if !ok {
-			log(ctx).Errorf("entry does not have object ID: %v", ent, err)
+			log(ctx).Errorf("entry for '%s' does not have object ID: %v", ent.Name(), err)
 			return nil
 		}
 
@@ -410,7 +410,7 @@ func (c *commandSnapshotList) entryBits(ctx context.Context, m *snapshot.Manifes
 	bits = append(bits,
 		maybeHumanReadableBytes(c.snapshotListShowHumanReadable, totalBytes),
 		ent.Mode().String())
-	if c.shapshotListShowOwner {
+	if c.snapshotListShowOwner {
 		bits = append(bits,
 			fmt.Sprintf("uid:%v", ent.Owner().UserID),
 			fmt.Sprintf("gid:%v", ent.Owner().GroupID))
@@ -440,7 +440,7 @@ func (c *commandSnapshotList) entryBits(ctx context.Context, m *snapshot.Manifes
 
 	if u := m.StorageStats; u != nil {
 		bits = append(bits,
-			fmt.Sprintf("new-data:%v", units.BytesStringBase10(atomic.LoadInt64(&u.NewData.PackedContentBytes))),
+			fmt.Sprintf("new-data:%v", units.BytesString(atomic.LoadInt64(&u.NewData.PackedContentBytes))),
 			fmt.Sprintf("new-files:%v", atomic.LoadInt32(&u.NewData.FileObjectCount)),
 			fmt.Sprintf("new-dirs:%v", atomic.LoadInt32(&u.NewData.DirObjectCount)),
 			fmt.Sprintf("compression:%v", formatCompressionPercentage(atomic.LoadInt64(&u.NewData.OriginalContentBytes), atomic.LoadInt64(&u.NewData.PackedContentBytes))),
@@ -452,7 +452,7 @@ func (c *commandSnapshotList) entryBits(ctx context.Context, m *snapshot.Manifes
 
 func deltaBytes(b int64) string {
 	if b > 0 {
-		return "(+" + units.BytesStringBase10(b) + ")"
+		return "(+" + units.BytesString(b) + ")"
 	}
 
 	return ""

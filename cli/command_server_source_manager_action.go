@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"path/filepath"
 
-	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/apiclient"
@@ -39,7 +39,7 @@ func (c *commandServerSourceManagerAction) triggerActionOnMatchingSources(ctx co
 
 	if !c.all {
 		if c.source == "" {
-			return errors.Errorf("must specify source or --all")
+			return errors.New("must specify source or --all")
 		}
 
 		absPath, err := filepath.Abs(c.source)

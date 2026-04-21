@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 
+	"github.com/pkg/errors"
+
 	"github.com/kopia/kopia/repo"
 )
 
@@ -17,11 +19,11 @@ func (c *commandRepositoryThrottleGet) setup(svc appServices, parent commandPare
 	cmd.Action(svc.directRepositoryReadAction(c.run))
 }
 
-func (c *commandRepositoryThrottleGet) run(ctx context.Context, rep repo.DirectRepository) error {
+func (c *commandRepositoryThrottleGet) run(_ context.Context, rep repo.DirectRepository) error {
 	limits := rep.Throttler().Limits()
 
 	if err := c.ctg.output(&limits); err != nil {
-		return err
+		return errors.Wrap(err, "output")
 	}
 
 	return nil

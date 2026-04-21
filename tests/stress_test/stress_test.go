@@ -70,8 +70,7 @@ func stressTestWithStorage(t *testing.T, st blob.Storage, duration time.Duration
 	deadline := clock.Now().Add(duration)
 
 	t.Run("workers", func(t *testing.T) {
-		for i := 0; i < goroutineCount; i++ {
-			i := i
+		for i := range goroutineCount {
 			t.Run(fmt.Sprintf("worker-%v", i), func(t *testing.T) {
 				t.Parallel()
 				stressWorker(ctx, t, deadline, openMgr, int64(seed0+i))
@@ -126,7 +125,7 @@ func stressWorker(ctx context.Context, t *testing.T, deadline time.Time, openMgr
 				return
 			}
 
-			if cerr := bm.Close(ctx); cerr != nil {
+			if cerr := bm.CloseShared(ctx); cerr != nil {
 				t.Errorf("close error: %v", cerr)
 				return
 			}

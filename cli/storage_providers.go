@@ -2,8 +2,9 @@ package cli
 
 import (
 	"context"
+	"io"
 
-	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/kingpin/v2"
 
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/throttling"
@@ -15,6 +16,7 @@ type StorageProviderServices interface {
 	EnvName(s string) string
 	setPasswordFromToken(pwd string)
 	storageProviders() []StorageProvider
+	stdin() io.Reader
 }
 
 // StorageFlags is implemented by cli storage providers which need to support a

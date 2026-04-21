@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"testing"
 
@@ -18,7 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/kopia/kopia/internal/clock"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/impossible"
 	"github.com/kopia/kopia/internal/testlogging"
@@ -30,7 +30,7 @@ import (
 	"github.com/kopia/kopia/repo/splitter"
 )
 
-var errSomeError = errors.Errorf("some error")
+var errSomeError = errors.New("some error")
 
 type fakeContentManager struct {
 	mu sync.Mutex
@@ -38,7 +38,7 @@ type fakeContentManager struct {
 	// +checklocks:mu
 	data map[content.ID][]byte
 	// +checklocks:mu
-	compresionIDs map[content.ID]compression.HeaderID
+	compressionIDs map[content.ID]compression.HeaderID
 
 	supportsContentCompression bool
 	writeContentError          error
@@ -73,15 +73,15 @@ func (f *fakeContentManager) WriteContent(ctx context.Context, data gather.Bytes
 	defer f.mu.Unlock()
 
 	f.data[contentID] = data.ToByteSlice()
-	if f.compresionIDs != nil {
-		f.compresionIDs[contentID] = comp
+	if f.compressionIDs != nil {
+		f.compressionIDs[contentID] = comp
 	}
 
 	return contentID, nil
 }
 
-func (f *fakeContentManager) SupportsContentCompression() (bool, error) {
-	return f.supportsContentCompression, nil
+func (f *fakeContentManager) SupportsContentCompression() bool {
+	return f.supportsContentCompression
 }
 
 func (f *fakeContentManager) ContentInfo(ctx context.Context, contentID content.ID) (content.Info, error) {
@@ -89,10 +89,10 @@ func (f *fakeContentManager) ContentInfo(ctx context.Context, contentID content.
 	defer f.mu.Unlock()
 
 	if d, ok := f.data[contentID]; ok {
-		return &content.InfoStruct{ContentID: contentID, PackedLength: uint32(len(d))}, nil
+		return content.Info{ContentID: contentID, PackedLength: uint32(len(d)), CompressionHeaderID: f.compressionIDs[contentID]}, nil
 	}
 
-	return nil, blob.ErrBlobNotFound
+	return content.Info{}, blob.ErrBlobNotFound
 }
 
 func (f *fakeContentManager) Flush(ctx context.Context) error {
@@ -107,12 +107,12 @@ func setupTest(t *testing.T, compressionHeaderID map[content.ID]compression.Head
 	fcm := &fakeContentManager{
 		data:                       data,
 		supportsContentCompression: compressionHeaderID != nil,
-		compresionIDs:              compressionHeaderID,
+		compressionIDs:             compressionHeaderID,
 	}
 
 	r, err := NewObjectManager(testlogging.Context(t), fcm, format.ObjectFormat{
 		Splitter: "FIXED-1M",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("can't create object manager: %v", err)
 	}
@@ -176,16 +176,91 @@ func TestCompression_ContentCompressionEnabled(t *testing.T) {
 	_, _, om := setupTest(t, cmap)
 
 	w := om.NewWriter(ctx, WriterOptions{
-		Compressor: "gzip",
+		Compressor:         "gzip",
+		MetadataCompressor: "zstd-fastest",
 	})
 	w.Write(bytes.Repeat([]byte{1, 2, 3, 4}, 1000))
 	oid, err := w.Result()
 	require.NoError(t, err)
 
 	cid, isCompressed, ok := oid.ContentID()
+
 	require.True(t, ok)
 	require.False(t, isCompressed) // oid will not indicate compression
 	require.Equal(t, compression.ByName["gzip"].HeaderID(), cmap[cid])
+}
+
+func TestCompression_IndirectContentCompressionEnabledMetadata(t *testing.T) {
+	ctx := testlogging.Context(t)
+
+	cmap := map[content.ID]compression.HeaderID{}
+	_, _, om := setupTest(t, cmap)
+	w := om.NewWriter(ctx, WriterOptions{
+		Compressor:         "gzip",
+		MetadataCompressor: "zstd-fastest",
+	})
+	w.Write(bytes.Repeat([]byte{1, 2, 3, 4}, 1000000))
+	oid, err := w.Result()
+	require.NoError(t, err)
+	verifyIndirectBlock(ctx, t, om, oid, compression.HeaderZstdFastest)
+
+	w2 := om.NewWriter(ctx, WriterOptions{
+		MetadataCompressor: "none",
+	})
+	w2.Write(bytes.Repeat([]byte{5, 6, 7, 8}, 1000000))
+	oid2, err2 := w2.Result()
+	require.NoError(t, err2)
+	verifyIndirectBlock(ctx, t, om, oid2, content.NoCompression)
+}
+
+func TestCompression_CustomSplitters(t *testing.T) {
+	cases := []struct {
+		wo          WriterOptions
+		wantLengths []int64
+	}{
+		{
+			wo:          WriterOptions{Splitter: ""},
+			wantLengths: []int64{1048576, 393216}, // uses default FIXED-1M
+		},
+		{
+			wo:          WriterOptions{Splitter: "nosuchsplitter"},
+			wantLengths: []int64{1048576, 393216}, // falls back to default FIXED-1M
+		},
+		{
+			wo:          WriterOptions{Splitter: "FIXED-128K"},
+			wantLengths: []int64{131072, 131072, 131072, 131072, 131072, 131072, 131072, 131072, 131072, 131072, 131072},
+		},
+		{
+			wo:          WriterOptions{Splitter: "FIXED-256K"},
+			wantLengths: []int64{262144, 262144, 262144, 262144, 262144, 131072},
+		},
+	}
+
+	ctx := testlogging.Context(t)
+
+	for _, tc := range cases {
+		cmap := map[content.ID]compression.HeaderID{}
+		_, fcm, om := setupTest(t, cmap)
+
+		w := om.NewWriter(ctx, tc.wo)
+
+		w.Write(bytes.Repeat([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, 128<<10))
+		oid, err := w.Result()
+		require.NoError(t, err)
+
+		ndx, ok := oid.IndexObjectID()
+		require.True(t, ok)
+
+		entries, err := LoadIndexObject(ctx, fcm, ndx)
+		require.NoError(t, err)
+
+		var gotLengths []int64
+		for _, e := range entries {
+			gotLengths = append(gotLengths, e.Length)
+		}
+
+		require.Equal(t, tc.wantLengths, gotLengths)
+	}
 }
 
 func TestCompression_ContentCompressionDisabled(t *testing.T) {
@@ -195,7 +270,8 @@ func TestCompression_ContentCompressionDisabled(t *testing.T) {
 	_, _, om := setupTest(t, nil)
 
 	w := om.NewWriter(ctx, WriterOptions{
-		Compressor: "gzip",
+		Compressor:         "gzip",
+		MetadataCompressor: "zstd-fastest",
 	})
 	w.Write(bytes.Repeat([]byte{1, 2, 3, 4}, 1000))
 	oid, err := w.Result()
@@ -273,8 +349,6 @@ func TestCheckpointing(t *testing.T) {
 }
 
 func TestObjectWriterRaceBetweenCheckpointAndResult(t *testing.T) {
-	rand.Seed(clock.Now().UnixNano())
-
 	ctx := testlogging.Context(t)
 	data := map[content.ID][]byte{}
 	fcm := &fakeContentManager{
@@ -283,7 +357,7 @@ func TestObjectWriterRaceBetweenCheckpointAndResult(t *testing.T) {
 
 	om, err := NewObjectManager(testlogging.Context(t), fcm, format.ObjectFormat{
 		Splitter: "FIXED-1M",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("can't create object manager: %v", err)
 	}
@@ -295,7 +369,7 @@ func TestObjectWriterRaceBetweenCheckpointAndResult(t *testing.T) {
 		repeat = 5
 	}
 
-	for i := 0; i < repeat; i++ {
+	for range repeat {
 		w := om.NewWriter(ctx, WriterOptions{
 			AsyncWrites: 1,
 		})
@@ -320,10 +394,8 @@ func TestObjectWriterRaceBetweenCheckpointAndResult(t *testing.T) {
 					return errors.Wrapf(err, "Checkpoint() returned invalid object %v", cpID)
 				}
 
-				for _, id := range ids {
-					if id == content.EmptyID {
-						return errors.Errorf("checkpoint returned empty id")
-					}
+				if slices.Contains(ids, content.EmptyID) {
+					return errors.New("checkpoint returned empty id")
 				}
 			}
 
@@ -359,12 +431,10 @@ func verifyFull(ctx context.Context, t *testing.T, om *Manager, oid ID, want []b
 func verifyNoError(t *testing.T, err error) {
 	t.Helper()
 
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 }
 
-func verifyIndirectBlock(ctx context.Context, t *testing.T, om *Manager, oid ID) {
+func verifyIndirectBlock(ctx context.Context, t *testing.T, om *Manager, oid ID, expectedComp compression.HeaderID) {
 	t.Helper()
 
 	for indexContentID, isIndirect := oid.IndexObjectID(); isIndirect; indexContentID, isIndirect = indexContentID.IndexObjectID() {
@@ -373,6 +443,13 @@ func verifyIndirectBlock(ctx context.Context, t *testing.T, om *Manager, oid ID)
 				if !c.HasPrefix() {
 					t.Errorf("expected base content ID to be prefixed, was %v", c)
 				}
+
+				info, err := om.contentMgr.ContentInfo(ctx, c)
+				if err != nil {
+					t.Errorf("error getting content info for %v", err.Error())
+				}
+
+				require.Equal(t, expectedComp, info.CompressionHeaderID)
 			}
 
 			rd, err := Open(ctx, om.contentMgr, indexContentID)
@@ -398,6 +475,7 @@ func TestIndirection(t *testing.T) {
 		dataLength          int
 		expectedBlobCount   int
 		expectedIndirection int
+		metadataCompressor  compression.Name
 	}{
 		{dataLength: 200, expectedBlobCount: 1, expectedIndirection: 0},
 		{dataLength: 1000, expectedBlobCount: 1, expectedIndirection: 0},
@@ -407,16 +485,19 @@ func TestIndirection(t *testing.T) {
 		// 1 blob of 1000 zeros + 1 index blob
 		{dataLength: 4000, expectedBlobCount: 2, expectedIndirection: 1},
 		// 1 blob of 1000 zeros + 1 index blob
-		{dataLength: 10000, expectedBlobCount: 2, expectedIndirection: 1},
+		{dataLength: 10000, expectedBlobCount: 2, expectedIndirection: 1, metadataCompressor: "none"},
+		// 1 blob of 1000 zeros + 1 index blob, enabled metadata compression
+		{dataLength: 10000, expectedBlobCount: 2, expectedIndirection: 1, metadataCompressor: "zstd-fastest"},
 	}
 
 	for _, c := range cases {
-		data, _, om := setupTest(t, nil)
+		cmap := map[content.ID]compression.HeaderID{}
+		data, _, om := setupTest(t, cmap)
 
 		contentBytes := make([]byte, c.dataLength)
 
-		writer := om.NewWriter(ctx, WriterOptions{})
-		writer.(*objectWriter).splitter = splitterFactory()
+		writer := om.NewWriter(ctx, WriterOptions{MetadataCompressor: c.metadataCompressor})
+		testutil.EnsureType[*objectWriter](t, writer).splitter = splitterFactory()
 
 		if _, err := writer.Write(contentBytes); err != nil {
 			t.Errorf("write error: %v", err)
@@ -446,7 +527,12 @@ func TestIndirection(t *testing.T) {
 			t.Errorf("invalid blob count for %v, got %v, wanted %v", result, got, want)
 		}
 
-		verifyIndirectBlock(ctx, t, om, result)
+		expectedCompressor := content.NoCompression
+		if len(c.metadataCompressor) > 0 && c.metadataCompressor != "none" {
+			expectedCompressor = compression.ByName[c.metadataCompressor].HeaderID()
+		}
+
+		verifyIndirectBlock(ctx, t, om, result, expectedCompressor)
 	}
 }
 
@@ -533,7 +619,7 @@ func TestConcatenate(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		concatenatedOID, err := om.Concatenate(ctx, tc.inputs)
+		concatenatedOID, err := om.Concatenate(ctx, tc.inputs, "zstd-fastest")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -572,7 +658,7 @@ func TestConcatenate(t *testing.T) {
 		}
 
 		// make sure results of concatenation can be further concatenated.
-		concatenated3OID, err := om.Concatenate(ctx, []ID{concatenatedOID, concatenatedOID, concatenatedOID})
+		concatenated3OID, err := om.Concatenate(ctx, []ID{concatenatedOID, concatenatedOID, concatenatedOID}, "zstd-fastest")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -598,14 +684,10 @@ func mustWriteObject(t *testing.T, om *Manager, data []byte, compressor compress
 	defer w.Close()
 
 	_, err := w.Write(data)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	oid, err := w.Result()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	return oid
 }
@@ -671,8 +753,6 @@ func TestReaderStoredBlockNotFound(t *testing.T) {
 
 func TestEndToEndReadAndSeek(t *testing.T) {
 	for _, asyncWrites := range []int{0, 4, 8} {
-		asyncWrites := asyncWrites
-
 		t.Run(fmt.Sprintf("async-%v", asyncWrites), func(t *testing.T) {
 			t.Parallel()
 
@@ -721,10 +801,11 @@ func TestEndToEndReadAndSeekWithCompression(t *testing.T) {
 	}
 
 	for _, compressible := range []bool{false, true} {
-		compressible := compressible
-
 		for compressorName := range compression.ByName {
-			compressorName := compressorName
+			if !compression.IsSupported(compressorName) {
+				continue
+			}
+
 			t.Run(string(compressorName), func(t *testing.T) {
 				ctx := testlogging.Context(t)
 
@@ -798,7 +879,7 @@ func verify(ctx context.Context, t *testing.T, cr contentReader, objectID ID, ex
 		return
 	}
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		sampleSize := int(rand.Int31n(300))
 		seekOffset := int(rand.Int31n(int32(len(expectedData))))
 
@@ -887,7 +968,7 @@ func TestWriterFlushFailure_OnWrite(t *testing.T) {
 
 	n, err := w.Write(bytes.Repeat([]byte{1, 2, 3, 4}, 1e6))
 	require.ErrorIs(t, err, errSomeError)
-	require.Equal(t, n, 0)
+	require.Equal(t, 0, n)
 }
 
 func TestWriterFlushFailure_OnFlush(t *testing.T) {
@@ -897,8 +978,8 @@ func TestWriterFlushFailure_OnFlush(t *testing.T) {
 	w := om.NewWriter(ctx, WriterOptions{})
 
 	n, err := w.Write(bytes.Repeat([]byte{1, 2, 3, 4}, 1e6))
-	require.NoError(t, err, errSomeError)
-	require.Equal(t, n, 4000000)
+	require.NoError(t, err)
+	require.Equal(t, 4000000, n)
 
 	fcm.writeContentError = errSomeError
 
@@ -931,8 +1012,8 @@ func TestWriterFlushFailure_OnAsyncWrite(t *testing.T) {
 	fcm.writeContentError = errSomeError
 
 	n, err := w.Write(bytes.Repeat([]byte{1, 2, 3, 4}, 1e6))
-	require.NoError(t, err, errSomeError)
-	require.Equal(t, n, 4000000)
+	require.NotErrorIs(t, err, errSomeError)
+	require.Equal(t, 4000000, n)
 
 	_, err = w.Result()
 	require.ErrorIs(t, err, errSomeError)
@@ -963,5 +1044,5 @@ func TestWriterFailure_OnCompression(t *testing.T) {
 	})
 
 	_, err := w.Write(bytes.Repeat([]byte{1, 2, 3, 4}, 1e6))
-	require.Error(t, err, errSomeError)
+	require.ErrorIs(t, err, errSomeError)
 }

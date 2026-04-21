@@ -20,12 +20,17 @@ import (
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/internal/uitask"
+	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/blob"
 	"github.com/kopia/kopia/repo/blob/filesystem"
+	"github.com/kopia/kopia/repo/maintenance"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
+	"github.com/kopia/kopia/tests/clitestutil"
 	"github.com/kopia/kopia/tests/testenv"
 )
+
+const defaultServerControlUsername = "server-control"
 
 func TestServerStart(t *testing.T) {
 	ctx := testlogging.Context(t)
@@ -42,7 +47,7 @@ func TestServerStart(t *testing.T) {
 
 	var sp testutil.ServerParameters
 
-	e.RunAndProcessStderr(t, sp.ProcessOutput,
+	wait, _ := e.RunAndProcessStderr(t, sp.ProcessOutput,
 		"server", "start",
 		"--ui",
 		"--address=localhost:0",
@@ -54,6 +59,9 @@ func TestServerStart(t *testing.T) {
 		"--override-username=fake-username",
 		"--ui-title-prefix", "Blah: <script>bleh</script> ",
 	)
+
+	defer wait()
+
 	t.Logf("detected server parameters %#v", sp)
 
 	cli, err := apiclient.NewKopiaAPIClient(apiclient.Options{
@@ -68,7 +76,7 @@ func TestServerStart(t *testing.T) {
 
 	controlClient, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             sp.BaseURL,
-		Username:                            "server-control",
+		Username:                            defaultServerControlUsername,
 		Password:                            sp.ServerControlPassword,
 		TrustedServerCertificateFingerprint: sp.SHA256Fingerprint,
 		LogRequests:                         true,
@@ -138,7 +146,8 @@ func TestServerStart(t *testing.T) {
 	require.NoError(t, err)
 
 	// make sure root payload is valid JSON for the directory.
-	var dummy map[string]interface{}
+	var dummy map[string]any
+
 	err = json.Unmarshal(rootPayload, &dummy)
 	require.NoError(t, err)
 
@@ -196,7 +205,7 @@ func TestServerStartAsyncRepoConnect(t *testing.T) {
 	)
 
 	// run again - passing --async-repo-connect
-	e.RunAndProcessStderr(t, sp.ProcessOutput,
+	wait, _ := e.RunAndProcessStderr(t, sp.ProcessOutput,
 		"server", "start",
 		"--ui",
 		"--address=localhost:0",
@@ -206,11 +215,14 @@ func TestServerStartAsyncRepoConnect(t *testing.T) {
 		"--tls-generate-cert",
 		"--tls-generate-rsa-key-size=2048", // use shorter key size to speed up generation
 	)
+
+	defer wait()
+
 	t.Logf("detected server parameters %#v", sp)
 
 	controlClient, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             sp.BaseURL,
-		Username:                            "server-control",
+		Username:                            defaultServerControlUsername,
 		Password:                            sp.ServerControlPassword,
 		TrustedServerCertificateFingerprint: sp.SHA256Fingerprint,
 		LogRequests:                         true,
@@ -245,7 +257,7 @@ func TestServerStartAsyncRepoConnect(t *testing.T) {
 }
 
 func TestServerCreateAndConnectViaAPI(t *testing.T) {
-	t.Parallel()
+	t.Setenv("KOPIA_UPGRADE_LOCK_ENABLED", "true")
 
 	ctx := testlogging.Context(t)
 
@@ -263,13 +275,16 @@ func TestServerCreateAndConnectViaAPI(t *testing.T) {
 		},
 	}
 
-	e.RunAndProcessStderr(t, sp.ProcessOutput,
+	wait, _ := e.RunAndProcessStderr(t, sp.ProcessOutput,
 		"server", "start", "--ui",
 		"--address=localhost:0", "--random-password",
 		"--random-server-control-password",
 		"--tls-generate-cert",
 		"--tls-generate-rsa-key-size=2048", // use shorter key size to speed up generation,
 	)
+
+	defer wait()
+
 	t.Logf("detected server parameters %#v", sp)
 
 	cli, err := apiclient.NewKopiaAPIClient(apiclient.Options{
@@ -283,7 +298,7 @@ func TestServerCreateAndConnectViaAPI(t *testing.T) {
 
 	controlClient, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             sp.BaseURL,
-		Username:                            "server-control",
+		Username:                            defaultServerControlUsername,
 		Password:                            sp.ServerControlPassword,
 		TrustedServerCertificateFingerprint: sp.SHA256Fingerprint,
 		LogRequests:                         true,
@@ -300,6 +315,9 @@ func TestServerCreateAndConnectViaAPI(t *testing.T) {
 		ConnectRepositoryRequest: serverapi.ConnectRepositoryRequest{
 			Password: "foofoo",
 			Storage:  connInfo,
+			ClientOptions: repo.ClientOptions{
+				PermissiveCacheLoading: true,
+			},
 		},
 	}); err != nil {
 		t.Fatalf("create error: %v", err)
@@ -345,17 +363,21 @@ func TestConnectToExistingRepositoryViaAPI(t *testing.T) {
 	}
 
 	// at this point repository is not connected, start the server
-	e.RunAndProcessStderr(t, sp.ProcessOutput, "server", "start",
+	wait, _ := e.RunAndProcessStderr(t, sp.ProcessOutput, "server", "start",
 		"--ui", "--address=localhost:0", "--random-password",
 		"--random-server-control-password",
 		"--tls-generate-cert",
 		"--tls-generate-rsa-key-size=2048", // use shorter key size to speed up generation
-		"--override-hostname=fake-hostname", "--override-username=fake-username")
+		"--override-hostname=fake-hostname", "--override-username=fake-username",
+	)
+
+	defer wait()
+
 	t.Logf("detected server parameters %#v", sp)
 
 	controlClient, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             sp.BaseURL,
-		Username:                            "server-control",
+		Username:                            defaultServerControlUsername,
 		Password:                            sp.ServerControlPassword,
 		TrustedServerCertificateFingerprint: sp.SHA256Fingerprint,
 	})
@@ -411,6 +433,67 @@ func TestConnectToExistingRepositoryViaAPI(t *testing.T) {
 	}
 }
 
+func TestServerScheduling(t *testing.T) {
+	t.Parallel()
+
+	runner := testenv.NewInProcRunner(t)
+	e := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, runner)
+
+	emptyDir1 := testutil.TempDirectory(t)
+	emptyDir2 := testutil.TempDirectory(t)
+
+	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
+
+	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir, "--override-hostname=fake-hostname", "--override-username=fake-username")
+
+	e.RunAndExpectSuccess(t, "snapshot", "create", emptyDir1)
+	e.RunAndExpectSuccess(t, "snapshot", "create", emptyDir2)
+	e.RunAndExpectSuccess(t, "maintenance", "set", "--full-interval", "2s", "--pause-full", "0s")
+	e.RunAndExpectSuccess(t, "policy", "set", emptyDir1, "--snapshot-interval=1s")
+	e.RunAndExpectSuccess(t, "policy", "set", emptyDir2, "--snapshot-interval=2s")
+
+	var sp testutil.ServerParameters
+
+	// maintenance info before and after server run
+	var miBefore, miAfter struct {
+		maintenance.Params
+		maintenance.Schedule `json:"schedule"`
+	}
+
+	testutil.MustParseJSONLines(t, e.RunAndExpectSuccess(t, "maintenance", "info", "--json"), &miBefore)
+
+	e.SetLogOutput(true, "server-")
+
+	// start a server, run for 10 seconds and kill it.
+	wait, kill := e.RunAndProcessStderr(t, sp.ProcessOutput,
+		"server", "start",
+		"--address=localhost:0",
+		"--insecure",
+		"--without-password",
+		"--server-control-password=admin-pwd",
+	)
+
+	time.Sleep(10 * time.Second)
+
+	kill()
+	wait()
+
+	snaps1 := clitestutil.ListSnapshotsAndExpectSuccess(t, e, emptyDir1)[0].Snapshots
+	snaps2 := clitestutil.ListSnapshotsAndExpectSuccess(t, e, emptyDir2)[0].Snapshots
+
+	// 10 seconds should be enough to make 8+ snapshots of emptyDir1 and 4+ snapshots of emptyDir2
+	require.GreaterOrEqual(t, len(snaps1), 8)
+	require.GreaterOrEqual(t, len(snaps2), 4)
+	require.Less(t, len(snaps2), len(snaps1))
+
+	testutil.MustParseJSONLines(t, e.RunAndExpectSuccess(t, "maintenance", "info", "--json"), &miAfter)
+
+	// make sure we got some maintenance runs
+	numRuns := len(miAfter.Runs["cleanup-logs"]) - len(miBefore.Runs["cleanup-logs"])
+	require.Greater(t, numRuns, 2)
+	require.Less(t, numRuns, 50)
+}
+
 func TestServerStartInsecure(t *testing.T) {
 	t.Parallel()
 
@@ -428,13 +511,15 @@ func TestServerStartInsecure(t *testing.T) {
 	var sp testutil.ServerParameters
 
 	// server starts without password and no TLS when --insecure is provided.
-	e.RunAndProcessStderr(t, sp.ProcessOutput,
+	wait, _ := e.RunAndProcessStderr(t, sp.ProcessOutput,
 		"server", "start",
 		"--ui",
 		"--address=localhost:0",
 		"--without-password",
 		"--insecure",
 	)
+
+	defer wait()
 
 	cli, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL: sp.BaseURL,
@@ -445,12 +530,19 @@ func TestServerStartInsecure(t *testing.T) {
 
 	waitUntilServerStarted(ctx, t, cli)
 
-	// server fails to start without a password but with TLS.
-	e.RunAndExpectFailure(t, "server", "start", "--ui", "--address=localhost:0", "--tls-generate-cert", "--without-password")
+	// server fails to start with --without-password when `--insecure` is not specified
+	e.RunAndExpectFailure(t, "server", "start", "--ui", "--address=localhost:0", "--without-password") // without TLS
 
-	// server fails to start with TLS but without password.
-	e.RunAndExpectFailure(t, "server", "start", "--ui", "--address=localhost:0", "--password=foo")
-	e.RunAndExpectFailure(t, "server", "start", "--ui", "--address=localhost:0", "--without-password")
+	// with TLS
+	e.RunAndExpectFailure(t, "server", "start", "--ui",
+		"--address=localhost:0",
+		"--without-password",
+		"--tls-generate-cert",
+		"--tls-generate-rsa-key-size=2048", // use shorter key size to speed up generation,
+	)
+
+	// server fails to start when TLS is not configured and `--insecure` is not specified
+	e.RunAndExpectFailure(t, "server", "start", "--ui", "--address=localhost:0")
 }
 
 func verifyServerConnected(t *testing.T, cli *apiclient.KopiaAPIClient, want bool) *serverapi.StatusResponse {

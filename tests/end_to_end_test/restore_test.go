@@ -13,12 +13,15 @@ import (
 	"regexp"
 	"runtime"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kopia/kopia/cli"
 	"github.com/kopia/kopia/fs/localfs"
 	"github.com/kopia/kopia/internal/diff"
 	"github.com/kopia/kopia/internal/fshasher"
@@ -26,6 +29,7 @@ import (
 	"github.com/kopia/kopia/internal/stat"
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/internal/testutil"
+	"github.com/kopia/kopia/snapshot/restore"
 	"github.com/kopia/kopia/tests/clitestutil"
 	"github.com/kopia/kopia/tests/testdirtree"
 	"github.com/kopia/kopia/tests/testenv"
@@ -37,7 +41,31 @@ const (
 
 	overriddenFilePermissions = 0o651
 	overriddenDirPermissions  = 0o752
+
+	statsOnly = false
 )
+
+type fakeRestoreProgress struct {
+	mtx                  sync.Mutex
+	invocations          []restore.Stats
+	flushesCount         int
+	invocationAfterFlush bool
+}
+
+func (p *fakeRestoreProgress) SetCounters(s restore.Stats) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
+	p.invocations = append(p.invocations, s)
+
+	if p.flushesCount > 0 {
+		p.invocationAfterFlush = true
+	}
+}
+
+func (p *fakeRestoreProgress) Flush() {
+	p.flushesCount++
+}
 
 func TestRestoreCommand(t *testing.T) {
 	t.Parallel()
@@ -82,7 +110,26 @@ func TestRestoreCommand(t *testing.T) {
 
 	// Attempt to restore using snapshot ID
 	restoreFailDir := testutil.TempDirectory(t)
-	e.RunAndExpectSuccess(t, "restore", snapID, restoreFailDir)
+
+	// Remember original app customization
+	origCustomizeApp := runner.CustomizeApp
+
+	// Prepare fake restore progress and set it when needed
+	frp := &fakeRestoreProgress{}
+
+	runner.CustomizeApp = func(a *cli.App, kp *kingpin.Application) {
+		origCustomizeApp(a, kp)
+		a.SetRestoreProgress(frp)
+	}
+
+	e.RunAndExpectSuccess(t, "restore", snapID, restoreFailDir, "--progress-update-interval", "1ms")
+
+	runner.CustomizeApp = origCustomizeApp
+
+	// Expecting progress to be reported multiple times and flush to be invoked at the end
+	require.Greater(t, len(frp.invocations), 2, "expected multiple reports of progress")
+	require.Equal(t, 1, frp.flushesCount, "expected to have progress flushed once")
+	require.False(t, frp.invocationAfterFlush, "expected not to have reports after flush")
 
 	// Restore last snapshot
 	restoreDir := testutil.TempDirectory(t)
@@ -127,6 +174,30 @@ func TestRestoreCommand(t *testing.T) {
 
 	// Attempt to restore into a target directory that already exists
 	e.RunAndExpectFailure(t, "restore", rootID, restoreDir, "--no-overwrite-files")
+
+	// Attempt to restore into a target directory with extra files, and check they have been deleted
+	extraFile := filepath.Join(restoreDir, "extraFile.txt")
+
+	err := os.WriteFile(extraFile, []byte("extra file contents"), 0o644)
+	require.NoError(t, err)
+
+	extraDir := filepath.Join(restoreDir, "extraDir")
+	err = os.Mkdir(extraDir, 0o766)
+	require.NoError(t, err)
+
+	// Add extra files to the extra directory
+	for i := range 10 {
+		extraFileInDir := filepath.Join(extraDir, fmt.Sprint("extraFile-", i))
+
+		err := os.WriteFile(extraFileInDir, []byte("extra file contents"), 0o644)
+		require.NoError(t, err)
+	}
+
+	e.RunAndExpectSuccess(t, "restore", rootID, restoreDir)
+	compareDirsWithChange(t, source, restoreDir, 11, 1)
+
+	e.RunAndExpectSuccess(t, "restore", rootID, restoreDir, "--delete-extra")
+	compareDirs(t, source, restoreDir)
 }
 
 func compareDirs(t *testing.T, source, restoreDir string) {
@@ -147,12 +218,42 @@ func compareDirs(t *testing.T, source, restoreDir string) {
 	require.NoError(t, err)
 
 	if !assert.Equal(t, wantHash, gotHash, "restored directory hash does not match source's hash") {
-		cmp, err := diff.NewComparer(os.Stderr)
+		cmp, err := diff.NewComparer(os.Stderr, statsOnly)
 		require.NoError(t, err)
 
 		cmp.DiffCommand = "cmp"
-		_ = cmp.Compare(ctx, s, r)
+		cmp.Compare(ctx, s, r)
 	}
+}
+
+func compareDirsWithChange(t *testing.T, source, restoreDir string, expectedExtraFiles, expectedExtraDirs int) {
+	t.Helper()
+
+	// Restored contents should match source
+	s, err := localfs.Directory(source)
+	require.NoError(t, err)
+	wantHash, err := fshasher.Hash(testlogging.Context(t), s)
+	require.NoError(t, err)
+
+	// check restored contents
+	r, err := localfs.Directory(restoreDir)
+	require.NoError(t, err)
+
+	ctx := testlogging.Context(t)
+	gotHash, err := fshasher.Hash(ctx, r)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, wantHash, gotHash)
+
+	cmp, err := diff.NewComparer(os.Stderr, statsOnly)
+	require.NoError(t, err)
+
+	stats, err := cmp.Compare(ctx, s, r)
+	require.NoError(t, err)
+
+	require.Equal(t, uint32(expectedExtraFiles), stats.FileEntries.Added, "unexpected number of extra files")
+
+	require.Equal(t, uint32(expectedExtraDirs), stats.DirectoryEntries.Added, "unexpected number of extra directories")
 }
 
 func TestSnapshotRestore(t *testing.T) {
@@ -182,9 +283,7 @@ func TestSnapshotRestore(t *testing.T) {
 
 	// create a file with well-known name.
 	f, err := os.Create(filepath.Join(source, "single-file"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	fmt.Fprintf(f, "some-data")
 	f.Close()
@@ -261,7 +360,7 @@ func TestSnapshotRestore(t *testing.T) {
 
 	// restoring single file
 	e.RunAndExpectSuccess(t, "snapshot", "restore", rootID+"/single-file", filepath.Join(restoreByOIDFile, "output-file"))
-	verifyFileMode(t, filepath.Join(restoreByOIDFile, "output-file"), os.FileMode(0o651))
+	verifyFileMode(t, filepath.Join(restoreByOIDFile, "output-file"), overriddenFilePermissions)
 
 	// Restore last snapshot using the snapshot ID
 	e.RunAndExpectSuccess(t, "snapshot", "restore", snapID, restoreDir)
@@ -299,9 +398,9 @@ func TestSnapshotRestore(t *testing.T) {
 
 	t.Run("modes", func(t *testing.T) {
 		for _, tc := range cases {
-			tc := tc
 			t.Run(tc.fname, func(t *testing.T) {
 				t.Parallel()
+
 				fname := filepath.Join(restoreArchiveDir, tc.fname)
 				e.RunAndExpectSuccess(t, append([]string{"snapshot", "restore", snapID, fname}, tc.args...)...)
 				tc.validator(t, fname)
@@ -427,9 +526,7 @@ func TestRestoreSnapshotOfSingleFile(t *testing.T) {
 	sourceFile := filepath.Join(sourceDir, "single-file")
 
 	f, err := os.Create(sourceFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	fmt.Fprintf(f, "some-data")
 	f.Close()
@@ -465,21 +562,22 @@ func TestRestoreSnapshotOfSingleFile(t *testing.T) {
 	verifyFileMode(t, filepath.Join(restoreDir, "restored-2"), os.FileMode(0o653))
 
 	if runtime.GOOS != windowsOSName {
+		overriddenFilePermissions := 0o654 | os.ModeSetuid
+
 		// change source file permissions and create one more snapshot
-		// at this poing we will have multiple snapshot manifests with one root but different attributes.
-		os.Chmod(sourceFile, 0o654)
+		// at this point we will have multiple snapshot manifests with one root but different attributes.
+		os.Chmod(sourceFile, overriddenFilePermissions)
 		e.RunAndExpectSuccess(t, "snapshot", "create", sourceFile)
 
 		// when restoring by root Kopia needs to pick which manifest to apply since they are conflicting
 		// We're passing --consistent-attributes which causes it to fail, since otherwise we'd restore arbitrary
 		// top-level object permissions.
 		e.RunAndExpectFailure(t, "snapshot", "restore", rootID, "--consistent-attributes", filepath.Join(restoreDir, "restored-3"))
+
+		// Without the flag kopia picks the attributes from the latest snapshot.
+		e.RunAndExpectSuccess(t, "snapshot", "restore", rootID, filepath.Join(restoreDir, "restored-3"))
+		verifyFileMode(t, filepath.Join(restoreDir, "restored-3"), overriddenFilePermissions)
 	}
-
-	// Without the flag kopia picks the attributes from the latest snapshot.
-	e.RunAndExpectSuccess(t, "snapshot", "restore", rootID, filepath.Join(restoreDir, "restored-3"))
-
-	verifyFileMode(t, filepath.Join(restoreDir, "restored-3"), os.FileMode(0o654))
 
 	// restoring using snapshot ID is unambiguous and always produces file with 0o653
 	e.RunAndExpectSuccess(t, "snapshot", "restore", snapID, filepath.Join(restoreDir, "restored-4"))
@@ -496,7 +594,7 @@ func TestSnapshotSparseRestore(t *testing.T) {
 
 	// The behavior of the Darwin (APFS) is not published, and sparse restores
 	// are not supported on Windows. As such, we cannot (reliably) test them here.
-	testutil.TestSkipUnlessLinux(t)
+	testutil.SkipTestUnlessLinux(t)
 
 	runner := testenv.NewInProcRunner(t)
 	e := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, runner)
@@ -691,39 +789,36 @@ func TestSnapshotSparseRestore(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		sourceFile := filepath.Join(sourceDir, c.name+"_source")
+		t.Run(c.name, func(t *testing.T) {
+			if c.name == "blk_hole_on_buf_boundary" && runtime.GOARCH == "arm64" {
+				t.Skip("skipping on arm64 due to a failure - https://github.com/kopia/kopia/issues/3178")
+			}
 
-		fd, err := os.Create(sourceFile)
-		if err != nil {
-			t.Fatal(err)
-		}
+			sourceFile := filepath.Join(sourceDir, c.name+"_source")
 
-		err = fd.Truncate(int64(c.trunc))
-		if err != nil {
-			t.Fatal(err)
-		}
+			fd, err := os.Create(sourceFile)
+			require.NoError(t, err)
 
-		for _, d := range c.data {
-			fd.WriteAt(bytes.Repeat(d.slice, int(d.rep)), int64(d.off))
-		}
+			err = fd.Truncate(int64(c.trunc))
+			require.NoError(t, err)
 
-		verifyFileSize(t, sourceFile, c.sLog, c.sPhys)
-		e.RunAndExpectSuccess(t, "snapshot", "create", sourceFile)
+			for _, d := range c.data {
+				fd.WriteAt(bytes.Repeat(d.slice, int(d.rep)), int64(d.off))
+			}
 
-		si := clitestutil.ListSnapshotsAndExpectSuccess(t, e, sourceFile)
-		if got, want := len(si), 1; got != want {
-			t.Fatalf("got %v sources, wanted %v", got, want)
-		}
+			verifyFileSize(t, sourceFile, c.sLog, c.sPhys)
+			e.RunAndExpectSuccess(t, "snapshot", "create", sourceFile)
 
-		if got, want := len(si[0].Snapshots), 1; got != want {
-			t.Fatalf("got %v snapshots, wanted %v", got, want)
-		}
+			si := clitestutil.ListSnapshotsAndExpectSuccess(t, e, sourceFile)
+			require.Len(t, si, 1)
+			require.Len(t, si[0].Snapshots, 1)
 
-		snapID := si[0].Snapshots[0].SnapshotID
-		restoreFile := filepath.Join(restoreDir, c.name+"_restore")
+			snapID := si[0].Snapshots[0].SnapshotID
+			restoreFile := filepath.Join(restoreDir, c.name+"_restore")
 
-		e.RunAndExpectSuccess(t, "snapshot", "restore", snapID, "--write-sparse-files", restoreFile)
-		verifyFileSize(t, restoreFile, c.rLog, c.rPhys)
+			e.RunAndExpectSuccess(t, "snapshot", "restore", snapID, "--write-sparse-files", restoreFile)
+			verifyFileSize(t, restoreFile, c.rLog, c.rPhys)
+		})
 	}
 }
 
@@ -731,15 +826,11 @@ func verifyFileSize(t *testing.T, fname string, logical, physical uint64) {
 	t.Helper()
 
 	st, err := os.Stat(fname)
-	if err != nil {
-		t.Fatalf("error verifying file size: %v", err)
-	}
+	require.NoError(t, err)
 
 	realLogical := uint64(st.Size())
 
-	if realLogical != logical {
-		t.Errorf("%s logical file size incorrect: expected %d, got %d", fname, logical, realLogical)
-	}
+	require.Equal(t, logical, realLogical)
 
 	if runtime.GOOS == windowsOSName {
 		t.Logf("getting physical file size is not supported on windows")
@@ -747,13 +838,9 @@ func verifyFileSize(t *testing.T, fname string, logical, physical uint64) {
 	}
 
 	realPhysical, err := stat.GetFileAllocSize(fname)
-	if err != nil {
-		t.Fatalf("error verifying file size: %v", err)
-	}
+	require.NoError(t, err)
 
-	if realPhysical != physical {
-		t.Errorf("%s physical file size incorrect: expected %d, got %d", fname, physical, realPhysical)
-	}
+	require.Equal(t, physical, realPhysical)
 }
 
 func verifyFileMode(t *testing.T, filename string, want os.FileMode) {
@@ -765,9 +852,7 @@ func verifyFileMode(t *testing.T, filename string, want os.FileMode) {
 	}
 
 	s, err := os.Lstat(filename)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// make sure we restored permissions correctly
 	if s.Mode() != want {
@@ -779,20 +864,17 @@ func verifyValidZipFile(t *testing.T, fname string) {
 	t.Helper()
 
 	zr, err := zip.OpenReader(fname)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	defer zr.Close()
+	zr.Close()
 }
 
 func verifyValidTarFile(t *testing.T, fname string) {
 	t.Helper()
 
 	f, err := os.Open(fname)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer f.Close()
 
 	verifyValidTarReader(t, tar.NewReader(f))
@@ -815,15 +897,12 @@ func verifyValidTarGzipFile(t *testing.T, fname string) {
 	t.Helper()
 
 	f, err := os.Open(fname)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer f.Close()
 
 	gz, err := gzip.NewReader(f)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	verifyValidTarReader(t, tar.NewReader(gz))
 }
@@ -842,9 +921,7 @@ func TestSnapshotRestoreByPath(t *testing.T) {
 
 	// create a file with well-known name.
 	f, err := os.Create(filepath.Join(source, "single-file"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	fmt.Fprintf(f, "some-data")
 	f.Close()
@@ -867,6 +944,7 @@ func TestRestoreByPathWithoutTarget(t *testing.T) {
 	e := testenv.NewCLITest(t, testenv.RepoFormatNotImportant, runner)
 
 	defer e.RunAndExpectSuccess(t, "repo", "disconnect")
+
 	e.RunAndExpectSuccess(t, "repo", "create", "filesystem", "--path", e.RepoDir)
 
 	srcdir := testutil.TempDirectory(t)
@@ -886,6 +964,6 @@ func TestRestoreByPathWithoutTarget(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, originalData, data)
 
-	// Must pass snapshot time
-	e.RunAndExpectFailure(t, "restore", srcdir)
+	// Defaults to latest snapshot time
+	e.RunAndExpectSuccess(t, "restore", srcdir)
 }

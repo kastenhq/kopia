@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kopia/kopia/fs/localfs"
-	"github.com/kopia/kopia/internal/atomicfile"
+	"github.com/kopia/kopia/internal/ospath"
 	"github.com/kopia/kopia/repo/object"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/restore"
@@ -146,7 +146,7 @@ func TestShallowFullCycle(t *testing.T) {
 	fpathinlong := filepath.Join(dirpathlong, "nestedfile")
 
 	require.NoError(t, os.Mkdir(dirpathlong, 0o755))
-	testdirtree.MustCreateRandomFile(t, atomicfile.MaybePrefixLongFilenameOnWindows(fpathinlong), testdirtree.DirectoryTreeOptions{}, (*testdirtree.DirectoryTreeCounters)(nil))
+	testdirtree.MustCreateRandomFile(t, ospath.SafeLongFilename(fpathinlong), testdirtree.DirectoryTreeOptions{}, (*testdirtree.DirectoryTreeCounters)(nil))
 
 	e.RunAndExpectSuccess(t, "snapshot", "create", source)
 	sources := clitestutil.ListSnapshotsAndExpectSuccess(t, e)
@@ -224,9 +224,8 @@ func addOneFile(m *mutatorArgs) {
 func doNothing(_ *mutatorArgs) {
 }
 
-// mplfow makes atomicfile.MaybePrefixLongFilenameOnWindows easier to type.
-func mplfow(fname string) string {
-	return atomicfile.MaybePrefixLongFilenameOnWindows(fname)
+func longName(fname string) string {
+	return ospath.SafeLongFilename(fname)
 }
 
 // moveDirectory moves a directory from one location to another (in the
@@ -252,11 +251,11 @@ func moveDirectory(m *mutatorArgs) {
 	require.NoError(m.t, os.Mkdir(neworiginaldir, 0o755))
 
 	// 3. move shallow dir into new dir, original dir into new dir
-	require.NoError(m.t, os.Rename(mplfow(dirinshallow), mplfow(filepath.Join(newshallowdir, relpath))))
-	require.NoError(m.t, os.Rename(mplfow(filepath.Join(m.original, relpathinreal)), mplfow(filepath.Join(neworiginaldir, relpathinreal))))
+	require.NoError(m.t, os.Rename(longName(dirinshallow), longName(filepath.Join(newshallowdir, relpath))))
+	require.NoError(m.t, os.Rename(longName(filepath.Join(m.original, relpathinreal)), longName(filepath.Join(neworiginaldir, relpathinreal))))
 
 	// 4. fix new directory timestamp to be the same
-	fi, err := os.Stat(mplfow(newshallowdir))
+	fi, err := os.Stat(longName(newshallowdir))
 	require.NoError(m.t, err)
 	require.NoError(m.t, os.Chtimes(neworiginaldir, fi.ModTime(), fi.ModTime()))
 	require.NoError(m.t, os.Chtimes(newshallowdir, fi.ModTime(), fi.ModTime()))
@@ -283,11 +282,11 @@ func moveFile(m *mutatorArgs) {
 	require.NoError(m.t, os.Mkdir(neworiginaldir, 0o755))
 
 	// 3. move shallow file into new dir, original dir into new dir
-	require.NoError(m.t, os.Rename(mplfow(fileinshallow), mplfow(filepath.Join(newshallowdir, relpath))))
-	require.NoError(m.t, os.Rename(mplfow(filepath.Join(m.original, localfs.TrimShallowSuffix(relpath))), mplfow(filepath.Join(neworiginaldir, localfs.TrimShallowSuffix(relpath)))))
+	require.NoError(m.t, os.Rename(longName(fileinshallow), longName(filepath.Join(newshallowdir, relpath))))
+	require.NoError(m.t, os.Rename(longName(filepath.Join(m.original, localfs.TrimShallowSuffix(relpath))), longName(filepath.Join(neworiginaldir, localfs.TrimShallowSuffix(relpath)))))
 
 	// 4. fix new directory timestamp to be the same
-	fi, err := os.Stat(mplfow(newshallowdir))
+	fi, err := os.Stat(longName(newshallowdir))
 	require.NoError(m.t, err)
 	require.NoError(m.t, os.Chtimes(neworiginaldir, fi.ModTime(), fi.ModTime()))
 	require.NoError(m.t, os.Chtimes(newshallowdir, fi.ModTime(), fi.ModTime()))
@@ -328,7 +327,7 @@ func deepenSubtreeFile(m *mutatorArgs) {
 // deepenOneSubtreeLevel reifies a shallow directory entry with one level
 // of reification. In particular: given a path into a shallow restored
 // tree, we restore a single shallow directory and the directory should
-// become a real (mutable) directory contaning shallow entries.
+// become a real (mutable) directory containing shallow entries.
 // TODO(rjk): generalize the testing of the shallow restoration
 // validation to make sure that the restored directory of this form has
 // the correct form.
@@ -627,6 +626,7 @@ func findRealFileDir(t *testing.T, original string) (dir, file string) {
 		case file != "" && dir != "":
 			return filepath.SkipDir
 		}
+
 		return nil
 	})
 	require.NoError(t, err)
@@ -655,7 +655,7 @@ func (rdc *repoDirEntryCache) repoRootRel(t *testing.T, fpath string) string {
 }
 
 // getRepoDirEntry retrieves the directory entry for rdc.rootid/rop via kopia
-// show of the repository rdc.rootid's directory contaning rdc.rootid/rop.
+// show of the repository rdc.rootid's directory containing rdc.rootid/rop.
 // Assumption: repository paths are paths and not filepaths.
 func (rdc *repoDirEntryCache) getRepoDirEntry(t *testing.T, rop string) *snapshot.DirEntry {
 	t.Helper()
@@ -700,7 +700,7 @@ func (rdc *repoDirEntryCache) getRepoDirEntry(t *testing.T, rop string) *snapsho
 	return nil
 }
 
-// validateXattr checks that shallowrestore absolute path srp has placeholder
+// validatePlaceholder checks that shallowrestore absolute path srp has placeholder
 // DirEntry value equal to the in-repository DirEntry for rootid/rop.
 func (rdc *repoDirEntryCache) validatePlaceholder(t *testing.T, rop, srp string) {
 	t.Helper()
@@ -760,7 +760,7 @@ func findFileDir(t *testing.T, shallow string) (dirinshallow, fileinshallow stri
 		fi, err := os.Lstat(f)
 		require.NoError(t, err)
 
-		if !(fi.Mode().IsDir() || fi.Mode().IsRegular()) {
+		if !fi.Mode().IsDir() && !fi.Mode().IsRegular() {
 			continue
 		}
 
@@ -785,13 +785,14 @@ func getShallowInfo(t *testing.T, srp string) (string, os.FileInfo) {
 	t.Helper()
 
 	const ENTRYTYPES = 3
+
 	shallowinfos := make([]os.FileInfo, ENTRYTYPES)
 	errors := make([]error, ENTRYTYPES)
 	paths := make([]string, ENTRYTYPES)
 
 	v := -1
 
-	for i, s := range []string{"", localfs.ShallowEntrySuffix, dIRPH} { // nolint(wsl)
+	for i, s := range []string{"", localfs.ShallowEntrySuffix, dIRPH} {
 		paths[i] = srp + s
 		shallowinfos[i], errors[i] = os.Lstat(paths[i])
 
@@ -804,7 +805,7 @@ func getShallowInfo(t *testing.T, srp string) (string, os.FileInfo) {
 	// the file paths should exist.)
 	errcount := 0
 
-	for _, e := range errors { // nolint(wsl)
+	for _, e := range errors {
 		if e != nil {
 			errcount++
 		}
@@ -946,7 +947,7 @@ func verifyShallowVsOriginalFile(t *testing.T, rdc *repoDirEntryCache, shallow, 
 func makeLongName(c rune) string {
 	// TODO(rjk): not likely to work on plan9.
 	buffy := make([]byte, 0, restore.MaxFilenameLength)
-	for i := 0; i < restore.MaxFilenameLength; i++ {
+	for range restore.MaxFilenameLength {
 		buffy = append(buffy, byte(c))
 	}
 

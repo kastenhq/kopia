@@ -16,9 +16,9 @@ import (
 
 type commandBenchmarkEcc struct {
 	blockSize   atunits.Base2Bytes
-	repeat      int
+	repeat      uint
 	optionPrint bool
-	parallel    int
+	parallel    uint
 
 	out textOutput
 }
@@ -26,8 +26,8 @@ type commandBenchmarkEcc struct {
 func (c *commandBenchmarkEcc) setup(svc appServices, parent commandParent) {
 	cmd := parent.Command("ecc", "Run ECC benchmarks")
 	cmd.Flag("block-size", "Size of a block to encrypt").Default("10MB").BytesVar(&c.blockSize)
-	cmd.Flag("repeat", "Number of repetitions").Default("100").IntVar(&c.repeat)
-	cmd.Flag("parallel", "Number of parallel goroutines").Default("1").IntVar(&c.parallel)
+	cmd.Flag("repeat", "Number of repetitions").Default("100").UintVar(&c.repeat)
+	cmd.Flag("parallel", "Number of parallel goroutines").Default("1").UintVar(&c.parallel)
 	cmd.Flag("print-options", "Print out options usable for repository creation").BoolVar(&c.optionPrint)
 	cmd.Action(svc.noRepositoryAction(c.run))
 	c.out.setup(svc)
@@ -47,10 +47,10 @@ func (c *commandBenchmarkEcc) run(ctx context.Context) error {
 
 	for ndx, r := range results {
 		c.out.printStdout("%3d. %-30v %12v/s %12v/s   %6v%% [%v]", ndx, r.ecc,
-			units.BytesStringBase2(int64(r.throughputEncoding)),
-			units.BytesStringBase2(int64(r.throughputDecoding)),
-			int(math.Round(r.growth*100)), //nolint:gomnd
-			units.BytesStringBase2(int64(r.size)),
+			units.BytesString(r.throughputEncoding),
+			units.BytesString(r.throughputDecoding),
+			int(math.Round(r.growth*100)), //nolint:mnd
+			units.BytesString(r.size),
 		)
 
 		if c.optionPrint {
@@ -70,7 +70,9 @@ func (c *commandBenchmarkEcc) runBenchmark(ctx context.Context) []eccBenchResult
 	var results []eccBenchResult
 
 	data := make([]byte, c.blockSize)
-	for i := uint64(0); i < uint64(c.blockSize); i++ {
+
+	//nolint:gosec
+	for i := range uint64(c.blockSize) {
 		data[i] = byte(i%255 + 1)
 	}
 
@@ -95,18 +97,16 @@ func (c *commandBenchmarkEcc) runBenchmark(ctx context.Context) []eccBenchResult
 
 			repeat := c.repeat
 
-			runInParallel(c.parallel, func() interface{} {
+			runInParallelNoInputNoResult(c.parallel, func() {
 				var tmp gather.WriteBuffer
 				defer tmp.Close()
 
-				for i := 0; i < repeat; i++ {
+				for range repeat {
 					if encerr := impl.Encrypt(input, nil, &tmp); encerr != nil {
 						log(ctx).Errorf("encoding failed: %v", encerr)
 						break
 					}
 				}
-
-				return nil
 			})
 
 			_, bytesPerSecondEncoding := tt.Completed(float64(c.parallel) * float64(len(data)) * float64(repeat))
@@ -123,18 +123,16 @@ func (c *commandBenchmarkEcc) runBenchmark(ctx context.Context) []eccBenchResult
 			input = encodedBuffer.Bytes()
 			tt = timetrack.Start()
 
-			runInParallel(c.parallel, func() interface{} {
+			runInParallelNoInputNoResult(c.parallel, func() {
 				var tmp gather.WriteBuffer
 				defer tmp.Close()
 
-				for i := 0; i < repeat; i++ {
+				for range repeat {
 					if decerr := impl.Decrypt(input, nil, &tmp); decerr != nil {
 						log(ctx).Errorf("decoding failed: %v", decerr)
 						break
 					}
 				}
-
-				return nil
 			})
 
 			_, bytesPerSecondDecoding := tt.Completed(float64(c.parallel) * float64(len(data)) * float64(repeat))
@@ -158,12 +156,4 @@ type eccBenchResult struct {
 	throughputDecoding float64
 	size               int
 	growth             float64
-}
-
-func min(a, b float64) float64 {
-	if a <= b {
-		return a
-	}
-
-	return b
 }

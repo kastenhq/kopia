@@ -1,5 +1,4 @@
 //go:build darwin || (linux && amd64)
-// +build darwin linux,amd64
 
 // Package snapmeta provides Kopia implementations of Persister and Snapshotter.
 package snapmeta
@@ -116,7 +115,7 @@ func (store *KopiaPersister) LoadMetadata() error {
 	}
 
 	if len(snapIDs) == 0 {
-		return nil // No snapshot IDs fouund in repository
+		return nil // No snapshot IDs found in repository
 	}
 
 	lastSnapID := snapIDs[len(snapIDs)-1]

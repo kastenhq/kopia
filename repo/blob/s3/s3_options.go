@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/kopia/kopia/repo/blob/throttling"
+	"github.com/kopia/kopia/repo/jsonencoding"
 )
 
 // Options defines options for S3-based storage.
@@ -17,10 +18,18 @@ type Options struct {
 	Endpoint       string `json:"endpoint"`
 	DoNotUseTLS    bool   `json:"doNotUseTLS,omitempty"`
 	DoNotVerifyTLS bool   `json:"doNotVerifyTLS,omitempty"`
+	RootCA         []byte `json:"rootCA,omitempty"`
 
 	AccessKeyID     string `json:"accessKeyID"`
 	SecretAccessKey string `json:"secretAccessKey" kopia:"sensitive"`
 	SessionToken    string `json:"sessionToken" kopia:"sensitive"`
+
+	// Used for assume role authentication.
+	RoleARN      string                `json:"roleARN"`
+	SessionName  string                `json:"sessionName"`
+	RoleDuration jsonencoding.Duration `json:"duration"`
+	RoleEndpoint string                `json:"roleEndpoint"`
+	RoleRegion   string                `json:"roleRegion"`
 
 	// Region is an optional region to pass in authorization header.
 	Region string `json:"region,omitempty"`

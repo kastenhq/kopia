@@ -2,17 +2,20 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/fatih/color"
+	"golang.org/x/term"
 
 	"github.com/kopia/kopia/internal/timetrack"
 	"github.com/kopia/kopia/internal/units"
-	"github.com/kopia/kopia/snapshot/snapshotfs"
+	"github.com/kopia/kopia/snapshot/upload"
 )
 
 const (
@@ -20,46 +23,44 @@ const (
 )
 
 type progressFlags struct {
-	enableProgress         bool
-	progressUpdateInterval time.Duration
-	out                    textOutput
+	enableProgress              bool
+	progressEstimationType      string
+	adaptiveEstimationThreshold int64
+	progressUpdateInterval      time.Duration
+	out                         textOutput
 }
 
 func (p *progressFlags) setup(svc appServices, app *kingpin.Application) {
-	app.Flag("progress", "Enable progress bar").Hidden().Default("true").BoolVar(&p.enableProgress)
+	progressDefault := "false"
+
+	if fd, err := intFd(os.Stdout); err == nil && term.IsTerminal(fd) {
+		progressDefault = "true"
+	}
+
+	app.Flag("progress", "Enable progress output").Default(progressDefault).BoolVar(&p.enableProgress)
+	app.Flag("progress-estimation-type", "Set type of estimation of the data to be snapshotted").Hidden().Default(upload.EstimationTypeClassic).
+		EnumVar(&p.progressEstimationType, upload.EstimationTypeClassic, upload.EstimationTypeRough, upload.EstimationTypeAdaptive)
 	app.Flag("progress-update-interval", "How often to update progress information").Hidden().Default("300ms").DurationVar(&p.progressUpdateInterval)
+	app.Flag("adaptive-estimation-threshold", "Sets the threshold below which the classic estimation method will be used").Hidden().Default(strconv.FormatInt(upload.AdaptiveEstimationThreshold, 10)).Int64Var(&p.adaptiveEstimationThreshold)
 	p.out.setup(svc)
 }
 
 type cliProgress struct {
-	snapshotfs.NullUploadProgress
+	upload.NullUploadProgress
 
 	// all int64 must precede all int32 due to alignment requirements on ARM
-	// +checkatomic
-	uploadedBytes int64
-	// +checkatomic
-	cachedBytes int64
-	// +checkatomic
-	hashedBytes    int64
-	outputThrottle timetrack.Throttle // is int64
-
-	// +checkatomic
-	cachedFiles int32
-	// +checkatomic
-	inProgressHashing int32
-	// +checkatomic
-	hashedFiles int32
-	// +checkatomic
-	uploadedFiles int32
-	// +checkatomic
-	ignoredErrorCount int32
-	// +checkatomic
-	fatalErrorCount int32
-
-	// +checkatomic
-	uploading int32
-	// +checkatomic
-	uploadFinished int32
+	uploadedBytes     atomic.Int64
+	cachedBytes       atomic.Int64
+	hashedBytes       atomic.Int64
+	outputThrottle    timetrack.Throttle
+	cachedFiles       atomic.Int32
+	inProgressHashing atomic.Int32
+	hashedFiles       atomic.Int32
+	uploadedFiles     atomic.Int32
+	ignoredErrorCount atomic.Int32
+	fatalErrorCount   atomic.Int32
+	uploading         atomic.Bool
+	uploadFinished    atomic.Bool
 
 	outputMutex sync.Mutex
 
@@ -70,7 +71,7 @@ type cliProgress struct {
 
 	uploadStartTime timetrack.Estimator // +checklocksignore
 
-	estimatedFileCount  int   // +checklocksignore
+	estimatedFileCount  int64 // +checklocksignore
 	estimatedTotalBytes int64 // +checklocksignore
 
 	// indicates shared instance that does not reset counters at the beginning of upload.
@@ -79,46 +80,51 @@ type cliProgress struct {
 	progressFlags
 }
 
-func (p *cliProgress) HashingFile(fname string) {
-	atomic.AddInt32(&p.inProgressHashing, 1)
+// Enabled returns true when progress is enabled.
+func (p *cliProgress) Enabled() bool {
+	return p.enableProgress
 }
 
-func (p *cliProgress) FinishedHashingFile(fname string, totalSize int64) {
-	atomic.AddInt32(&p.hashedFiles, 1)
-	atomic.AddInt32(&p.inProgressHashing, -1)
+func (p *cliProgress) HashingFile(_ string) {
+	p.inProgressHashing.Add(1)
+}
+
+func (p *cliProgress) FinishedHashingFile(_ string, _ int64) {
+	p.hashedFiles.Add(1)
+	p.inProgressHashing.Add(-1)
 	p.maybeOutput()
 }
 
 func (p *cliProgress) UploadedBytes(numBytes int64) {
-	atomic.AddInt64(&p.uploadedBytes, numBytes)
-	atomic.AddInt32(&p.uploadedFiles, 1)
+	p.uploadedBytes.Add(numBytes)
+	p.uploadedFiles.Add(1)
 
 	p.maybeOutput()
 }
 
 func (p *cliProgress) HashedBytes(numBytes int64) {
-	atomic.AddInt64(&p.hashedBytes, numBytes)
+	p.hashedBytes.Add(numBytes)
 	p.maybeOutput()
 }
 
 func (p *cliProgress) Error(path string, err error, isIgnored bool) {
 	if isIgnored {
-		atomic.AddInt32(&p.ignoredErrorCount, 1)
+		p.ignoredErrorCount.Add(1)
 		p.output(warningColor, fmt.Sprintf("Ignored error when processing \"%v\": %v\n", path, err))
 	} else {
-		atomic.AddInt32(&p.fatalErrorCount, 1)
-		p.output(warningColor, fmt.Sprintf("Error when processing \"%v\": %v\n", path, err))
+		p.fatalErrorCount.Add(1)
+		p.output(errorColor, fmt.Sprintf("Error when processing \"%v\": %v\n", path, err))
 	}
 }
 
-func (p *cliProgress) CachedFile(fname string, numBytes int64) {
-	atomic.AddInt64(&p.cachedBytes, numBytes)
-	atomic.AddInt32(&p.cachedFiles, 1)
+func (p *cliProgress) CachedFile(_ string, numBytes int64) {
+	p.cachedBytes.Add(numBytes)
+	p.cachedFiles.Add(1)
 	p.maybeOutput()
 }
 
 func (p *cliProgress) maybeOutput() {
-	if atomic.LoadInt32(&p.uploading) == 0 {
+	if !p.uploading.Load() {
 		return
 	}
 
@@ -131,14 +137,14 @@ func (p *cliProgress) output(col *color.Color, msg string) {
 	p.outputMutex.Lock()
 	defer p.outputMutex.Unlock()
 
-	hashedBytes := atomic.LoadInt64(&p.hashedBytes)
-	cachedBytes := atomic.LoadInt64(&p.cachedBytes)
-	uploadedBytes := atomic.LoadInt64(&p.uploadedBytes)
-	cachedFiles := atomic.LoadInt32(&p.cachedFiles)
-	inProgressHashing := atomic.LoadInt32(&p.inProgressHashing)
-	hashedFiles := atomic.LoadInt32(&p.hashedFiles)
-	ignoredErrorCount := atomic.LoadInt32(&p.ignoredErrorCount)
-	fatalErrorCount := atomic.LoadInt32(&p.fatalErrorCount)
+	hashedBytes := p.hashedBytes.Load()
+	cachedBytes := p.cachedBytes.Load()
+	uploadedBytes := p.uploadedBytes.Load()
+	cachedFiles := p.cachedFiles.Load()
+	inProgressHashing := p.inProgressHashing.Load()
+	hashedFiles := p.hashedFiles.Load()
+	ignoredErrorCount := p.ignoredErrorCount.Load()
+	fatalErrorCount := p.fatalErrorCount.Load()
 
 	line := fmt.Sprintf(
 		" %v %v hashing, %v hashed (%v), %v cached (%v), uploaded %v",
@@ -147,12 +153,12 @@ func (p *cliProgress) output(col *color.Color, msg string) {
 		inProgressHashing,
 
 		hashedFiles,
-		units.BytesStringBase10(hashedBytes),
+		units.BytesString(hashedBytes),
 
 		cachedFiles,
-		units.BytesStringBase10(cachedBytes),
+		units.BytesString(cachedBytes),
 
-		units.BytesStringBase10(uploadedBytes),
+		units.BytesString(uploadedBytes),
 	)
 
 	if fatalErrorCount > 0 {
@@ -177,7 +183,7 @@ func (p *cliProgress) output(col *color.Color, msg string) {
 	}
 
 	if est, ok := p.uploadStartTime.Estimate(float64(hashedBytes+cachedBytes), float64(p.estimatedTotalBytes)); ok {
-		line += fmt.Sprintf(", estimated %v", units.BytesStringBase10(p.estimatedTotalBytes))
+		line += fmt.Sprintf(", estimated %v", units.BytesString(p.estimatedTotalBytes))
 		line += fmt.Sprintf(" (%.1f%%)", est.PercentComplete)
 		line += fmt.Sprintf(" %v left", est.Remaining)
 	} else {
@@ -197,7 +203,7 @@ func (p *cliProgress) output(col *color.Color, msg string) {
 
 // +checklocks:p.outputMutex
 func (p *cliProgress) spinnerCharacter() string {
-	if atomic.LoadInt32(&p.uploadFinished) == 1 {
+	if p.uploadFinished.Load() {
 		return "*"
 	}
 
@@ -208,22 +214,21 @@ func (p *cliProgress) spinnerCharacter() string {
 	return s
 }
 
-// +checklocksignore.
 func (p *cliProgress) StartShared() {
 	*p = cliProgress{
-		uploading:       1,
 		uploadStartTime: timetrack.Start(),
 		shared:          true,
 		progressFlags:   p.progressFlags,
 	}
+
+	p.uploading.Store(true)
 }
 
 func (p *cliProgress) FinishShared() {
-	atomic.StoreInt32(&p.uploadFinished, 1)
+	p.uploadFinished.Store(true)
 	p.output(defaultColor, "")
 }
 
-// +checklocksignore.
 func (p *cliProgress) UploadStarted() {
 	if p.shared {
 		// do nothing
@@ -231,13 +236,14 @@ func (p *cliProgress) UploadStarted() {
 	}
 
 	*p = cliProgress{
-		uploading:       1,
 		uploadStartTime: timetrack.Start(),
 		progressFlags:   p.progressFlags,
 	}
+
+	p.uploading.Store(true)
 }
 
-func (p *cliProgress) EstimatedDataSize(fileCount int, totalBytes int64) {
+func (p *cliProgress) EstimatedDataSize(fileCount, totalBytes int64) {
 	if p.shared {
 		// do nothing
 		return
@@ -260,8 +266,8 @@ func (p *cliProgress) Finish() {
 		return
 	}
 
-	atomic.StoreInt32(&p.uploadFinished, 1)
-	atomic.StoreInt32(&p.uploading, 0)
+	p.uploadFinished.Store(true)
+	p.uploading.Store(false)
 
 	p.output(defaultColor, "")
 
@@ -270,4 +276,11 @@ func (p *cliProgress) Finish() {
 	}
 }
 
-var _ snapshotfs.UploadProgress = (*cliProgress)(nil)
+func (p *cliProgress) EstimationParameters() upload.EstimationParameters {
+	return upload.EstimationParameters{
+		Type:              p.progressEstimationType,
+		AdaptiveThreshold: p.adaptiveEstimationThreshold,
+	}
+}
+
+var _ upload.Progress = (*cliProgress)(nil)

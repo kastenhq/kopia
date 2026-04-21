@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/internal/clock"
+	"github.com/kopia/kopia/internal/repodiag"
 	"github.com/kopia/kopia/repo/blob"
-	"github.com/kopia/kopia/repo/content"
 )
 
 type logSessionInfo struct {
@@ -70,10 +70,10 @@ func getLogSessions(ctx context.Context, st blob.Reader) ([]*logSessionInfo, err
 
 	var allSessions []*logSessionInfo
 
-	if err := st.ListBlobs(ctx, content.TextLogBlobPrefix, func(bm blob.Metadata) error {
+	if err := st.ListBlobs(ctx, repodiag.LogBlobPrefix, func(bm blob.Metadata) error {
 		parts := strings.Split(string(bm.BlobID), "_")
 
-		//nolint:gomnd
+		//nolint:mnd
 		if len(parts) < 8 {
 			log(ctx).Errorf("invalid part count: %v skipping unrecognized log: %v", len(parts), bm.BlobID)
 			return nil
@@ -81,7 +81,6 @@ func getLogSessions(ctx context.Context, st blob.Reader) ([]*logSessionInfo, err
 
 		id := parts[2] + "_" + parts[3]
 
-		//nolint:gomnd
 		startTime, err := strconv.ParseInt(parts[4], 10, 64)
 		if err != nil {
 			log(ctx).Errorf("invalid start time - skipping unrecognized log: %v", bm.BlobID)
@@ -90,7 +89,6 @@ func getLogSessions(ctx context.Context, st blob.Reader) ([]*logSessionInfo, err
 			return nil
 		}
 
-		//nolint:gomnd
 		endTime, err := strconv.ParseInt(parts[5], 10, 64)
 		if err != nil {
 			log(ctx).Errorf("invalid end time - skipping unrecognized log: %v", bm.BlobID)

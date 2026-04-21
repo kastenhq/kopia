@@ -19,9 +19,9 @@ import (
 type commandBenchmarkSplitters struct {
 	randSeed    int64
 	blockSize   atunits.Base2Bytes
-	blockCount  int
+	blockCount  uint
 	printOption bool
-	parallel    int
+	parallel    uint
 
 	out textOutput
 }
@@ -31,9 +31,9 @@ func (c *commandBenchmarkSplitters) setup(svc appServices, parent commandParent)
 
 	cmd.Flag("rand-seed", "Random seed").Default("42").Int64Var(&c.randSeed)
 	cmd.Flag("data-size", "Size of a data to split").Default("32MB").BytesVar(&c.blockSize)
-	cmd.Flag("block-count", "Number of data blocks to split").Default("16").IntVar(&c.blockCount)
+	cmd.Flag("block-count", "Number of data blocks to split").Default("16").UintVar(&c.blockCount)
 	cmd.Flag("print-options", "Print out the fastest dynamic splitter option").BoolVar(&c.printOption)
-	cmd.Flag("parallel", "Number of parallel goroutines").Default("1").IntVar(&c.parallel)
+	cmd.Flag("parallel", "Number of parallel goroutines").Default("1").UintVar(&c.parallel)
 
 	cmd.Action(svc.noRepositoryAction(c.run))
 
@@ -66,7 +66,7 @@ func (c *commandBenchmarkSplitters) run(ctx context.Context) error { //nolint:fu
 
 	rnd := rand.New(rand.NewSource(c.randSeed)) //nolint:gosec
 
-	for i := 0; i < c.blockCount; i++ {
+	for range c.blockCount {
 		b := make([]byte, c.blockSize)
 		if _, err := rnd.Read(b); err != nil {
 			return errors.Wrap(err, "error generating random data")
@@ -80,15 +80,14 @@ func (c *commandBenchmarkSplitters) run(ctx context.Context) error { //nolint:fu
 	for _, sp := range splitter.SupportedAlgorithms() {
 		tt := timetrack.Start()
 
-		segmentLengths, _ := runInParallel(c.parallel, func() interface{} {
+		segmentLengths := runInParallelNoInput(c.parallel, func() []int {
 			fact := splitter.GetFactory(sp)
 
 			var segmentLengths []int
 
-			for _, data := range dataBlocks {
+			for _, d := range dataBlocks {
 				s := fact()
 
-				d := data
 				for len(d) > 0 {
 					n := s.NextSplitPoint(d)
 					if n < 0 {
@@ -102,7 +101,7 @@ func (c *commandBenchmarkSplitters) run(ctx context.Context) error { //nolint:fu
 			}
 
 			return segmentLengths
-		}).([]int)
+		})
 
 		_, bytesPerSecond := tt.Completed(float64(c.parallel) * float64(c.blockCount) * float64(c.blockSize))
 
@@ -124,9 +123,9 @@ func (c *commandBenchmarkSplitters) run(ctx context.Context) error { //nolint:fu
 			int64(bytesPerSecond),
 		}
 
-		c.out.printStdout("%-25v %12v count:%v min:%v 10th:%v 25th:%v 50th:%v 75th:%v 90th:%v max:%v\n",
+		c.out.printStdout("%-25v %12v/s count:%v min:%v 10th:%v 25th:%v 50th:%v 75th:%v 90th:%v max:%v\n",
 			r.splitter,
-			units.BytesStringBase10(r.bytesPerSecond)+"/s",
+			units.BytesString(r.bytesPerSecond),
 			r.segmentCount,
 			r.min, r.p10, r.p25, r.p50, r.p75, r.p90, r.max,
 		)
@@ -140,10 +139,10 @@ func (c *commandBenchmarkSplitters) run(ctx context.Context) error { //nolint:fu
 	c.out.printStdout("-----------------------------------------------------------------\n")
 
 	for ndx, r := range results {
-		c.out.printStdout("%3v. %-25v %-12v count:%v min:%v 10th:%v 25th:%v 50th:%v 75th:%v 90th:%v max:%v\n",
+		c.out.printStdout("%3v. %-25v %-12v/s count:%v min:%v 10th:%v 25th:%v 50th:%v 75th:%v 90th:%v max:%v\n",
 			ndx,
 			r.splitter,
-			units.BytesStringBase10(r.bytesPerSecond)+"/s",
+			units.BytesString(r.bytesPerSecond),
 			r.segmentCount,
 			r.min, r.p10, r.p25, r.p50, r.p75, r.p90, r.max)
 

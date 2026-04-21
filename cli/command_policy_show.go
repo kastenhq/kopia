@@ -126,7 +126,13 @@ func printPolicy(out *textOutput, p *policy.Policy, def *policy.Definition) {
 	rows = append(rows, policyTableRow{})
 	rows = appendCompressionPolicyRows(rows, p, def)
 	rows = append(rows, policyTableRow{})
+	rows = appendMetadataCompressionPolicyRows(rows, p, def)
+	rows = append(rows, policyTableRow{})
+	rows = appendSplitterPolicyRows(rows, p, def)
+	rows = append(rows, policyTableRow{})
 	rows = appendActionsPolicyRows(rows, p, def)
+	rows = append(rows, policyTableRow{})
+	rows = appendOSSnapshotPolicyRows(rows, p, def)
 	rows = append(rows, policyTableRow{})
 	rows = appendLoggingPolicyRows(rows, p, def)
 
@@ -192,7 +198,7 @@ func appendFilesPolicyValue(items []policyTableRow, p *policy.Policy, def *polic
 	if maxSize := p.FilesPolicy.MaxFileSize; maxSize > 0 {
 		items = append(items, policyTableRow{
 			"  Ignore files above:",
-			units.BytesStringBase2(maxSize),
+			units.BytesString(maxSize),
 			definitionPointToString(p.Target(), def.FilesPolicy.MaxFileSize),
 		})
 	}
@@ -292,10 +298,30 @@ func appendSchedulingPolicyRows(rows []policyTableRow, p *policy.Policy, def *po
 	}
 
 	if len(p.SchedulingPolicy.TimesOfDay) > 0 {
-		rows = append(rows, policyTableRow{"  Snapshot times:", "", definitionPointToString(p.Target(), def.SchedulingPolicy.TimesOfDay)})
+		rows = append(rows,
+			policyTableRow{
+				"  Run missed snapshots:",
+				boolToString(p.SchedulingPolicy.RunMissed.OrDefault(false)),
+				definitionPointToString(p.Target(), def.SchedulingPolicy.RunMissed),
+			},
+			policyTableRow{
+				"  Snapshot times:",
+				"",
+				definitionPointToString(p.Target(), def.SchedulingPolicy.TimesOfDay),
+			})
 
 		for _, tod := range p.SchedulingPolicy.TimesOfDay {
 			rows = append(rows, policyTableRow{"    " + tod.String(), "", ""})
+		}
+
+		hasAny = true
+	}
+
+	if len(p.SchedulingPolicy.Cron) > 0 {
+		rows = append(rows, policyTableRow{"  Crontab expressions:", "", definitionPointToString(p.Target(), def.SchedulingPolicy.Cron)})
+
+		for _, cron := range p.SchedulingPolicy.Cron {
+			rows = append(rows, policyTableRow{"    " + cron, "", ""})
 		}
 
 		hasAny = true
@@ -349,17 +375,41 @@ func appendCompressionPolicyRows(rows []policyTableRow, p *policy.Policy, def *p
 	case p.CompressionPolicy.MaxSize > 0:
 		rows = append(rows, policyTableRow{fmt.Sprintf(
 			"  Only compress files between %v and %v.",
-			units.BytesStringBase10(p.CompressionPolicy.MinSize),
-			units.BytesStringBase10(p.CompressionPolicy.MaxSize)), "", ""})
+			units.BytesString(p.CompressionPolicy.MinSize),
+			units.BytesString(p.CompressionPolicy.MaxSize)), "", ""})
 
 	case p.CompressionPolicy.MinSize > 0:
 		rows = append(rows, policyTableRow{fmt.Sprintf(
 			"  Only compress files bigger than %v.",
-			units.BytesStringBase10(p.CompressionPolicy.MinSize)), "", ""})
+			units.BytesString(p.CompressionPolicy.MinSize)), "", ""})
 
 	default:
 		rows = append(rows, policyTableRow{"  Compress files of all sizes.", "", ""})
 	}
+
+	return rows
+}
+
+func appendMetadataCompressionPolicyRows(rows []policyTableRow, p *policy.Policy, def *policy.Definition) []policyTableRow {
+	if p.MetadataCompressionPolicy.CompressorName == "" || p.MetadataCompressionPolicy.CompressorName == "none" {
+		rows = append(rows, policyTableRow{"Metadata compression disabled.", "", ""})
+		return rows
+	}
+
+	return append(rows,
+		policyTableRow{"Metadata compression:", "", ""},
+		policyTableRow{"  Compressor:", string(p.MetadataCompressionPolicy.CompressorName), definitionPointToString(p.Target(), def.MetadataCompressionPolicy.CompressorName)})
+}
+
+func appendSplitterPolicyRows(rows []policyTableRow, p *policy.Policy, def *policy.Definition) []policyTableRow {
+	algorithm := p.SplitterPolicy.Algorithm
+	if algorithm == "" {
+		algorithm = "(repository default)"
+	}
+
+	rows = append(rows,
+		policyTableRow{"Splitter:", "", ""},
+		policyTableRow{"  Algorithm override:", algorithm, definitionPointToString(p.Target(), def.SplitterPolicy.Algorithm)})
 
 	return rows
 }
@@ -429,6 +479,19 @@ func appendActionCommandRows(rows []policyTableRow, h *policy.ActionCommand) []p
 	return rows
 }
 
+func appendOSSnapshotPolicyRows(rows []policyTableRow, p *policy.Policy, def *policy.Definition) []policyTableRow {
+	rows = append(rows,
+		policyTableRow{"OS-level snapshot support:", "", ""},
+		policyTableRow{
+			"  Volume Shadow Copy:",
+			p.OSSnapshotPolicy.VolumeShadowCopy.Enable.OrDefault(policy.OSSnapshotNever).String(),
+			definitionPointToString(p.Target(), def.OSSnapshotPolicy.VolumeShadowCopy.Enable),
+		},
+	)
+
+	return rows
+}
+
 func valueOrNotSet(p *policy.OptionalInt) string {
 	if p == nil {
 		return "-"
@@ -442,5 +505,5 @@ func valueOrNotSetOptionalInt64Bytes(p *policy.OptionalInt64) string {
 		return "-"
 	}
 
-	return units.BytesStringBase2(int64(*p))
+	return units.BytesString(*p)
 }

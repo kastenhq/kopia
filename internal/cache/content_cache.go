@@ -2,11 +2,14 @@ package cache
 
 import (
 	"context"
+	"time"
 
 	"github.com/pkg/errors"
 
+	"github.com/kopia/kopia/internal/cacheprot"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/impossible"
+	"github.com/kopia/kopia/internal/metrics"
 	"github.com/kopia/kopia/repo/blob"
 )
 
@@ -26,6 +29,7 @@ type Options struct {
 	HMACSecret         []byte
 	FetchFullBlobs     bool
 	Sweep              SweepSettings
+	TimeNow            func() time.Time
 }
 
 type contentCacheImpl struct {
@@ -58,13 +62,11 @@ func (c *contentCacheImpl) GetContent(ctx context.Context, contentID string, blo
 }
 
 func (c *contentCacheImpl) getContentFromFullBlob(ctx context.Context, blobID blob.ID, offset, length int64, output *gather.WriteBuffer) error {
-	// acquire exclusive lock
-	mut := c.pc.GetFetchingMutex(string(blobID))
-	mut.Lock()
-	defer mut.Unlock()
+	c.pc.exclusiveLock(string(blobID))
+	defer c.pc.exclusiveUnlock(string(blobID))
 
 	// check again to see if we perhaps lost the race and the data is now in cache.
-	if c.pc.GetPartial(ctx, BlobIDCacheKey(blobID), offset, length, output) {
+	if c.pc.getPartial(ctx, BlobIDCacheKey(blobID), offset, length, output) {
 		return nil
 	}
 
@@ -95,12 +97,12 @@ func (c *contentCacheImpl) getContentFromFullBlob(ctx context.Context, blobID bl
 func (c *contentCacheImpl) fetchBlobInternal(ctx context.Context, blobID blob.ID, blobData *gather.WriteBuffer) error {
 	// read the entire blob
 	if err := c.st.GetBlob(ctx, blobID, 0, -1, blobData); err != nil {
-		reportMissError()
+		c.pc.reportMissError()
 
 		return errors.Wrapf(err, "failed to get blob with ID %s", blobID)
 	}
 
-	reportMissBytes(int64(blobData.Length()))
+	c.pc.reportMissBytes(int64(blobData.Length()))
 
 	// store the whole blob in the cache.
 	c.pc.Put(ctx, BlobIDCacheKey(blobID), blobData.Bytes())
@@ -110,33 +112,31 @@ func (c *contentCacheImpl) fetchBlobInternal(ctx context.Context, blobID blob.ID
 
 func (c *contentCacheImpl) getContentFromFullOrPartialBlob(ctx context.Context, contentID string, blobID blob.ID, offset, length int64, output *gather.WriteBuffer) error {
 	// acquire shared lock on a blob, PrefetchBlob will acquire exclusive lock here.
-	mut := c.pc.GetFetchingMutex(string(blobID))
-	mut.RLock()
-	defer mut.RUnlock()
+	c.pc.sharedLock(string(blobID))
+	defer c.pc.sharedUnlock(string(blobID))
 
 	// see if we have the full blob cached by extracting a partial range.
-	if c.pc.GetPartial(ctx, BlobIDCacheKey(blobID), offset, length, output) {
+	if c.pc.getPartial(ctx, BlobIDCacheKey(blobID), offset, length, output) {
 		return nil
 	}
 
 	// acquire exclusive lock on the content
-	mut2 := c.pc.GetFetchingMutex(contentID)
-	mut2.Lock()
-	defer mut2.Unlock()
+	c.pc.exclusiveLock(contentID)
+	defer c.pc.exclusiveUnlock(contentID)
 
 	output.Reset()
 
-	if c.pc.GetFull(ctx, ContentIDCacheKey(contentID), output) {
+	if c.pc.getFull(ctx, ContentIDCacheKey(contentID), output) {
 		return nil
 	}
 
 	if err := c.st.GetBlob(ctx, blobID, offset, length, output); err != nil {
-		reportMissError()
+		c.pc.reportMissError()
 
 		return errors.Wrapf(err, "failed to get blob with ID %s", blobID)
 	}
 
-	reportMissBytes(int64(output.Length()))
+	c.pc.reportMissBytes(int64(output.Length()))
 
 	c.pc.Put(ctx, ContentIDCacheKey(contentID), output.Bytes())
 
@@ -152,16 +152,15 @@ func (c *contentCacheImpl) PrefetchBlob(ctx context.Context, blobID blob.ID) err
 	defer blobData.Close()
 
 	// see if it's already cached before taking a lock
-	if c.pc.GetPartial(ctx, BlobIDCacheKey(blobID), 0, 1, &blobData) {
+	if c.pc.getPartial(ctx, BlobIDCacheKey(blobID), 0, 1, &blobData) {
 		return nil
 	}
 
 	// acquire exclusive lock for the blob.
-	mut := c.pc.GetFetchingMutex(string(blobID))
-	mut.Lock()
-	defer mut.Unlock()
+	c.pc.exclusiveLock(string(blobID))
+	defer c.pc.exclusiveUnlock(string(blobID))
 
-	if c.pc.GetPartial(ctx, BlobIDCacheKey(blobID), 0, 1, &blobData) {
+	if c.pc.getPartial(ctx, BlobIDCacheKey(blobID), 0, 1, &blobData) {
 		return nil
 	}
 
@@ -173,7 +172,7 @@ func (c *contentCacheImpl) CacheStorage() Storage {
 }
 
 // NewContentCache creates new content cache for data contents.
-func NewContentCache(ctx context.Context, st blob.Storage, opt Options) (ContentCache, error) {
+func NewContentCache(ctx context.Context, st blob.Storage, opt Options, mr *metrics.Registry) (ContentCache, error) {
 	cacheStorage := opt.Storage
 	if cacheStorage == nil {
 		if opt.BaseCacheDirectory == "" {
@@ -188,7 +187,7 @@ func NewContentCache(ctx context.Context, st blob.Storage, opt Options) (Content
 		}
 	}
 
-	pc, err := NewPersistentCache(ctx, opt.CacheSubDir, cacheStorage, ChecksumProtection(opt.HMACSecret), opt.Sweep)
+	pc, err := NewPersistentCache(ctx, opt.CacheSubDir, cacheStorage, cacheprot.ChecksumProtection(opt.HMACSecret), opt.Sweep, mr, opt.TimeNow)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to create base cache")
 	}

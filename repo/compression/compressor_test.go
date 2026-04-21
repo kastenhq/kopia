@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"fmt"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/kopia/kopia/internal/testutil"
@@ -14,7 +14,9 @@ func TestMain(m *testing.M) { testutil.MyTestMain(m) }
 
 func TestCompressor(t *testing.T) {
 	for id, comp := range ByHeaderID {
-		id, comp := id, comp
+		if isUnsupported[id] {
+			continue
+		}
 
 		t.Run(fmt.Sprintf("compressible-data-%x", id), func(t *testing.T) {
 			// make sure all-zero data is compressed
@@ -97,12 +99,14 @@ func BenchmarkCompressor(b *testing.B) {
 
 	var sortedNames []Name
 	for id := range ByName {
+		if !IsSupported(id) {
+			continue
+		}
+
 		sortedNames = append(sortedNames, id)
 	}
 
-	sort.Slice(sortedNames, func(i, j int) bool {
-		return sortedNames[i] < sortedNames[j]
-	})
+	slices.Sort(sortedNames)
 
 	for _, id := range sortedNames {
 		comp := ByName[id]
@@ -136,7 +140,7 @@ func compressionBenchmark(b *testing.B, comp Compressor, input []byte, output *b
 
 	rdr := bytes.NewReader(input)
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		output.Reset()
 		rdr.Reset(input)
 
@@ -153,7 +157,7 @@ func decompressionBenchmark(b *testing.B, comp Compressor, input []byte, output 
 
 	rdr := bytes.NewReader(input)
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		output.Reset()
 
 		rdr.Reset(input)

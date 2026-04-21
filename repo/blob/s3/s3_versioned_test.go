@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"path"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -58,6 +59,7 @@ func TestGetBlobVersions(t *testing.T) {
 			dm, err := deleteBlob(ctx, s, blobName)
 
 			require.NoError(t, err)
+
 			bm = append(bm, dm)
 
 			var b gather.WriteBuffer
@@ -249,6 +251,7 @@ func TestGetBlobWithVersion(t *testing.T) {
 			}
 
 			var i int
+
 			for _, b := range blobs {
 				for _, bv := range b {
 					m := metas[i]
@@ -264,6 +267,7 @@ func TestGetBlobWithVersion(t *testing.T) {
 
 					require.NoError(t, err)
 					require.Equal(t, c, b.ToByteSlice())
+
 					i++
 				}
 			}
@@ -640,12 +644,32 @@ func randHex(tb testing.TB, length int) string {
 		return fmt.Sprintf("%0x", rand.Uint64())[0:length]
 	}
 
+	return randLongHex(tb, length)
+}
+
+// Protects the initialization of a random number generator for byte sequences
+// that are larger than 16 characters (8 bytes)
+// Notice that this is not a crypto RNG.
+var (
+	rMu sync.Mutex
+	// +checklocks:rMu
+	r = rand.New(rand.NewSource(clock.Now().UnixNano()))
+)
+
+func randLongHex(tb testing.TB, length int) string {
+	tb.Helper()
+
 	byteLength := (length + 1) / 2
 	b := make([]byte, byteLength)
-	n, err := rand.Read(b)
+
+	rMu.Lock()
+
+	n, err := r.Read(b)
+
+	rMu.Unlock()
 
 	require.NoError(tb, err)
-	require.Equal(tb, byteLength, n, "unexpected number of bytes from rand.Read")
+	require.Equal(tb, byteLength, n, "unexpected number of bytes while reading RNG")
 
 	return hex.EncodeToString(b)[:length]
 }
@@ -710,16 +734,9 @@ func putBlobs(ctx context.Context, tb testing.TB, s *s3Storage, blobs []blobCont
 
 // only available for tests.
 func (s *s3Storage) putBlobVersion(ctx context.Context, id blob.ID, data blob.Bytes, opts blob.PutOptions) (versionMetadata, error) {
-	var vm versionMetadata
-
-	_, err := retry.WithExponentialBackoff(ctx, "putBlobVersion("+string(id)+")", func() (interface{}, error) {
-		v, err := s.putBlob(ctx, id, data, opts)
-		vm = v
-
-		return true, err //nolint:wrapcheck
+	return retry.WithExponentialBackoff(ctx, "putBlobVersion("+string(id)+")", func() (versionMetadata, error) {
+		return s.putBlob(ctx, id, data, opts)
 	}, isRetriable)
-
-	return vm, err //nolint:wrapcheck
 }
 
 func compareMetadata(tb testing.TB, a, b versionMetadata) {
@@ -736,24 +753,18 @@ func compareMetadata(tb testing.TB, a, b versionMetadata) {
 	// deletion-marker metadata is not returned by the delete blob operation,
 	// and can only be retrieved later by listing versions.
 	if !a.IsDeleteMarker {
-		require.Equalf(tb, a.Version, b.Version, "blob versions do not match a:%v b:v", a, b)
+		require.Equalf(tb, a.Version, b.Version, "blob versions do not match a:%v b:%v", a, b)
 	}
 }
 
 func compareVersionSlices(tb testing.TB, a, b []versionMetadata) {
 	tb.Helper()
 
-	l := len(a)
-
-	if len(b) < l {
-		l = len(b)
-	}
-
-	for i := range a[:l] {
+	for i := range min(len(a), len(b)) {
 		compareMetadata(tb, a[i], b[i])
 	}
 
-	require.Equal(tb, len(a), len(b), "the number of the blob versions to compare does not match", a, b)
+	require.Len(tb, b, len(a), "the number of the blob versions to compare does not match", a, b)
 }
 
 func reverseVersionSlice(m []versionMetadata) []versionMetadata {
@@ -838,25 +849,25 @@ func isRetriable(err error) bool {
 func getVersionedTestStore(tb testing.TB, envName string) *s3Storage {
 	tb.Helper()
 
-	ctx := testlogging.Context(tb)
 	o := getProviderOptions(tb, envName)
 	o.Prefix = path.Join(tb.Name(), uuid.NewString()) + "/"
 
-	s, err := newStorage(ctx, o)
+	s, err := newStorage(testlogging.Context(tb), o)
 	require.NoError(tb, err, "error creating versioned store client")
 
 	tb.Cleanup(func() {
-		cleanupVersions(tb, s)
+		ctx := testlogging.ContextForCleanup(tb)
+
+		cleanupVersions(ctx, tb, s)
 		blobtesting.CleanupOldData(ctx, tb, s, 0)
 	})
 
 	return s
 }
 
-func cleanupVersions(tb testing.TB, s *s3Storage) {
+func cleanupVersions(ctx context.Context, tb testing.TB, s *s3Storage) {
 	tb.Helper()
 
-	ctx := testlogging.Context(tb)
 	ch := make(chan minio.ObjectInfo, 4)
 	errChan := s.cli.RemoveObjects(ctx, s.BucketName, ch, minio.RemoveObjectsOptions{})
 

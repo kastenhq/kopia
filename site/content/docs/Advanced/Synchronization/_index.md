@@ -1,8 +1,10 @@
 ---
 title: "Synchronization"
 linkTitle: "Synchronization"
-weight: 46
+weight: 55
 ---
+
+## Synchronization
 
 Maintaining multiple copies of a repository is important for disaster recovery scenarios. While cloud-based repositories often have better durability than local ones, a local repository copy may help speed up data recovery.
 
@@ -28,3 +30,7 @@ When synchronizing to a filesystem location, it is important to check that the f
 ```
 $ kopia repository sync-to filesystem --path /dest/repository --must-exist
 ```
+
+### Automation
+
+For automated synchronization tasks, progress output can be suppressed using the `--no-progress` flag to provide clean output suitable for cron jobs and scripts.

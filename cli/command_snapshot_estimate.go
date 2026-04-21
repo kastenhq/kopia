@@ -13,7 +13,7 @@ import (
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/policy"
-	"github.com/kopia/kopia/snapshot/snapshotfs"
+	"github.com/kopia/kopia/snapshot/upload"
 )
 
 type commandSnapshotEstimate struct {
@@ -39,8 +39,8 @@ func (c *commandSnapshotEstimate) setup(svc appServices, parent commandParent) {
 
 type estimateProgress struct {
 	stats        snapshot.Stats
-	included     snapshotfs.SampleBuckets
-	excluded     snapshotfs.SampleBuckets
+	included     upload.SampleBuckets
+	excluded     upload.SampleBuckets
 	excludedDirs []string
 	quiet        bool
 }
@@ -59,7 +59,9 @@ func (ep *estimateProgress) Error(ctx context.Context, filename string, err erro
 	}
 }
 
-func (ep *estimateProgress) Stats(ctx context.Context, st *snapshot.Stats, included, excluded snapshotfs.SampleBuckets, excludedDirs []string, final bool) {
+func (ep *estimateProgress) Stats(_ context.Context, st *snapshot.Stats, included, excluded upload.SampleBuckets, excludedDirs []string, final bool) {
+	_ = final
+
 	ep.stats = *st
 	ep.included = included
 	ep.excluded = excluded
@@ -97,16 +99,16 @@ func (c *commandSnapshotEstimate) run(ctx context.Context, rep repo.Repository) 
 		return errors.Wrapf(err, "error creating policy tree for %v", sourceInfo)
 	}
 
-	if err := snapshotfs.Estimate(ctx, dir, policyTree, &ep, c.maxExamplesPerBucket); err != nil {
+	if err := upload.Estimate(ctx, dir, policyTree, &ep, c.maxExamplesPerBucket); err != nil {
 		return errors.Wrap(err, "error estimating")
 	}
 
-	c.out.printStdout("Snapshot includes %v file(s), total size %v\n", ep.stats.TotalFileCount, units.BytesStringBase10(ep.stats.TotalFileSize))
+	c.out.printStdout("Snapshot includes %v file(s), total size %v\n", ep.stats.TotalFileCount, units.BytesString(ep.stats.TotalFileSize))
 	c.showBuckets(ep.included, c.snapshotEstimateShowFiles)
 	c.out.printStdout("\n")
 
 	if ep.stats.ExcludedFileCount > 0 {
-		c.out.printStdout("Snapshot excludes %v file(s), total size %v\n", ep.stats.ExcludedFileCount, units.BytesStringBase10(ep.stats.ExcludedTotalFileSize))
+		c.out.printStdout("Snapshot excludes %v file(s), total size %v\n", ep.stats.ExcludedFileCount, units.BytesString(ep.stats.ExcludedTotalFileSize))
 		c.showBuckets(ep.excluded, true)
 	} else {
 		c.out.printStdout("Snapshot excludes no files.\n")
@@ -126,7 +128,7 @@ func (c *commandSnapshotEstimate) run(ctx context.Context, rep repo.Repository) 
 		c.out.printStdout("Encountered %v error(s).\n", ep.stats.ErrorCount)
 	}
 
-	megabits := float64(ep.stats.TotalFileSize) * 8 / 1000000 //nolint:gomnd
+	megabits := float64(ep.stats.TotalFileSize) * 8 / 1000000 //nolint:mnd
 	seconds := megabits / c.snapshotEstimateUploadSpeed
 
 	c.out.printStdout("\n")
@@ -135,7 +137,7 @@ func (c *commandSnapshotEstimate) run(ctx context.Context, rep repo.Repository) 
 	return nil
 }
 
-func (c *commandSnapshotEstimate) showBuckets(buckets snapshotfs.SampleBuckets, showFiles bool) {
+func (c *commandSnapshotEstimate) showBuckets(buckets upload.SampleBuckets, showFiles bool) {
 	for i, bucket := range buckets {
 		if bucket.Count == 0 {
 			continue
@@ -145,16 +147,16 @@ func (c *commandSnapshotEstimate) showBuckets(buckets snapshotfs.SampleBuckets, 
 
 		if i == 0 {
 			sizeRange = fmt.Sprintf("< %-6v",
-				units.BytesStringBase10(bucket.MinSize))
+				units.BytesString(bucket.MinSize))
 		} else {
 			sizeRange = fmt.Sprintf("%-6v...%6v",
-				units.BytesStringBase10(bucket.MinSize),
-				units.BytesStringBase10(buckets[i-1].MinSize))
+				units.BytesString(bucket.MinSize),
+				units.BytesString(buckets[i-1].MinSize))
 		}
 
 		c.out.printStdout("%18v: %7v files, total size %v\n",
 			sizeRange,
-			bucket.Count, units.BytesStringBase10(bucket.TotalSize))
+			bucket.Count, units.BytesString(bucket.TotalSize))
 
 		if showFiles {
 			for _, sample := range bucket.Examples {

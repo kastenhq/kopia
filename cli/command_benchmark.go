@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"sync"
 )
 
@@ -30,23 +31,62 @@ type cryptoBenchResult struct {
 	throughput float64
 }
 
-func runInParallel(parallel int, run func() interface{}) interface{} {
+func runInParallelNoInputNoResult(n uint, run func()) {
+	if n == 0 {
+		return
+	}
+
+	dummyArgs := make([]int, n)
+
+	runInParallelNoResult(dummyArgs, func(_ int) {
+		run()
+	})
+}
+
+func runInParallelNoInput[T any](n uint, run func() T) T {
+	if n == 0 {
+		var zero T
+
+		return zero
+	}
+
+	dummyArgs := make([]int, n)
+
+	return runInParallel(dummyArgs, func(_ int) T {
+		return run()
+	})
+}
+
+func runInParallelNoResult[A any](args []A, run func(arg A)) {
+	runInParallel(args, func(arg A) any {
+		run(arg)
+		return nil
+	})
+}
+
+func runInParallel[A, T any](args []A, run func(arg A) T) T {
 	var wg sync.WaitGroup
 
-	for i := 0; i < parallel-1; i++ {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			run()
-		}()
+	for _, arg := range args[1:] {
+		wg.Go(func() {
+			run(arg)
+		})
 	}
 
 	// run one on the main goroutine and N-1 in parallel.
-	v := run()
+	v := run(args[0])
 
 	wg.Wait()
 
 	return v
+}
+
+func makeOutputBuffers(n, capacity int) []*bytes.Buffer {
+	var res []*bytes.Buffer
+
+	for range n {
+		res = append(res, bytes.NewBuffer(make([]byte, 0, capacity)))
+	}
+
+	return res
 }

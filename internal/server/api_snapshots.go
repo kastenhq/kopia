@@ -14,7 +14,7 @@ import (
 	"github.com/kopia/kopia/snapshot/policy"
 )
 
-func handleListSnapshots(ctx context.Context, rc requestContext) (interface{}, *apiError) {
+func handleListSnapshots(ctx context.Context, rc requestContext) (any, *apiError) {
 	si := getSnapshotSourceFromURL(rc.req.URL)
 
 	manifestIDs, err := snapshot.ListSnapshotManifests(ctx, rc.rep, &si, nil)
@@ -54,14 +54,14 @@ func handleListSnapshots(ctx context.Context, rc requestContext) (interface{}, *
 	return resp, nil
 }
 
-func handleDeleteSnapshots(ctx context.Context, rc requestContext) (interface{}, *apiError) {
+func handleDeleteSnapshots(ctx context.Context, rc requestContext) (any, *apiError) {
 	var req serverapi.DeleteSnapshotsRequest
 
 	if err := json.Unmarshal(rc.body, &req); err != nil {
 		return nil, requestError(serverapi.ErrorMalformedRequest, "malformed request")
 	}
 
-	sm := rc.srv.allSourceManagers()[req.SourceInfo]
+	sm := rc.srv.snapshotAllSourceManagers()[req.SourceInfo]
 	if sm == nil {
 		return nil, requestError(serverapi.ErrorNotFound, "unknown source")
 	}
@@ -93,7 +93,7 @@ func handleDeleteSnapshots(ctx context.Context, rc requestContext) (interface{},
 
 			for _, sn := range snaps {
 				if sn.Source != req.SourceInfo {
-					return errors.Errorf("source info does not match snapshot source")
+					return errors.New("source info does not match snapshot source")
 				}
 			}
 
@@ -102,7 +102,7 @@ func handleDeleteSnapshots(ctx context.Context, rc requestContext) (interface{},
 
 		for _, m := range manifestIDs {
 			if err := w.DeleteManifest(ctx, m); err != nil {
-				return errors.Wrap(err, "uanble to delete snapshot")
+				return errors.Wrap(err, "unable to delete snapshot")
 			}
 		}
 
@@ -115,7 +115,7 @@ func handleDeleteSnapshots(ctx context.Context, rc requestContext) (interface{},
 		return nil
 	}); err != nil {
 		// if source deletion failed, refresh the repository to rediscover the source
-		rc.srv.Refresh(ctx) //nolint:errcheck
+		rc.srv.Refresh()
 
 		return nil, internalServerError(err)
 	}
@@ -123,7 +123,7 @@ func handleDeleteSnapshots(ctx context.Context, rc requestContext) (interface{},
 	return &serverapi.Empty{}, nil
 }
 
-func handleEditSnapshots(ctx context.Context, rc requestContext) (interface{}, *apiError) {
+func handleEditSnapshots(ctx context.Context, rc requestContext) (any, *apiError) {
 	var req serverapi.EditSnapshotsRequest
 
 	if err := json.Unmarshal(rc.body, &req); err != nil {
@@ -169,13 +169,13 @@ func handleEditSnapshots(ctx context.Context, rc requestContext) (interface{}, *
 	return snaps, nil
 }
 
-func forAllSourceManagersMatchingURLFilter(ctx context.Context, managers map[snapshot.SourceInfo]*sourceManager, c func(s *sourceManager, ctx context.Context) serverapi.SourceActionResponse, values url.Values) (interface{}, *apiError) {
+func forAllSourceManagersMatchingURLFilter(ctx context.Context, managers map[snapshot.SourceInfo]*sourceManager, c func(s *sourceManager, ctx context.Context) serverapi.SourceActionResponse, values url.Values) (any, *apiError) {
 	resp := &serverapi.MultipleSourceActionResponse{
 		Sources: map[string]serverapi.SourceActionResponse{},
 	}
 
 	for src, mgr := range managers {
-		if mgr.isReadOnly {
+		if mgr.isRunningReadOnly() {
 			continue
 		}
 
@@ -193,20 +193,20 @@ func forAllSourceManagersMatchingURLFilter(ctx context.Context, managers map[sna
 	return resp, nil
 }
 
-func handleUpload(ctx context.Context, rc requestContext) (interface{}, *apiError) {
-	return forAllSourceManagersMatchingURLFilter(ctx, rc.srv.allSourceManagers(), (*sourceManager).upload, rc.req.URL.Query())
+func handleUpload(ctx context.Context, rc requestContext) (any, *apiError) {
+	return forAllSourceManagersMatchingURLFilter(ctx, rc.srv.snapshotAllSourceManagers(), (*sourceManager).upload, rc.req.URL.Query())
 }
 
-func handleCancel(ctx context.Context, rc requestContext) (interface{}, *apiError) {
-	return forAllSourceManagersMatchingURLFilter(ctx, rc.srv.allSourceManagers(), (*sourceManager).cancel, rc.req.URL.Query())
+func handleCancel(ctx context.Context, rc requestContext) (any, *apiError) {
+	return forAllSourceManagersMatchingURLFilter(ctx, rc.srv.snapshotAllSourceManagers(), (*sourceManager).cancel, rc.req.URL.Query())
 }
 
-func handlePause(ctx context.Context, rc requestContext) (interface{}, *apiError) {
-	return forAllSourceManagersMatchingURLFilter(ctx, rc.srv.allSourceManagers(), (*sourceManager).pause, rc.req.URL.Query())
+func handlePause(ctx context.Context, rc requestContext) (any, *apiError) {
+	return forAllSourceManagersMatchingURLFilter(ctx, rc.srv.snapshotAllSourceManagers(), (*sourceManager).pause, rc.req.URL.Query())
 }
 
-func handleResume(ctx context.Context, rc requestContext) (interface{}, *apiError) {
-	return forAllSourceManagersMatchingURLFilter(ctx, rc.srv.allSourceManagers(), (*sourceManager).resume, rc.req.URL.Query())
+func handleResume(ctx context.Context, rc requestContext) (any, *apiError) {
+	return forAllSourceManagersMatchingURLFilter(ctx, rc.srv.snapshotAllSourceManagers(), (*sourceManager).resume, rc.req.URL.Query())
 }
 
 func uniqueSnapshots(rows []*serverapi.Snapshot) []*serverapi.Snapshot {

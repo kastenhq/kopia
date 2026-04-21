@@ -5,8 +5,8 @@ include ../tools/tools.mk
 deps: node_modules/.up-to-date
 
 node_modules/.up-to-date: $(npm) package.json package-lock.json
-	$(retry) $(npm) $(npm_flags) install --no-audit
-	$(npm) $(npm_flags) audit --production
+	$(retry) $(npm) $(npm_flags) $(npm_install_or_ci) --no-audit
+	$(npm) $(npm_flags) audit --omit=dev
 	echo updated > node_modules/.up-to-date
 
 electron_builder_flags+=-c.extraMetadata.version=$(KOPIA_VERSION:v%=%)
@@ -25,11 +25,20 @@ endif
 
 else
 
-# not running on Travis, or Travis in PR mode, don't build installer and don't publish
+# Running as part of a pull_request event on GH, or outside a GH workflow, then
+# don't build installer and don't publish
 ifneq ($(FORCE_KOPIA_UI_SIGN),)
 electron_builder_flags+=--dir
-endif
 
+else
+
+# unset CSC_LINK completely, otherwise electron builder hangs attempting to
+# notarize.
+unexport CSC_LINK
+unexport CSC_KEY_PASSWORD
+unexport KOPIA_UI_NOTARIZE
+
+endif
 endif
 
 # empty CSC_LINK, unset completely since empty value confuses electron builder.
@@ -68,9 +77,18 @@ dev: node_modules/.up-to-date
 run:
 	$(npm) $(npm_flags) run start-electron-prebuilt
 
+e2e-test:
+	$(npm) $(npm_flags) run e2e
+
 build-electron: ../dist/kopia-ui/.up-to-date
 
 # rebuild packages if HTML, embedded EXE or build config changed.
 ../dist/kopia-ui/.up-to-date: package.json ../dist/kopia_*/kopia* node_modules/.up-to-date public/* resources/*/*/*
 	$(retry) $(npm) $(npm_flags) run build-electron -- $(electron_builder_flags) -p $(electron_publish_flag)
 	echo updated > ../dist/kopia-ui/.up-to-date
+
+check-prettier: node_modules/.up-to-date
+	$(npm) run prettier:check
+
+prettier: node_modules/.up-to-date
+	$(npm) run prettier

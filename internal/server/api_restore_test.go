@@ -14,13 +14,14 @@ import (
 	"github.com/kopia/kopia/internal/mockfs"
 	"github.com/kopia/kopia/internal/repotesting"
 	"github.com/kopia/kopia/internal/serverapi"
+	"github.com/kopia/kopia/internal/servertesting"
 	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/internal/uitask"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/snapshot"
 	"github.com/kopia/kopia/snapshot/restore"
-	"github.com/kopia/kopia/snapshot/snapshotfs"
+	"github.com/kopia/kopia/snapshot/upload"
 )
 
 func TestRestoreSnapshots(t *testing.T) {
@@ -31,7 +32,7 @@ func TestRestoreSnapshots(t *testing.T) {
 	var id11 manifest.ID
 
 	require.NoError(t, repo.WriteSession(ctx, env.Repository, repo.WriteSessionOptions{Purpose: "Test"}, func(ctx context.Context, w repo.RepositoryWriter) error {
-		u := snapshotfs.NewUploader(w)
+		u := upload.NewUploader(w)
 
 		dir1 := mockfs.NewDirectory()
 
@@ -46,13 +47,13 @@ func TestRestoreSnapshots(t *testing.T) {
 		return nil
 	}))
 
-	srvInfo := startServer(t, env, false)
+	srvInfo := servertesting.StartServer(t, env, false)
 
 	cli, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             srvInfo.BaseURL,
 		TrustedServerCertificateFingerprint: srvInfo.TrustedServerCertificateFingerprint,
-		Username:                            testUIUsername,
-		Password:                            testUIPassword,
+		Username:                            servertesting.TestUIUsername,
+		Password:                            servertesting.TestUIPassword,
 	})
 
 	require.NoError(t, err)

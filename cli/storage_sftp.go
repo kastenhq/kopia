@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/pkg/errors"
 
 	"github.com/kopia/kopia/repo/blob"
@@ -86,7 +86,7 @@ func (c *storageSFTPFlags) getOptions(formatVersion int) (*sftp.Options, error) 
 			sftpo.Keyfile = a
 
 		default:
-			return nil, errors.Errorf("must provide either --sftp-password, --keyfile or --key-data")
+			return nil, errors.New("must provide either --sftp-password, --keyfile or --key-data")
 		}
 
 		switch {
@@ -100,7 +100,7 @@ func (c *storageSFTPFlags) getOptions(formatVersion int) (*sftp.Options, error) 
 
 			sftpo.KnownHostsFile = a
 		default:
-			return nil, errors.Errorf("must provide either --known-hosts or --known-hosts-data")
+			return nil, errors.New("must provide either --known-hosts or --known-hosts-data")
 		}
 	}
 

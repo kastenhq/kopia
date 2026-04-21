@@ -42,7 +42,7 @@ func (r *Reconnector) GetOrOpenConnection(ctx context.Context) (Connection, erro
 	defer r.mu.Unlock()
 
 	if r.activeConnection == nil {
-		log(ctx).Debugf("establishing new connection...")
+		log(ctx).Debug("establishing new connection...")
 
 		conn, err := r.connector.NewConnection(ctx)
 		if err != nil {
@@ -56,9 +56,10 @@ func (r *Reconnector) GetOrOpenConnection(ctx context.Context) (Connection, erro
 }
 
 // UsingConnection invokes the provided callback for a Connection.
-func (r *Reconnector) UsingConnection(ctx context.Context, desc string, cb func(cli Connection) (interface{}, error)) (interface{}, error) {
-	//nolint:wrapcheck
-	return retry.WithExponentialBackoff(ctx, desc, func() (interface{}, error) {
+func UsingConnection[T any](ctx context.Context, r *Reconnector, desc string, cb func(cli Connection) (T, error)) (T, error) {
+	var defaultT T
+
+	return retry.WithExponentialBackoff(ctx, desc, func() (T, error) {
 		conn, err := r.GetOrOpenConnection(ctx)
 		if err != nil {
 			if r.connector.IsConnectionClosedError(err) {
@@ -67,7 +68,7 @@ func (r *Reconnector) UsingConnection(ctx context.Context, desc string, cb func(
 
 			r.CloseActiveConnection(ctx)
 
-			return nil, errors.Wrap(err, "error opening connection")
+			return defaultT, errors.Wrap(err, "error opening connection")
 		}
 
 		v, err := cb(conn)
@@ -85,8 +86,8 @@ func (r *Reconnector) UsingConnection(ctx context.Context, desc string, cb func(
 
 // UsingConnectionNoResult invokes the provided callback for a Connection.
 func (r *Reconnector) UsingConnectionNoResult(ctx context.Context, desc string, cb func(cli Connection) error) error {
-	_, err := r.UsingConnection(ctx, desc, func(cli Connection) (interface{}, error) {
-		return nil, cb(cli)
+	_, err := UsingConnection(ctx, r, desc, func(cli Connection) (bool, error) {
+		return true, cb(cli)
 	})
 
 	return err
@@ -101,7 +102,7 @@ func (r *Reconnector) CloseActiveConnection(ctx context.Context) {
 	r.activeConnection = nil
 
 	if c != nil {
-		log(ctx).Debugf("closing active connection.")
+		log(ctx).Debug("closing active connection.")
 
 		if err := c.Close(); err != nil {
 			log(ctx).Errorf("error closing active connection: %v", err)

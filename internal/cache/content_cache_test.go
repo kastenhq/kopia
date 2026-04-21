@@ -3,7 +3,7 @@ package cache_test
 import (
 	"bytes"
 	"context"
-	"sort"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -33,7 +33,64 @@ func newUnderlyingStorageForContentCacheTesting(t *testing.T) blob.Storage {
 	return st
 }
 
-func TestCacheExpiration(t *testing.T) {
+func TestCacheExpiration_SoftLimitNoMinAge(t *testing.T) {
+	// cache is 10k, each blob is 4k, so we can store 2 blobs before they are evicted.
+	wantEvicted := []blob.ID{"a", "b"}
+
+	verifyCacheExpiration(t, cache.SweepSettings{
+		MaxSizeBytes:   10000,
+		TouchThreshold: -1,
+	}, wantEvicted)
+}
+
+func TestCacheExpiration_SoftLimitWithMinAge(t *testing.T) {
+	// cache is 10k, each blob is 4k, cache will grow beyond the limit but will not evict anything.
+	verifyCacheExpiration(t, cache.SweepSettings{
+		MaxSizeBytes:   10000,
+		TouchThreshold: -1,
+		MinSweepAge:    time.Hour,
+	}, nil)
+}
+
+func TestCacheExpiration_HardLimitWithMinAge(t *testing.T) {
+	// cache is 10k, each blob is 4k, cache will grow beyond the limit but will not evict anything.
+	wantEvicted := []blob.ID{"a", "b"}
+
+	verifyCacheExpiration(t, cache.SweepSettings{
+		MaxSizeBytes:   10000,
+		TouchThreshold: -1,
+		MinSweepAge:    time.Hour,
+		LimitBytes:     10000,
+	}, wantEvicted)
+}
+
+func TestCacheExpiration_HardLimitAboveSoftLimit(t *testing.T) {
+	wantExpired := []blob.ID{"a"}
+
+	verifyCacheExpiration(t, cache.SweepSettings{
+		MaxSizeBytes:   10000,
+		TouchThreshold: -1,
+		MinSweepAge:    time.Hour,
+		LimitBytes:     13000,
+	}, wantExpired)
+}
+
+func TestCacheExpiration_HardLimitBelowSoftLimit(t *testing.T) {
+	wantExpired := []blob.ID{"a", "b", "c"}
+
+	verifyCacheExpiration(t, cache.SweepSettings{
+		MaxSizeBytes:   10000,
+		TouchThreshold: -1,
+		MinSweepAge:    time.Hour,
+		LimitBytes:     5000,
+	}, wantExpired)
+}
+
+// The test will fetch 4 items into the cache, named "a", "b", "c", "d", each 4000 bytes in size
+// verify that the cache is evicting correct items based on the sweep settings.
+//
+//nolint:thelper
+func verifyCacheExpiration(t *testing.T, sweepSettings cache.SweepSettings, wantEvicted []blob.ID) {
 	cacheData := blobtesting.DataMap{}
 
 	// on Windows, the time does not always move forward (sometimes clock.Now() returns exactly the same value for consecutive invocations)
@@ -50,19 +107,16 @@ func TestCacheExpiration(t *testing.T) {
 
 		return currentTime
 	}
-	cacheStorage := blobtesting.NewMapStorage(cacheData, nil, movingTimeFunc)
 
+	cacheStorage := testutil.EnsureType[cache.Storage](t, blobtesting.NewMapStorage(cacheData, nil, movingTimeFunc))
 	underlyingStorage := newUnderlyingStorageForContentCacheTesting(t)
 
 	ctx := testlogging.Context(t)
 	cc, err := cache.NewContentCache(ctx, underlyingStorage, cache.Options{
-		Storage: cacheStorage.(cache.Storage),
-		Sweep: cache.SweepSettings{
-			MaxSizeBytes:   10000,
-			SweepFrequency: 500 * time.Millisecond,
-			TouchThreshold: -1,
-		},
-	})
+		Storage: cacheStorage,
+		Sweep:   sweepSettings,
+		TimeNow: movingTimeFunc,
+	}, nil)
 
 	require.NoError(t, err)
 
@@ -71,37 +125,26 @@ func TestCacheExpiration(t *testing.T) {
 	var tmp gather.WriteBuffer
 	defer tmp.Close()
 
-	err = cc.GetContent(ctx, "00000a", "content-4k", 0, -1, &tmp) // 4k
+	const underlyingBlobID = "content-4k"
+
+	err = cc.GetContent(ctx, "a", underlyingBlobID, 0, -1, &tmp) // 4k
 	require.NoError(t, err)
-	err = cc.GetContent(ctx, "00000b", "content-4k", 0, -1, &tmp) // 4k
+	err = cc.GetContent(ctx, "b", underlyingBlobID, 0, -1, &tmp) // 4k
 	require.NoError(t, err)
-	err = cc.GetContent(ctx, "00000c", "content-4k", 0, -1, &tmp) // 4k
+	err = cc.GetContent(ctx, "c", underlyingBlobID, 0, -1, &tmp) // 4k
 	require.NoError(t, err)
-	err = cc.GetContent(ctx, "00000d", "content-4k", 0, -1, &tmp) // 4k
+	err = cc.GetContent(ctx, "d", underlyingBlobID, 0, -1, &tmp) // 4k
 	require.NoError(t, err)
 
-	// wait for a sweep
-	time.Sleep(2 * time.Second)
+	// delete underlying storage blob to identify cache items that have been evicted
+	// all other items will be fetched from the cache.
+	require.NoError(t, underlyingStorage.DeleteBlob(ctx, underlyingBlobID))
 
-	// 00000a and 00000b will be removed from cache because it's the oldest.
-	// to verify, let's remove content-4k from the underlying storage and make sure we can still read
-	// 00000c and 00000d from the cache but not 00000a nor 00000b
-	require.NoError(t, underlyingStorage.DeleteBlob(ctx, "content-4k"))
-
-	cases := []struct {
-		contentID     string
-		expectedError error
-	}{
-		{"00000a", blob.ErrBlobNotFound},
-		{"00000b", blob.ErrBlobNotFound},
-		{"00000c", nil},
-		{"00000d", nil},
-	}
-
-	for _, tc := range cases {
-		got := cc.GetContent(ctx, tc.contentID, "content-4k", 0, -1, &tmp)
-		if assert.ErrorIs(t, got, tc.expectedError, "tc.contentID:", tc.contentID) {
-			t.Logf("got correct error %v when reading content %v", tc.expectedError, tc.contentID)
+	for _, blobID := range []blob.ID{"a", "b", "c", "d"} {
+		if slices.Contains(wantEvicted, blobID) {
+			require.ErrorIs(t, cc.GetContent(ctx, string(blobID), underlyingBlobID, 0, -1, &tmp), blob.ErrBlobNotFound, "expected item not found %v", blobID)
+		} else {
+			require.NoError(t, cc.GetContent(ctx, string(blobID), underlyingBlobID, 0, -1, &tmp), "expected item to be found %v", blobID)
 		}
 	}
 }
@@ -121,7 +164,7 @@ func TestDiskContentCache(t *testing.T) {
 		Sweep: cache.SweepSettings{
 			MaxSizeBytes: maxBytes,
 		},
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	defer cc.Close(ctx)
@@ -129,7 +172,7 @@ func TestDiskContentCache(t *testing.T) {
 	verifyContentCache(t, cc, cacheStorage)
 }
 
-func verifyContentCache(t *testing.T, cc cache.ContentCache, cacheStorage blob.Storage) {
+func verifyContentCache(t *testing.T, cc cache.ContentCache, cacheStorage cache.Storage) {
 	t.Helper()
 
 	ctx := testlogging.Context(t)
@@ -151,8 +194,8 @@ func verifyContentCache(t *testing.T, cc cache.ContentCache, cacheStorage blob.S
 			{"xf0f0f3", "no-such-content", 0, -1, nil, blob.ErrBlobNotFound},
 			{"xf0f0f4", "no-such-content", 10, 5, nil, blob.ErrBlobNotFound},
 			{"f0f0f5", "content-1", 7, 3, []byte{8, 9, 10}, nil},
-			{"xf0f0f6", "content-1", 11, 10, nil, errors.Errorf("invalid offset: 11: invalid blob offset or length")},
-			{"xf0f0f6", "content-1", -1, 5, nil, errors.Errorf("invalid offset: -1: invalid blob offset or length")},
+			{"xf0f0f6", "content-1", 11, 10, nil, errors.New("invalid offset: 11: invalid blob offset or length")},
+			{"xf0f0f6", "content-1", -1, 5, nil, errors.New("invalid offset: -1: invalid blob offset or length")},
 		}
 
 		var v gather.WriteBuffer
@@ -161,10 +204,11 @@ func verifyContentCache(t *testing.T, cc cache.ContentCache, cacheStorage blob.S
 		for _, tc := range cases {
 			err := cc.GetContent(ctx, tc.contentID, tc.blobID, tc.offset, tc.length, &v)
 			if tc.err == nil {
-				assert.NoErrorf(t, err, "tc.contentID: %v", tc.contentID)
+				require.NoErrorf(t, err, "tc.contentID: %v", tc.contentID)
 			} else {
-				assert.ErrorContainsf(t, err, tc.err.Error(), "tc.contentID: %v", tc.contentID)
+				require.ErrorContainsf(t, err, tc.err.Error(), "tc.contentID: %v", tc.contentID)
 			}
+
 			if got := v.ToByteSlice(); !bytes.Equal(got, tc.expected) {
 				t.Errorf("unexpected data for %v: %x, wanted %x", tc.contentID, got, tc.expected)
 			}
@@ -208,7 +252,7 @@ func TestCacheFailureToOpen(t *testing.T) {
 	_, err := cache.NewContentCache(testlogging.Context(t), underlyingStorage, cache.Options{
 		Storage: withoutTouchBlob{faultyCache},
 		Sweep:   cache.SweepSettings{MaxSizeBytes: 10000},
-	})
+	}, nil)
 	require.Error(t, err)
 	require.ErrorContains(t, err, someError.Error())
 
@@ -218,7 +262,7 @@ func TestCacheFailureToOpen(t *testing.T) {
 	cc, err := cache.NewContentCache(ctx, underlyingStorage, cache.Options{
 		Storage: withoutTouchBlob{faultyCache},
 		Sweep:   cache.SweepSettings{MaxSizeBytes: 10000},
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	cc.Close(ctx)
@@ -235,7 +279,7 @@ func TestCacheFailureToWrite(t *testing.T) {
 	cc, err := cache.NewContentCache(testlogging.Context(t), underlyingStorage, cache.Options{
 		Storage: withoutTouchBlob{faultyCache},
 		Sweep:   cache.SweepSettings{MaxSizeBytes: 10000},
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	ctx := testlogging.Context(t)
@@ -248,13 +292,13 @@ func TestCacheFailureToWrite(t *testing.T) {
 	defer v.Close()
 
 	err = cc.GetContent(ctx, "aa", "content-1", 0, 3, &v)
-	assert.NoError(t, err, "write failure wasn't ignored")
+	require.NoError(t, err, "write failure wasn't ignored")
 
 	got, want := v.ToByteSlice(), []byte{1, 2, 3}
-	assert.Equal(t, want, got, "unexpected value retrieved from cache")
+	require.Equal(t, want, got, "unexpected value retrieved from cache")
 
 	all, err := blob.ListAllBlobs(ctx, cacheStorage, "")
-	assert.NoError(t, err, "error listing cache")
+	require.NoError(t, err, "error listing cache")
 
 	require.Empty(t, all, "invalid test - cache was written")
 }
@@ -270,7 +314,7 @@ func TestCacheFailureToRead(t *testing.T) {
 	cc, err := cache.NewContentCache(testlogging.Context(t), underlyingStorage, cache.Options{
 		Storage: withoutTouchBlob{faultyCache},
 		Sweep:   cache.SweepSettings{MaxSizeBytes: 10000},
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	ctx := testlogging.Context(t)
@@ -282,7 +326,7 @@ func TestCacheFailureToRead(t *testing.T) {
 	var v gather.WriteBuffer
 	defer v.Close()
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		require.NoError(t, cc.GetContent(ctx, "aa", "content-1", 0, 3, &v))
 
 		got, want := v.ToByteSlice(), []byte{1, 2, 3}
@@ -290,7 +334,7 @@ func TestCacheFailureToRead(t *testing.T) {
 	}
 }
 
-func verifyStorageContentList(t *testing.T, st blob.Storage, expectedContents ...blob.ID) {
+func verifyStorageContentList(t *testing.T, st cache.Storage, expectedContents ...blob.ID) {
 	t.Helper()
 
 	var foundContents []blob.ID
@@ -300,9 +344,7 @@ func verifyStorageContentList(t *testing.T, st blob.Storage, expectedContents ..
 		return nil
 	}))
 
-	sort.Slice(foundContents, func(i, j int) bool {
-		return foundContents[i] < foundContents[j]
-	})
+	slices.Sort(foundContents)
 
 	assert.Equal(t, expectedContents, foundContents, "unexpected content list")
 }
@@ -311,6 +353,6 @@ type withoutTouchBlob struct {
 	blob.Storage
 }
 
-func (c withoutTouchBlob) TouchBlob(ctx context.Context, blobID blob.ID, threshold time.Duration) error {
-	return errors.Errorf("TouchBlob not implemented")
+func (c withoutTouchBlob) TouchBlob(ctx context.Context, blobID blob.ID, threshold time.Duration) (time.Time, error) {
+	return time.Time{}, errors.New("TouchBlob not implemented")
 }

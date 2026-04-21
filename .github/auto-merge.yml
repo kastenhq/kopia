@@ -8,6 +8,11 @@
     dependency_name: "github.com/aws/aws-sdk-go"
     update_type: "semver:minor"
 
+# golang.org/x 
+- match:
+    dependency_name: "golang.org/x/.*"
+    update_type: "semver:minor"
+
 # Google-provided libraries
 - match:
     dependency_name: "google.golang.org/grpc"
@@ -25,6 +30,17 @@
 # minio
 - match:
     dependency_name: "github.com/minio/minio-go/v7"
+    update_type: "semver:minor"
+
+# Playwright test framework
+- match:
+    dependency_name: "@playwright/test"
+    update_type: "semver:minor"
+- match:
+    dependency_name: "playwright"
+    update_type: "semver:minor"
+- match:
+    dependency_name: "playwright-core"
     update_type: "semver:minor"
 
 # otel

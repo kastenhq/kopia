@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -10,6 +11,7 @@ import (
 	"github.com/kopia/kopia/internal/units"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/maintenance"
+	"github.com/kopia/kopia/repo/maintenancestats"
 )
 
 type commandMaintenanceInfo struct {
@@ -64,7 +66,17 @@ func (c *commandMaintenanceInfo) run(ctx context.Context, rep repo.DirectReposit
 	c.out.printStdout("Log Retention:\n")
 	c.out.printStdout("  max count:       %v\n", cl.MaxCount)
 	c.out.printStdout("  max age of logs: %v\n", cl.MaxAge)
-	c.out.printStdout("  max total size:  %v\n", units.BytesStringBase2(cl.MaxTotalSize))
+	c.out.printStdout("  max total size:  %v\n", units.BytesString(cl.MaxTotalSize))
+
+	if p.ExtendObjectLocks {
+		c.out.printStdout("Object Lock Extension: enabled\n")
+	} else {
+		c.out.printStdout("Object Lock Extension: disabled\n")
+	}
+
+	if p.ListParallelism != 0 {
+		c.out.printStdout("List parallelism: %v\n", p.ListParallelism)
+	}
 
 	c.out.printStdout("Recent Maintenance Runs:\n")
 
@@ -72,18 +84,19 @@ func (c *commandMaintenanceInfo) run(ctx context.Context, rep repo.DirectReposit
 		c.out.printStdout("  %v:\n", run)
 
 		for _, t := range timings {
-			var errInfo string
+			var message string
+
 			if t.Success {
-				errInfo = "SUCCESS"
+				message = getMessageFromRun(t.Extra)
 			} else {
-				errInfo = "ERROR: " + t.Error
+				message = "ERROR: " + t.Error
 			}
 
 			c.out.printStdout(
 				"    %v (%v) %v\n",
 				formatTimestamp(t.Start),
 				t.End.Sub(t.Start).Truncate(time.Second),
-				errInfo)
+				message)
 		}
 	}
 
@@ -102,4 +115,26 @@ func (c *commandMaintenanceInfo) displayCycleInfo(cp *maintenance.CycleParams, t
 			c.out.printStdout("  next run: now\n")
 		}
 	}
+}
+
+func getMessageFromRun(extra []maintenancestats.Extra) string {
+	succeed := "SUCCESS"
+
+	if len(extra) == 0 {
+		return succeed
+	}
+
+	var extraStr strings.Builder
+
+	for _, e := range extra {
+		if msg, err := maintenancestats.BuildFromExtra(e); err == nil {
+			extraStr.WriteString(msg.Summary())
+		}
+	}
+
+	if extraStr.Len() > 0 {
+		succeed += ": " + extraStr.String()
+	}
+
+	return succeed
 }

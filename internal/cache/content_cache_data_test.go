@@ -9,6 +9,7 @@ import (
 	"github.com/kopia/kopia/internal/cache"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/testlogging"
+	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo/blob"
 )
 
@@ -19,15 +20,15 @@ func TestContentCacheForData(t *testing.T) {
 	underlying := blobtesting.NewMapStorage(underlyingData, nil, nil)
 
 	cacheData := blobtesting.DataMap{}
-	cacheStorage := blobtesting.NewMapStorage(cacheData, nil, nil).(cache.Storage)
+	cacheStorage := testutil.EnsureType[cache.Storage](t, blobtesting.NewMapStorage(cacheData, nil, nil))
 
 	dataCache, err := cache.NewContentCache(ctx, underlying, cache.Options{
 		Storage:    cacheStorage,
 		HMACSecret: []byte{1, 2, 3, 4},
 		Sweep: cache.SweepSettings{
-			MaxSizeBytes: 100,
+			MaxSizeBytes: 150,
 		},
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	var tmp gather.WriteBuffer
@@ -78,7 +79,7 @@ func TestContentCacheForData_Passthrough(t *testing.T) {
 
 	ctx := testlogging.Context(t)
 
-	dataCache, err := cache.NewContentCache(ctx, underlying, cache.Options{})
+	dataCache, err := cache.NewContentCache(ctx, underlying, cache.Options{}, nil)
 
 	require.NoError(t, err)
 	require.NoError(t, underlying.PutBlob(ctx, "blob1", gather.FromSlice([]byte{1, 2, 3, 4, 5, 6}), blob.PutOptions{}))

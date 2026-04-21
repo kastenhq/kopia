@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,14 +30,11 @@ const (
 
 type s3Storage struct {
 	Options
+	blob.DefaultProviderImplementation
 
 	cli *minio.Client
 
 	storageConfig *StorageConfig
-}
-
-func (s *s3Storage) GetCapacity(ctx context.Context) (blob.Capacity, error) {
-	return blob.Capacity{}, blob.ErrNotAVolume
 }
 
 func (s *s3Storage) GetBlob(ctx context.Context, b blob.ID, offset, length int64, output blob.OutputBuffer) error {
@@ -75,7 +73,6 @@ func (s *s3Storage) getBlobWithVersion(ctx context.Context, b blob.ID, version s
 			return nil
 		}
 
-		//nolint:wrapcheck
 		return iocopy.JustCopy(output, o)
 	}
 
@@ -230,6 +227,25 @@ func (s *s3Storage) DeleteBlob(ctx context.Context, b blob.ID) error {
 	return err
 }
 
+func (s *s3Storage) ExtendBlobRetention(ctx context.Context, b blob.ID, opts blob.ExtendOptions) error {
+	retentionMode := minio.RetentionMode(opts.RetentionMode)
+	if !retentionMode.IsValid() {
+		return errors.Errorf("invalid retention mode: %q", opts.RetentionMode)
+	}
+
+	retainUntilDate := clock.Now().Add(opts.RetentionPeriod).UTC()
+
+	err := s.cli.PutObjectRetention(ctx, s.BucketName, s.getObjectNameString(b), minio.PutObjectRetentionOptions{
+		RetainUntilDate: &retainUntilDate,
+		Mode:            &retentionMode,
+	})
+	if err != nil {
+		return errors.Wrap(err, "unable to extend retention period")
+	}
+
+	return nil
+}
+
 func (s *s3Storage) getObjectNameString(b blob.ID) string {
 	return s.Prefix + string(b)
 }
@@ -276,10 +292,6 @@ func (s *s3Storage) ConnectionInfo() blob.ConnectionInfo {
 	}
 }
 
-func (s *s3Storage) Close(ctx context.Context) error {
-	return nil
-}
-
 func (s *s3Storage) String() string {
 	return fmt.Sprintf("s3://%v/%v", s.BucketName, s.Prefix)
 }
@@ -288,20 +300,35 @@ func (s *s3Storage) DisplayName() string {
 	return fmt.Sprintf("S3: %v %v", s.Endpoint, s.BucketName)
 }
 
-func (s *s3Storage) FlushCaches(ctx context.Context) error {
-	return nil
-}
+func getCustomTransport(opt *Options) (*http.Transport, error) {
+	transport := http.DefaultTransport.(*http.Transport).Clone() //nolint:forcetypeassert
 
-func getCustomTransport(insecureSkipVerify bool) (transport *http.Transport) {
-	//nolint:gosec
-	customTransport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: insecureSkipVerify}}
-	return customTransport
+	if opt.DoNotVerifyTLS {
+		//nolint:gosec
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+		return transport, nil
+	}
+
+	if len(opt.RootCA) != 0 {
+		rootcas := x509.NewCertPool()
+
+		if ok := rootcas.AppendCertsFromPEM(opt.RootCA); !ok {
+			return nil, errors.New("cannot parse provided CA")
+		}
+
+		transport.TLSClientConfig.RootCAs = rootcas
+	}
+
+	return transport, nil
 }
 
 // New creates new S3-backed storage with specified options:
 //
 // - the 'BucketName' field is required and all other parameters are optional.
-func New(ctx context.Context, opt *Options) (blob.Storage, error) {
+func New(ctx context.Context, opt *Options, isCreate bool) (blob.Storage, error) {
+	_ = isCreate
+
 	st, err := newStorage(ctx, opt)
 	if err != nil {
 		return nil, err
@@ -335,6 +362,29 @@ func newStorage(ctx context.Context, opt *Options) (*s3Storage, error) {
 		},
 	)
 
+	// If a role was specified, use the assume role credential provider
+	if opt.RoleARN != "" {
+		assumeRoleOpts := credentials.STSAssumeRoleOptions{
+			AccessKey:       opt.AccessKeyID,
+			SecretKey:       opt.SecretAccessKey,
+			RoleSessionName: opt.SessionName,
+			SessionToken:    opt.SessionToken,
+			RoleARN:         opt.RoleARN,
+			DurationSeconds: int(opt.RoleDuration.Seconds()),
+			Location:        opt.RoleRegion,
+		}
+
+		var err error
+
+		creds, err = credentials.NewSTSAssumeRole(
+			opt.RoleEndpoint,
+			assumeRoleOpts,
+		)
+		if err != nil {
+			return nil, errors.Wrap(err, "getting assume role credentials")
+		}
+	}
+
 	return newStorageWithCredentials(ctx, creds, opt)
 }
 
@@ -349,22 +399,16 @@ func newStorageWithCredentials(ctx context.Context, creds *credentials.Credentia
 		Region: opt.Region,
 	}
 
-	if opt.DoNotVerifyTLS {
-		minioOpts.Transport = getCustomTransport(true)
+	var err error
+
+	minioOpts.Transport, err = getCustomTransport(opt)
+	if err != nil {
+		return nil, err
 	}
 
 	cli, err := minio.New(opt.Endpoint, minioOpts)
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to create client")
-	}
-
-	ok, err := cli.BucketExists(ctx, opt.BucketName)
-	if err != nil {
-		return nil, errors.Wrapf(err, "unable to determine if bucket %q exists", opt.BucketName)
-	}
-
-	if !ok {
-		return nil, errors.Errorf("bucket %q does not exist", opt.BucketName)
 	}
 
 	s := s3Storage{
@@ -387,12 +431,5 @@ func newStorageWithCredentials(ctx context.Context, creds *credentials.Credentia
 }
 
 func init() {
-	blob.AddSupportedStorage(
-		s3storageType,
-		func() interface{} {
-			return &Options{}
-		},
-		func(ctx context.Context, o interface{}, isCreate bool) (blob.Storage, error) {
-			return New(ctx, o.(*Options)) //nolint:forcetypeassert
-		})
+	blob.AddSupportedStorage(s3storageType, Options{}, New)
 }

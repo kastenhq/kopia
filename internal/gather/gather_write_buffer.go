@@ -140,10 +140,7 @@ func (b *WriteBuffer) Append(data []byte) {
 			remaining = cap(b.inner.Slices[ndx]) - len(b.inner.Slices[ndx])
 		}
 
-		chunkSize := remaining
-		if chunkSize > len(data) {
-			chunkSize = len(data)
-		}
+		chunkSize := min(remaining, len(data))
 
 		b.inner.Slices[ndx] = append(b.inner.Slices[ndx], data[0:chunkSize]...)
 		data = data[chunkSize:]
@@ -164,6 +161,7 @@ func (b *WriteBuffer) Dup() *WriteBuffer {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
 	dup.alloc = b.alloc
 	dup.inner = FromSlice(b.inner.ToByteSlice())
 
@@ -173,4 +171,9 @@ func (b *WriteBuffer) Dup() *WriteBuffer {
 // NewWriteBuffer creates new write buffer.
 func NewWriteBuffer() *WriteBuffer {
 	return &WriteBuffer{}
+}
+
+// NewWriteBufferMaxContiguous creates new write buffer that will allocate large chunks.
+func NewWriteBufferMaxContiguous() *WriteBuffer {
+	return &WriteBuffer{alloc: maxContiguousAllocator}
 }

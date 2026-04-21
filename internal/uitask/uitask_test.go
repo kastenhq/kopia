@@ -1,6 +1,7 @@
 package uitask_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/require"
 
 	"github.com/kopia/kopia/internal/uitask"
 	"github.com/kopia/kopia/repo/content"
@@ -21,11 +23,29 @@ var (
 	ignoredLog = logging.Module(content.FormatLogModule)
 )
 
-func TestUITask(t *testing.T) {
-	t.Parallel()
+func TestUITask_withoutPersistentLogging(t *testing.T) {
+	var logBuf bytes.Buffer
 
-	ctx := context.Background()
-	m := uitask.NewManager()
+	ctx := logging.WithLogger(context.Background(), logging.ToWriter(&logBuf))
+
+	m := uitask.NewManager(false)
+	testUITaskInternal(t, ctx, m)
+	require.Empty(t, logBuf.String())
+}
+
+func TestUITask_withPersistentLogging(t *testing.T) {
+	var logBuf bytes.Buffer
+
+	ctx := logging.WithLogger(context.Background(), logging.ToWriter(&logBuf))
+
+	m := uitask.NewManager(true)
+	testUITaskInternal(t, ctx, m)
+	require.Equal(t, "first\nthis is ignored\niii\nwww\neee\n", logBuf.String())
+}
+
+//nolint:thelper
+func testUITaskInternal(t *testing.T, ctx context.Context, m *uitask.Manager) {
+	t.Parallel()
 
 	m.MaxLogMessagesPerTask = 3
 	m.MaxFinishedTasks = 3
@@ -55,15 +75,15 @@ func TestUITask(t *testing.T) {
 		})
 
 		verifyTaskLog(t, m, tid1a, nil)
-		log(ctx).Debugf("first")
-		ignoredLog(ctx).Debugf("this is ignored")
-		log(ctx).Infof("iii")
+		log(ctx).Debug("first")
+		ignoredLog(ctx).Debug("this is ignored")
+		log(ctx).Info("iii")
 		verifyTaskLog(t, m, tid1a, []string{
 			"first",
 			"iii",
 		})
-		log(ctx).Infof("www")
-		log(ctx).Errorf("eee")
+		log(ctx).Info("www")
+		log(ctx).Error("eee")
 
 		// 'first' has aged out
 		verifyTaskLog(t, m, tid1a, []string{
@@ -83,6 +103,7 @@ func TestUITask(t *testing.T) {
 			"foo-notice": uitask.NoticeCounter(7),
 			"bar-notice": uitask.NoticeBytesCounter(8),
 		})
+
 		tsk, _ = m.GetTask(tid1a)
 		if diff := cmp.Diff(tsk.Counters, map[string]uitask.CounterValue{
 			"foo":        {1, "", ""},
@@ -165,7 +186,7 @@ func TestUITask(t *testing.T) {
 			t.Fatalf("unexpected summary: %v", diff)
 		}
 
-		return errors.Errorf("some error")
+		return errors.New("some error")
 	})
 
 	verifyTaskList(t, m, map[string]uitask.Status{
@@ -225,7 +246,7 @@ func verifyTaskList(t *testing.T, m *uitask.Manager, wantStatuses map[string]uit
 func TestUITaskCancel_NonExistent(t *testing.T) {
 	t.Parallel()
 
-	m := uitask.NewManager()
+	m := uitask.NewManager(false)
 	m.CancelTask("no-such-task")
 }
 
@@ -233,7 +254,7 @@ func TestUITaskCancel_AfterOnCancel(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	m := uitask.NewManager()
+	m := uitask.NewManager(false)
 
 	ch := make(chan string)
 
@@ -242,7 +263,7 @@ func TestUITaskCancel_AfterOnCancel(t *testing.T) {
 
 		time.Sleep(time.Second)
 
-		t.Logf("requesting cancelation of %v", childTaskID)
+		t.Logf("requesting cancellation of %v", childTaskID)
 		m.CancelTask(childTaskID)
 	}()
 
@@ -253,6 +274,7 @@ func TestUITaskCancel_AfterOnCancel(t *testing.T) {
 
 		// send my task ID to the goroutine which will cancel our task
 		ch <- tid
+
 		canceled := make(chan struct{})
 
 		ctrl.OnCancel(func() {
@@ -277,7 +299,7 @@ func TestUITaskCancel_BeforeOnCancel(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	m := uitask.NewManager()
+	m := uitask.NewManager(false)
 
 	ch := make(chan string)
 
@@ -292,8 +314,11 @@ func TestUITaskCancel_BeforeOnCancel(t *testing.T) {
 		// send my task ID to the goroutine which will cancel our task
 		tid = ctrl.CurrentTaskID()
 		ch <- tid
+
 		time.Sleep(1 * time.Second)
+
 		canceled := make(chan struct{})
+
 		ctrl.OnCancel(func() {
 			verifyTaskList(t, m, map[string]uitask.Status{
 				tid: uitask.StatusCanceling,
@@ -331,7 +356,7 @@ func verifyTaskLog(t *testing.T, m *uitask.Manager, taskID string, want []string
 	t.Helper()
 
 	if got, want := logText(m.TaskLog(taskID)), strings.Join(want, "\n"); got != want {
-		t.Fatalf("invalid task log %v, want %v", got, want)
+		t.Fatalf("invalid task log: got `%v`, want `%v`", got, want)
 	}
 }
 

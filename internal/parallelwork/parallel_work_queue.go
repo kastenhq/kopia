@@ -1,4 +1,4 @@
-// Package parallelwork implements pallel work queue with fixed number of workers that concurrently process and add work items to the queue.
+// Package parallelwork implements parallel work queue with fixed number of workers that concurrently process and add work items to the queue.
 package parallelwork
 
 import (
@@ -63,13 +63,12 @@ func (v *Queue) Process(ctx context.Context, workers int) error {
 
 	eg, ctx := errgroup.WithContext(ctx)
 
-	for i := 0; i < workers; i++ {
+	for range workers {
 		eg.Go(func() error {
 			for {
 				select {
 				case <-ctx.Done():
 					// context canceled - some other worker returned an error.
-					//nolint:wrapcheck
 					return ctx.Err()
 
 				default:
@@ -80,7 +79,9 @@ func (v *Queue) Process(ctx context.Context, workers int) error {
 					}
 
 					err := callback()
+
 					v.completed(ctx)
+
 					if err != nil {
 						return err
 					}
@@ -150,8 +151,10 @@ func OnNthCompletion(n int, callback CallbackFunc) CallbackFunc {
 
 	return func() error {
 		mu.Lock()
+
 		n--
 		call := n == 0
+
 		mu.Unlock()
 
 		if call {

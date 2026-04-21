@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kylelemons/godebug/pretty"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kopia/kopia/internal/clock"
@@ -15,19 +14,11 @@ import (
 
 func (s *formatSpecificTestSuite) TestMaintenanceSchedule(t *testing.T) {
 	ctx, env := repotesting.NewEnvironment(t, s.formatVersion)
-
 	sch, err := maintenance.GetSchedule(ctx, env.RepositoryWriter)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
 
-	if !sch.NextFullMaintenanceTime.IsZero() {
-		t.Errorf("unexpected NextFullMaintenanceTime: %v", sch.NextFullMaintenanceTime)
-	}
-
-	if !sch.NextQuickMaintenanceTime.IsZero() {
-		t.Errorf("unexpected NextQuickMaintenanceTime: %v", sch.NextQuickMaintenanceTime)
-	}
+	require.NoError(t, err)
+	require.True(t, sch.NextFullMaintenanceTime.IsZero(), "unexpected NextFullMaintenanceTime")
+	require.True(t, sch.NextQuickMaintenanceTime.IsZero(), "unexpected NextQuickMaintenanceTime")
 
 	sch.NextFullMaintenanceTime = clock.Now()
 	sch.NextQuickMaintenanceTime = clock.Now()
@@ -37,25 +28,20 @@ func (s *formatSpecificTestSuite) TestMaintenanceSchedule(t *testing.T) {
 		Success: true,
 	})
 
-	if err = maintenance.SetSchedule(ctx, env.RepositoryWriter, sch); err != nil {
-		t.Fatalf("unable to set schedule: %v", err)
-	}
+	err = maintenance.SetSchedule(ctx, env.RepositoryWriter, sch)
+	require.NoError(t, err, "unable to set schedule")
 
 	s2, err := maintenance.GetSchedule(ctx, env.RepositoryWriter)
-	if err != nil {
-		t.Fatalf("unable to get schedule: %v", err)
-	}
+	require.NoError(t, err, "unable to get schedule")
 
-	if got, want := toJSON(s2), toJSON(sch); got != want {
-		t.Errorf("invalid schedule (-want,+got) %v", pretty.Compare(want, got))
-	}
+	got, want := toJSON(t, s2), toJSON(t, sch)
+	require.Equal(t, want, got, "unexpected schedule")
 }
 
 func TestTimeToAttemptNextMaintenance(t *testing.T) {
 	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant)
 
 	now := time.Date(2020, 1, 1, 12, 0, 0, 0, time.UTC)
-	max := now.Add(10 * time.Hour)
 
 	cases := []struct {
 		desc   string
@@ -100,7 +86,7 @@ func TestTimeToAttemptNextMaintenance(t *testing.T) {
 				NextFullMaintenanceTime:  now.Add(2 * time.Hour),
 				NextQuickMaintenanceTime: now.Add(3 * time.Hour),
 			},
-			want: max,
+			want: time.Time{},
 		},
 		{
 			desc: "not owned",
@@ -113,7 +99,7 @@ func TestTimeToAttemptNextMaintenance(t *testing.T) {
 				NextFullMaintenanceTime:  now.Add(2 * time.Hour),
 				NextQuickMaintenanceTime: now.Add(3 * time.Hour),
 			},
-			want: max,
+			want: time.Time{},
 		},
 	}
 
@@ -122,7 +108,7 @@ func TestTimeToAttemptNextMaintenance(t *testing.T) {
 			require.NoError(t, maintenance.SetParams(ctx, env.RepositoryWriter, &tc.params))
 			require.NoError(t, maintenance.SetSchedule(ctx, env.RepositoryWriter, &tc.sched))
 
-			nmt, err := maintenance.TimeToAttemptNextMaintenance(ctx, env.RepositoryWriter, max)
+			nmt, err := maintenance.TimeToAttemptNextMaintenance(ctx, env.RepositoryWriter)
 			require.NoError(t, err)
 
 			require.Equal(t, tc.want, nmt)
@@ -130,7 +116,12 @@ func TestTimeToAttemptNextMaintenance(t *testing.T) {
 	}
 }
 
-func toJSON(v interface{}) string {
-	b, _ := json.MarshalIndent(v, "", "  ")
+func toJSON(t *testing.T, v any) string {
+	t.Helper()
+
+	b, err := json.MarshalIndent(v, "", "  ")
+
+	require.NoError(t, err, "json marshal")
+
 	return string(b)
 }

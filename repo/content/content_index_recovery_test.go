@@ -9,6 +9,7 @@ import (
 	"github.com/kopia/kopia/internal/blobtesting"
 	"github.com/kopia/kopia/internal/testlogging"
 	"github.com/kopia/kopia/repo/blob"
+	"github.com/kopia/kopia/repo/content/indexblob"
 )
 
 func (s *contentManagerSuite) TestContentIndexRecovery(t *testing.T) {
@@ -28,7 +29,7 @@ func (s *contentManagerSuite) TestContentIndexRecovery(t *testing.T) {
 	}
 
 	// delete all index blobs
-	require.NoError(t, bm.st.ListBlobs(ctx, LegacyIndexBlobPrefix, func(bi blob.Metadata) error {
+	require.NoError(t, bm.st.ListBlobs(ctx, indexblob.V0IndexBlobPrefix, func(bi blob.Metadata) error {
 		t.Logf("deleting %v", bi.BlobID)
 		return bm.st.DeleteBlob(ctx, bi.BlobID)
 	}))
@@ -38,11 +39,11 @@ func (s *contentManagerSuite) TestContentIndexRecovery(t *testing.T) {
 		return bm.st.DeleteBlob(ctx, bi.BlobID)
 	}))
 
-	bm.Close(ctx)
+	bm.CloseShared(ctx)
 
 	// now with index blobs gone, all contents appear to not be found
 	bm = s.newTestContentManagerWithCustomTime(t, st, nil)
-	defer bm.Close(ctx)
+	defer bm.CloseShared(ctx)
 
 	verifyContentNotFound(ctx, t, bm, content1)
 	verifyContentNotFound(ctx, t, bm, content2)
@@ -57,8 +58,10 @@ func (s *contentManagerSuite) TestContentIndexRecovery(t *testing.T) {
 			if err != nil {
 				return err
 			}
+
 			totalRecovered += len(infos)
 			t.Logf("recovered %v contents", len(infos))
+
 			return nil
 		})
 		if err != nil {
@@ -84,8 +87,10 @@ func (s *contentManagerSuite) TestContentIndexRecovery(t *testing.T) {
 			if rerr != nil {
 				return rerr
 			}
+
 			totalRecovered += len(infos)
 			t.Logf("recovered %v contents", len(infos))
+
 			return nil
 		})
 		if err != nil {

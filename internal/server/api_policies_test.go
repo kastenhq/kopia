@@ -11,6 +11,7 @@ import (
 	"github.com/kopia/kopia/internal/apiclient"
 	"github.com/kopia/kopia/internal/repotesting"
 	"github.com/kopia/kopia/internal/serverapi"
+	"github.com/kopia/kopia/internal/servertesting"
 	"github.com/kopia/kopia/internal/testutil"
 	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/snapshot"
@@ -19,13 +20,13 @@ import (
 
 func TestPolicies(t *testing.T) {
 	ctx, env := repotesting.NewEnvironment(t, repotesting.FormatNotImportant)
-	srvInfo := startServer(t, env, false)
+	srvInfo := servertesting.StartServer(t, env, false)
 
 	cli, err := apiclient.NewKopiaAPIClient(apiclient.Options{
 		BaseURL:                             srvInfo.BaseURL,
 		TrustedServerCertificateFingerprint: srvInfo.TrustedServerCertificateFingerprint,
-		Username:                            testUIUsername,
-		Password:                            testUIPassword,
+		Username:                            servertesting.TestUIUsername,
+		Password:                            servertesting.TestUIPassword,
 	})
 
 	require.NoError(t, err)
@@ -75,6 +76,7 @@ func TestPolicies(t *testing.T) {
 		wantNeverCompress               []string
 		wantNeverCompressSource         snapshot.SourceInfo
 		wantUpcomingSnapshotTimesLength int
+		wantSchedulingError             string
 	}{
 		{
 			si:                       si0,
@@ -139,6 +141,19 @@ func TestPolicies(t *testing.T) {
 			},
 			wantUpcomingSnapshotTimesLength: 3,
 		},
+		{
+			si:                       si0,
+			wantCompressorName:       compression.Name("none"),
+			wantNeverCompress:        nil,
+			wantCompressorNameSource: policy.GlobalPolicySourceInfo,
+			wantNeverCompressSource:  policy.GlobalPolicySourceInfo,
+			updates: &policy.Policy{
+				SchedulingPolicy: policy.SchedulingPolicy{
+					Cron: []string{"invalid"},
+				},
+			},
+			wantSchedulingError: "invalid cron expression \"invalid\"",
+		},
 	}
 
 	for i, tc := range cases {
@@ -153,9 +168,11 @@ func TestPolicies(t *testing.T) {
 			require.Equal(t, tc.wantCompressorNameSource, res.Definition.CompressionPolicy.CompressorName)
 			require.Equal(t, tc.wantNeverCompressSource, res.Definition.CompressionPolicy.NeverCompress)
 			require.Len(t, res.UpcomingSnapshotTimes, tc.wantUpcomingSnapshotTimesLength)
+			require.Equal(t, tc.wantSchedulingError, res.SchedulingError)
 
 			for j, ust := range res.UpcomingSnapshotTimes {
 				require.Equal(t, ust.Truncate(60*time.Second), ust)
+
 				if j > 0 {
 					require.Equal(t, 60*time.Second, ust.Sub(res.UpcomingSnapshotTimes[j-1]))
 				}

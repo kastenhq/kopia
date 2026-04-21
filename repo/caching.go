@@ -13,7 +13,7 @@ import (
 )
 
 // GetCachingOptions reads caching configuration for a given repository.
-func GetCachingOptions(ctx context.Context, configFile string) (*content.CachingOptions, error) {
+func GetCachingOptions(_ context.Context, configFile string) (*content.CachingOptions, error) {
 	lc, err := LoadConfigFromFile(configFile)
 	if err != nil {
 		return nil, err
@@ -39,7 +39,7 @@ func SetCachingOptions(ctx context.Context, configFile string, opt *content.Cach
 func setupCachingOptionsWithDefaults(ctx context.Context, configPath string, lc *LocalConfig, opt *content.CachingOptions, uniqueID []byte) error {
 	opt = opt.CloneOrDefault()
 
-	if opt.MaxCacheSizeBytes == 0 {
+	if opt.ContentCacheSizeBytes == 0 {
 		lc.Caching = &content.CachingOptions{}
 		return nil
 	}
@@ -67,14 +67,16 @@ func setupCachingOptionsWithDefaults(ctx context.Context, configPath string, lc 
 		lc.Caching.CacheDirectory = d
 	}
 
-	lc.Caching.MaxCacheSizeBytes = opt.MaxCacheSizeBytes
-	lc.Caching.MaxMetadataCacheSizeBytes = opt.MaxMetadataCacheSizeBytes
+	lc.Caching.ContentCacheSizeBytes = opt.ContentCacheSizeBytes
+	lc.Caching.ContentCacheSizeLimitBytes = opt.ContentCacheSizeLimitBytes
+	lc.Caching.MetadataCacheSizeBytes = opt.MetadataCacheSizeBytes
+	lc.Caching.MetadataCacheSizeLimitBytes = opt.MetadataCacheSizeLimitBytes
 	lc.Caching.MaxListCacheDuration = opt.MaxListCacheDuration
 	lc.Caching.MinContentSweepAge = opt.MinContentSweepAge
 	lc.Caching.MinMetadataSweepAge = opt.MinMetadataSweepAge
 	lc.Caching.MinIndexSweepAge = opt.MinIndexSweepAge
 
-	log(ctx).Debugf("Creating cache directory '%v' with max size %v", lc.Caching.CacheDirectory, lc.Caching.MaxCacheSizeBytes)
+	log(ctx).Debugf("Creating cache directory '%v' with max size %v", lc.Caching.CacheDirectory, lc.Caching.ContentCacheSizeBytes)
 
 	return nil
 }

@@ -19,13 +19,19 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/kopia/kopia/internal/auth"
+	"github.com/kopia/kopia/internal/contentlog"
+	"github.com/kopia/kopia/internal/contentlog/logparam"
 	"github.com/kopia/kopia/internal/gather"
 	"github.com/kopia/kopia/internal/grpcapi"
+	"github.com/kopia/kopia/notification"
+	"github.com/kopia/kopia/notification/notifydata"
 	"github.com/kopia/kopia/repo"
 	"github.com/kopia/kopia/repo/compression"
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/manifest"
 	"github.com/kopia/kopia/repo/object"
+	"github.com/kopia/kopia/snapshot"
+	"github.com/kopia/kopia/snapshot/policy"
 )
 
 type grpcServerState struct {
@@ -34,12 +40,16 @@ type grpcServerState struct {
 	grpcapi.UnimplementedKopiaRepositoryServer
 
 	sem *semaphore.Weighted
+
+	// GRPC server instance for graceful shutdown
+	grpcServer *grpc.Server
+	grpcMutex  sync.RWMutex
 }
 
 // send sends the provided session response with the provided request ID.
 func (s *Server) send(srv grpcapi.KopiaRepository_SessionServer, requestID int64, resp *grpcapi.SessionResponse) error {
-	s.grpcServerState.sendMutex.Lock()
-	defer s.grpcServerState.sendMutex.Unlock()
+	s.sendMutex.Lock()
+	defer s.sendMutex.Unlock()
 
 	resp.RequestId = requestID
 
@@ -82,12 +92,15 @@ func (s *Server) Session(srv grpcapi.KopiaRepository_SessionServer) error {
 		return status.Errorf(codes.Unavailable, "not connected to a direct repository")
 	}
 
-	username, err := s.authenticateGRPCSession(ctx, dr)
+	log := dr.LogManager().NewLogger("grpc-session")
+	ctx = contentlog.WithParams(ctx, logparam.String("span:server-session", contentlog.RandomSpanID()))
+
+	usernameAtHostname, err := s.authenticateGRPCSession(ctx, dr)
 	if err != nil {
 		return err
 	}
 
-	authz := s.authorizer.Authorize(ctx, dr, username)
+	authz := s.authorizer.Authorize(ctx, dr, usernameAtHostname)
 	if authz == nil {
 		authz = auth.NoAccess()
 	}
@@ -97,12 +110,12 @@ func (s *Server) Session(srv grpcapi.KopiaRepository_SessionServer) error {
 		return status.Errorf(codes.PermissionDenied, "peer not found in context")
 	}
 
-	log(ctx).Infof("starting session for user %q from %v", username, p.Addr)
-	defer log(ctx).Infof("session ended for user %q from %v", username, p.Addr)
+	userLog(ctx).Infof("starting session for user %q from %v", usernameAtHostname, p.Addr)
+	defer userLog(ctx).Infof("session ended for user %q from %v", usernameAtHostname, p.Addr)
 
 	opt, err := s.handleInitialSessionHandshake(srv, dr)
 	if err != nil {
-		log(ctx).Errorf("session handshake error: %v", err)
+		userLog(ctx).Errorf("session handshake error: %v", err)
 		return err
 	}
 
@@ -112,33 +125,36 @@ func (s *Server) Session(srv grpcapi.KopiaRepository_SessionServer) error {
 		lastErr := make(chan error, 1)
 
 		for req, err := srv.Recv(); err == nil; req, err = srv.Recv() {
-			req := req
-
 			// propagate any error from the goroutines
 			select {
 			case err := <-lastErr:
-				log(ctx).Errorf("error handling session request: %v", err)
+				userLog(ctx).Errorf("error handling session request: %v", err)
+
+				contentlog.Log1(ctx, log,
+					"error handling session request",
+					logparam.Error("error", err))
+
 				return err
 
 			default:
 			}
 
 			// enforce limit on concurrent handling
-			if err := s.grpcServerState.sem.Acquire(ctx, 1); err != nil {
+			if err := s.sem.Acquire(ctx, 1); err != nil {
 				return errors.Wrap(err, "unable to acquire semaphore")
 			}
 
 			go func() {
-				defer s.grpcServerState.sem.Release(1)
+				defer s.sem.Release(1)
 
-				resp := handleSessionRequest(ctx, dw, authz, req)
-
-				if err := s.send(srv, req.RequestId, resp); err != nil {
-					select {
-					case lastErr <- err:
-					default:
+				s.handleSessionRequest(ctx, dw, authz, usernameAtHostname, req, func(resp *grpcapi.SessionResponse) {
+					if err := s.send(srv, req.GetRequestId(), resp); err != nil {
+						select {
+						case lastErr <- err:
+						default:
+						}
 					}
-				}
+				})
 			}()
 		}
 
@@ -148,45 +164,52 @@ func (s *Server) Session(srv grpcapi.KopiaRepository_SessionServer) error {
 
 var tracer = otel.Tracer("kopia/grpc")
 
-func handleSessionRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.SessionRequest) *grpcapi.SessionResponse {
-	if req.TraceContext != nil {
+func (s *Server) handleSessionRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, usernameAtHostname string, req *grpcapi.SessionRequest, respond func(*grpcapi.SessionResponse)) {
+	if req.GetTraceContext() != nil {
 		var tc propagation.TraceContext
-		ctx = tc.Extract(ctx, propagation.MapCarrier(req.TraceContext))
+
+		ctx = tc.Extract(ctx, propagation.MapCarrier(req.GetTraceContext()))
 	}
 
 	switch inner := req.GetRequest().(type) {
 	case *grpcapi.SessionRequest_GetContentInfo:
-		return handleGetContentInfoRequest(ctx, dw, authz, inner.GetContentInfo)
+		respond(handleGetContentInfoRequest(ctx, dw, authz, inner.GetContentInfo))
 
 	case *grpcapi.SessionRequest_GetContent:
-		return handleGetContentRequest(ctx, dw, authz, inner.GetContent)
+		respond(handleGetContentRequest(ctx, dw, authz, inner.GetContent))
 
 	case *grpcapi.SessionRequest_WriteContent:
-		return handleWriteContentRequest(ctx, dw, authz, inner.WriteContent)
+		respond(handleWriteContentRequest(ctx, dw, authz, inner.WriteContent))
 
 	case *grpcapi.SessionRequest_Flush:
-		return handleFlushRequest(ctx, dw, authz, inner.Flush)
+		respond(handleFlushRequest(ctx, dw, authz, inner.Flush))
 
 	case *grpcapi.SessionRequest_GetManifest:
-		return handleGetManifestRequest(ctx, dw, authz, inner.GetManifest)
+		respond(handleGetManifestRequest(ctx, dw, authz, inner.GetManifest))
 
 	case *grpcapi.SessionRequest_PutManifest:
-		return handlePutManifestRequest(ctx, dw, authz, inner.PutManifest)
+		respond(handlePutManifestRequest(ctx, dw, authz, inner.PutManifest))
 
 	case *grpcapi.SessionRequest_FindManifests:
-		return handleFindManifestsRequest(ctx, dw, authz, inner.FindManifests)
+		handleFindManifestsRequest(ctx, dw, authz, inner.FindManifests, respond)
 
 	case *grpcapi.SessionRequest_DeleteManifest:
-		return handleDeleteManifestRequest(ctx, dw, authz, inner.DeleteManifest)
+		respond(handleDeleteManifestRequest(ctx, dw, authz, inner.DeleteManifest))
 
 	case *grpcapi.SessionRequest_PrefetchContents:
-		return handlePrefetchContentsRequest(ctx, dw, authz, inner.PrefetchContents)
+		respond(handlePrefetchContentsRequest(ctx, dw, authz, inner.PrefetchContents))
+
+	case *grpcapi.SessionRequest_ApplyRetentionPolicy:
+		respond(handleApplyRetentionPolicyRequest(ctx, dw, authz, usernameAtHostname, inner.ApplyRetentionPolicy))
+
+	case *grpcapi.SessionRequest_SendNotification:
+		respond(s.handleSendNotificationRequest(ctx, dw, authz, inner.SendNotification))
 
 	case *grpcapi.SessionRequest_InitializeSession:
-		return errorResponse(errors.Errorf("InitializeSession must be the first request in a session"))
+		respond(errorResponse(errors.New("InitializeSession must be the first request in a session")))
 
 	default:
-		return errorResponse(errors.Errorf("unhandled session request"))
+		respond(errorResponse(errors.New("unhandled session request")))
 	}
 }
 
@@ -212,14 +235,14 @@ func handleGetContentInfoRequest(ctx context.Context, dw repo.DirectRepositoryWr
 		Response: &grpcapi.SessionResponse_GetContentInfo{
 			GetContentInfo: &grpcapi.GetContentInfoResponse{
 				Info: &grpcapi.ContentInfo{
-					Id:               ci.GetContentID().String(),
-					PackedLength:     ci.GetPackedLength(),
-					TimestampSeconds: ci.GetTimestampSeconds(),
-					PackBlobId:       string(ci.GetPackBlobID()),
-					PackOffset:       ci.GetPackOffset(),
-					Deleted:          ci.GetDeleted(),
-					FormatVersion:    uint32(ci.GetFormatVersion()),
-					OriginalLength:   ci.GetOriginalLength(),
+					Id:               ci.ContentID.String(),
+					PackedLength:     ci.PackedLength,
+					TimestampSeconds: ci.TimestampSeconds,
+					PackBlobId:       string(ci.PackBlobID),
+					PackOffset:       ci.PackOffset,
+					Deleted:          ci.Deleted,
+					FormatVersion:    uint32(ci.FormatVersion),
+					OriginalLength:   ci.OriginalLength,
 				},
 			},
 		},
@@ -344,13 +367,14 @@ func handlePutManifestRequest(ctx context.Context, dw repo.DirectRepositoryWrite
 	}
 }
 
-func handleFindManifestsRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.FindManifestsRequest) *grpcapi.SessionResponse {
+func handleFindManifestsRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.FindManifestsRequest, respond func(*grpcapi.SessionResponse)) {
 	ctx, span := tracer.Start(ctx, "GRPCSession.FindManifests")
 	defer span.End()
 
 	em, err := dw.FindManifests(ctx, req.GetLabels())
 	if err != nil {
-		return errorResponse(err)
+		respond(errorResponse(err))
+		return
 	}
 
 	// only return manifests which the caller can read
@@ -361,16 +385,32 @@ func handleFindManifestsRequest(ctx context.Context, dw repo.DirectRepositoryWri
 			continue
 		}
 
+		// if pagination was requested and we've already reached the page size,
+		// send a response with the current batch of manifests and reset the batch.
+		if ps := int(req.GetPageSize()); ps > 0 && len(filtered) >= ps {
+			respond(&grpcapi.SessionResponse{
+				HasMore: true,
+				Response: &grpcapi.SessionResponse_FindManifests{
+					FindManifests: &grpcapi.FindManifestsResponse{
+						Metadata: makeEntryMetadataList(filtered),
+					},
+				},
+			})
+
+			filtered = nil
+		}
+
 		filtered = append(filtered, m)
 	}
 
-	return &grpcapi.SessionResponse{
+	// respond with the final page of manifests
+	respond(&grpcapi.SessionResponse{
 		Response: &grpcapi.SessionResponse_FindManifests{
 			FindManifests: &grpcapi.FindManifestsResponse{
 				Metadata: makeEntryMetadataList(filtered),
 			},
 		},
-	}
+	})
 }
 
 func handleDeleteManifestRequest(ctx context.Context, dw repo.DirectRepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.DeleteManifestRequest) *grpcapi.SessionResponse {
@@ -407,18 +447,87 @@ func handlePrefetchContentsRequest(ctx context.Context, rep repo.Repository, aut
 		return accessDeniedResponse()
 	}
 
-	contentIDs, err := content.IDsFromStrings(req.ContentIds)
+	contentIDs, err := content.IDsFromStrings(req.GetContentIds())
 	if err != nil {
 		return errorResponse(err)
 	}
 
-	cids := rep.PrefetchContents(ctx, contentIDs, req.Hint)
+	cids := rep.PrefetchContents(ctx, contentIDs, req.GetHint())
 
 	return &grpcapi.SessionResponse{
 		Response: &grpcapi.SessionResponse_PrefetchContents{
 			PrefetchContents: &grpcapi.PrefetchContentsResponse{
 				ContentIds: content.IDsToStrings(cids),
 			},
+		},
+	}
+}
+
+func handleApplyRetentionPolicyRequest(ctx context.Context, rep repo.RepositoryWriter, authz auth.AuthorizationInfo, usernameAtHostname string, req *grpcapi.ApplyRetentionPolicyRequest) *grpcapi.SessionResponse {
+	ctx, span := tracer.Start(ctx, "GRPCSession.ApplyRetentionPolicy")
+	defer span.End()
+
+	parts := strings.Split(usernameAtHostname, "@")
+	if len(parts) != 2 { //nolint:mnd
+		return errorResponse(errors.Errorf("invalid username@hostname: %q", usernameAtHostname))
+	}
+
+	username := parts[0]
+	hostname := parts[1]
+
+	// only allow users to apply retention policy if they have permission to add snapshots
+	// for a particular path.
+	if authz.ManifestAccessLevel(map[string]string{
+		manifest.TypeLabelKey:  snapshot.ManifestType,
+		snapshot.UsernameLabel: username,
+		snapshot.HostnameLabel: hostname,
+		snapshot.PathLabel:     req.GetSourcePath(),
+	}) < auth.AccessLevelAppend {
+		return accessDeniedResponse()
+	}
+
+	manifestIDs, err := policy.ApplyRetentionPolicy(ctx, rep, snapshot.SourceInfo{
+		Host:     hostname,
+		UserName: username,
+		Path:     req.GetSourcePath(),
+	}, req.GetReallyDelete())
+	if err != nil {
+		return errorResponse(err)
+	}
+
+	return &grpcapi.SessionResponse{
+		Response: &grpcapi.SessionResponse_ApplyRetentionPolicy{
+			ApplyRetentionPolicy: &grpcapi.ApplyRetentionPolicyResponse{
+				ManifestIds: manifest.IDsToStrings(manifestIDs),
+			},
+		},
+	}
+}
+
+func (s *Server) handleSendNotificationRequest(ctx context.Context, rep repo.RepositoryWriter, authz auth.AuthorizationInfo, req *grpcapi.SendNotificationRequest) *grpcapi.SessionResponse {
+	ctx, span := tracer.Start(ctx, "GRPCSession.SendNotification")
+	defer span.End()
+
+	if authz.ContentAccessLevel() < auth.AccessLevelAppend {
+		return accessDeniedResponse()
+	}
+
+	eventArgs, err := notifydata.UnmarshalEventArgs(req.GetEventArgs(), req.GetEventArgsType())
+	if err != nil {
+		return errorResponse(err)
+	}
+
+	if err := notification.SendInternal(ctx, rep,
+		req.GetTemplateName(),
+		eventArgs,
+		notification.Severity(req.GetSeverity()),
+		s.options.NotifyTemplateOptions); err != nil {
+		return errorResponse(err)
+	}
+
+	return &grpcapi.SessionResponse{
+		Response: &grpcapi.SessionResponse_SendNotification{
+			SendNotification: &grpcapi.SendNotificationResponse{},
 		},
 	}
 }
@@ -471,7 +580,7 @@ func makeEntryMetadataList(em []*manifest.EntryMetadata) []*grpcapi.ManifestEntr
 func makeEntryMetadata(em *manifest.EntryMetadata) *grpcapi.ManifestEntryMetadata {
 	return &grpcapi.ManifestEntryMetadata{
 		Id:           string(em.ID),
-		Length:       int32(em.Length),
+		Length:       int32(em.Length), //nolint:gosec
 		ModTimeNanos: em.ModTime.UnixNano(),
 		Labels:       em.Labels,
 	}
@@ -485,13 +594,10 @@ func (s *Server) handleInitialSessionHandshake(srv grpcapi.KopiaRepository_Sessi
 
 	ir := initializeReq.GetInitializeSession()
 	if ir == nil {
-		return repo.WriteSessionOptions{}, errors.Errorf("missing initialization request")
+		return repo.WriteSessionOptions{}, errors.New("missing initialization request")
 	}
 
-	scc, err := dr.ContentReader().SupportsContentCompression()
-	if err != nil {
-		return repo.WriteSessionOptions{}, errors.Wrap(err, "supports content compression")
-	}
+	scc := dr.ContentReader().SupportsContentCompression()
 
 	if err := s.send(srv, initializeReq.GetRequestId(), &grpcapi.SessionResponse{
 		Response: &grpcapi.SessionResponse_InitializeSession{
@@ -520,7 +626,7 @@ func (s *Server) RegisterGRPCHandlers(r grpc.ServiceRegistrar) {
 
 func makeGRPCServerState(maxConcurrency int) grpcServerState {
 	if maxConcurrency == 0 {
-		maxConcurrency = 2 * runtime.NumCPU() //nolint:gomnd
+		maxConcurrency = 2 * runtime.NumCPU() //nolint:mnd
 	}
 
 	return grpcServerState{
@@ -531,18 +637,36 @@ func makeGRPCServerState(maxConcurrency int) grpcServerState {
 // GRPCRouterHandler returns HTTP handler that supports GRPC services and
 // routes non-GRPC calls to the provided handler.
 func (s *Server) GRPCRouterHandler(handler http.Handler) http.Handler {
-	grpcServer := grpc.NewServer(
-		grpc.MaxSendMsgSize(repo.MaxGRPCMessageSize),
-		grpc.MaxRecvMsgSize(repo.MaxGRPCMessageSize),
-	)
+	s.grpcMutex.Lock()
+	defer s.grpcMutex.Unlock()
 
-	s.RegisterGRPCHandlers(grpcServer)
+	if s.grpcServer == nil {
+		s.grpcServer = grpc.NewServer(
+			grpc.MaxSendMsgSize(repo.MaxGRPCMessageSize),
+			grpc.MaxRecvMsgSize(repo.MaxGRPCMessageSize),
+		)
+
+		s.RegisterGRPCHandlers(s.grpcServer)
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ProtoMajor == 2 && strings.Contains(r.Header.Get("Content-Type"), "application/grpc") {
-			grpcServer.ServeHTTP(w, r)
+			s.grpcServer.ServeHTTP(w, r)
 		} else {
 			handler.ServeHTTP(w, r)
 		}
 	})
+}
+
+// ShutdownGRPCServer shuts down the GRPC server.
+// Note: Since the GRPC server runs over HTTP handler transport,
+// GracefulStop() doesn't work. We use Stop() instead.
+func (s *Server) ShutdownGRPCServer() {
+	s.grpcMutex.Lock()
+	defer s.grpcMutex.Unlock()
+
+	if s.grpcServer != nil {
+		s.grpcServer.Stop()
+		s.grpcServer = nil
+	}
 }

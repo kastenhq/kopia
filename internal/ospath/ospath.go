@@ -24,20 +24,20 @@ func LogsDir() string {
 	return filepath.Join(userLogsDir, "kopia")
 }
 
-// IsAbs determines if a given path is absolute, in particular treating treating \\hostname\share as absolute on Windows.
+// IsAbs determines if a given path is absolute, in particular treating \\hostname\share as absolute on Windows.
 func IsAbs(s string) bool {
-	//nolint:forbidigo
-	if filepath.IsAbs(s) {
-		return true
-	}
-
 	// On Windows, treat \\hostname\share as absolute paths, which is not what filepath.IsAbs() does.
 	if runtime.GOOS == "windows" {
 		if strings.HasPrefix(s, "\\\\") {
 			parts := strings.Split(s[2:], "\\")
 
-			return len(parts) > 1 && len(parts[1]) > 0
+			return len(parts) > 1 && parts[1] != ""
 		}
+	}
+
+	//nolint:forbidigo
+	if filepath.IsAbs(s) {
+		return true
 	}
 
 	return false
