@@ -173,7 +173,7 @@ func getTags(tagStrings []string) (map[string]string, error) {
 	for _, tagkv := range tagStrings {
 		parts := strings.SplitN(tagkv, ":", numberOfPartsInTagString)
 		if len(parts) != numberOfPartsInTagString {
-			return nil, errors.Errorf("Invalid tag format (%s). Requires <key>:<value>", tagkv)
+			return nil, errors.Errorf("Invalid tag format (%q). Requires <key>:<value>", tagkv)
 		}
 
 		key := tagKeyPrefix + parts[0]
