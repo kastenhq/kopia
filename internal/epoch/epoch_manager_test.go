@@ -194,7 +194,14 @@ func makeSingleEpochCompactedIndexBlobsForEpochs(
 	}
 }
 
-func makeRangeCheckpointIndexBlob(ctx context.Context, tb testing.TB, te *epochManagerTestEnv, minEpoch, maxEpoch, idxDataOffset int) { //nolint:unparam
+func makeRangeCheckpointIndexBlob(
+	ctx context.Context,
+	tb testing.TB,
+	te *epochManagerTestEnv,
+	minEpoch int, //nolint:unparam // kept for generality
+	maxEpoch int,
+	idxDataOffset int, //nolint:unparam // kept for generality
+) {
 	tb.Helper()
 
 	makeIndexBlob(
