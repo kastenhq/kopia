@@ -1034,13 +1034,13 @@ func (e *Manager) MaybeCompactSingleEpoch(ctx context.Context) (*maintenancestat
 		return nil, nil
 	}
 
-	if _, alreadyCompacted := blobSet.SingleEpochCompactionSets[uncompacted]; alreadyCompacted {
+	if _, alreadyCompacted := cs.SingleEpochCompactionSets[uncompacted]; alreadyCompacted {
 		contentlog.Log1(ctx, e.log, "unexpected: selected epoch is already single-compacted, skipping", logparam.Int("epoch", uncompacted))
 
 		return nil, nil
 	}
 
-	if rangeCompacted := getRangeCompactedRange(blobSet); !rangeCompacted.isEmpty() && uncompacted <= rangeCompacted.hi {
+	if rangeCompacted := getRangeCompactedRange(cs); !rangeCompacted.isEmpty() && uncompacted <= rangeCompacted.hi {
 		contentlog.Log3(ctx, e.log, "unexpected: selected epoch is within the range-compacted window, skipping",
 			logparam.Int("epoch", uncompacted),
 			logparam.Int("rangeLo", rangeCompacted.lo),
